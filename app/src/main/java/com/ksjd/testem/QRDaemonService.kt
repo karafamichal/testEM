@@ -151,12 +151,12 @@ class QRDaemonService(
             // Step 3: Post login credentials
             onStatus("Submitting login…")
             val loginBody = FormBody.Builder()
-                .add("email", username)
-                .add("password", password)
+                .add("post[login]", username)
+                .add("post[password]", password)
                 .build()
             
             val loginRequest = Request.Builder()
-                .url("$sessionBaseUrl/account/login")
+                .url("$sessionBaseUrl/accountapi/login")
                 .post(loginBody)
                 .addHeader("User-Agent", userAgent)
                 .addHeader("Origin", sessionBaseUrl)
