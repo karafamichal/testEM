@@ -36,6 +36,11 @@ class QRDaemonService(
         private val cookieStore = mutableListOf<Cookie>()
 
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+            Log.d(TAG, "saveFromResponse: url=$url, incoming cookies=${cookies.size}")
+            cookies.forEach { cookie ->
+                Log.d(TAG, "  Incoming cookie: ${cookie.name}=${cookie.value} (domain=${cookie.domain}, path=${cookie.path})")
+            }
+            
             cookieStore.removeAll { existing ->
                 cookies.any { incoming ->
                     incoming.name == existing.name &&
@@ -44,10 +49,17 @@ class QRDaemonService(
                 }
             }
             cookieStore.addAll(cookies)
+            
+            Log.d(TAG, "Total cookies in store: ${cookieStore.size}")
+            cookieStore.forEach { cookie ->
+                Log.d(TAG, "  Stored: ${cookie.name} (domain=${cookie.domain}, path=${cookie.path})")
+            }
         }
 
         override fun loadForRequest(url: HttpUrl): List<Cookie> {
-            return cookieStore.filter { it.matches(url) }
+            val matching = cookieStore.filter { it.matches(url) }
+            Log.d(TAG, "loadForRequest: url=$url, matched ${matching.size}/${cookieStore.size} cookies")
+            return matching
         }
     }
 
@@ -81,22 +93,37 @@ class QRDaemonService(
     private var pollingJob: Job? = null
     private var isAuthenticated = false
     private var authFailures = 0
+    private var isPolling = false
 
     fun startPolling() {
+        if (isPolling) {
+            onStatus("[WARNING] Polling already running - ignoring duplicate call")
+            Log.w(TAG, "startPolling() called while already polling - ignoring")
+            return
+        }
+        
+        isPolling = true
+        // Cancel any existing polling job first
+        pollingJob?.cancel()
+        
         pollingJob = CoroutineScope(Dispatchers.IO).launch {
             try {
                 onStatus("Starting polling…")
+                Log.d(TAG, "startPolling: isAuthenticated=$isAuthenticated")
                 // Check if already authenticated
                 if (!isAuthenticated) {
                     performLogin()
                 }
                 
                 // Start token polling
+                Log.d(TAG, "Starting pollTokens()")
                 pollTokens()
+                Log.d(TAG, "pollTokens() completed (should never happen)")
+                onStatus("Polling stopped unexpectedly")
             } catch (e: Exception) {
-                Log.e(TAG, "Polling error: ${e.message}", e)
-                onError("Polling error: ${e.message}")
-                onStatus("Polling error: ${e.message}")
+                Log.e(TAG, "startPolling caught exception: ${e.javaClass.simpleName}: ${e.message}", e)
+                onError("Fatal error: ${e.message}")
+                onStatus("Fatal error - restarting in 5s: ${e.message}")
                 delay(5000)
                 startPolling()
             }
@@ -172,31 +199,58 @@ class QRDaemonService(
                 .build()
             
             client.newCall(loginRequest).execute().use { response ->
-                val responseUrl = response.request.url.toString()
-                Log.d(TAG, "Login response: ${response.code} -> $responseUrl")
+                Log.d(TAG, "Login response: ${response.code}")
                 
-                when {
-                    response.code == 401 -> throw Exception("Invalid credentials")
-                    responseUrl.contains("/account/login") -> {
-                        throw Exception("Login redirect - credentials rejected")
+                if (response.code != 200) {
+                    throw Exception("Login failed: ${response.code}")
+                }
+                
+                // Parse JSON response to check success
+                val responseBody = response.body?.string() ?: ""
+                Log.d(TAG, "Login response body: $responseBody")
+                
+                try {
+                    val jsonResponse = gson.fromJson(responseBody, JsonObject::class.java)
+                    val success = jsonResponse.get("success")?.asBoolean ?: false
+                    
+                    if (!success) {
+                        throw Exception("Login failed: API returned success=false")
                     }
-                    response.code == 200 || response.code == 302 || response.code == 301 -> {
-                        val tokenUrl = "$sessionBaseUrl/cardapi/getQrToken".toHttpUrlOrNull() ?: return@use
-                        val allCookies = cookieJar.loadForRequest(tokenUrl)
-                        Log.d(TAG, "Login successful. Cookies for token endpoint: ${allCookies.size}")
-                        allCookies.forEach { cookie ->
-                            Log.d(TAG, "  Cookie: ${cookie.name}=${cookie.value} (domain=${cookie.domain}, path=${cookie.path})")
-                        }
-                        
-                        authFailures = 0
-                        onStatus("Login successful (cookies: ${allCookies.size})")
-                        isAuthenticated = true
+                    
+                    val tokenUrl = "$sessionBaseUrl/cardapi/getQrToken".toHttpUrlOrNull() ?: return@use
+                    val allCookies = cookieJar.loadForRequest(tokenUrl)
+                    Log.d(TAG, "Login successful. Cookies for token endpoint: ${allCookies.size}")
+                    allCookies.forEach { cookie ->
+                        Log.d(TAG, "  Cookie: ${cookie.name}=${cookie.value} (domain=${cookie.domain}, path=${cookie.path})")
                     }
-                    else -> throw Exception("Login failed: ${response.code}")
+                    
+                    authFailures = 0
+                    onStatus("Login successful (cookies: ${allCookies.size})")
+                    isAuthenticated = true
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse login response: ${e.message}")
+                    throw Exception("Login response parsing failed: ${e.message}")
                 }
             }
             
-            delay(2000)
+            // Warm up session by visiting /account page
+            delay(1000)
+            onStatus("Warming up session…")
+            val warmupRequest = Request.Builder()
+                .url("$sessionBaseUrl/account")
+                .get()
+                .addHeader("User-Agent", userAgent)
+                .addHeader("Referer", sessionBaseUrl)
+                .build()
+            
+            client.newCall(warmupRequest).execute().use { response ->
+                Log.d(TAG, "Account page warmup: ${response.code}")
+                if (response.code == 200) {
+                    onStatus("Session ready")
+                }
+            }
+            
+            delay(1000)
             
         } catch (e: Exception) {
             Log.e(TAG, "Login failed: ${e.message}", e)
@@ -212,11 +266,14 @@ class QRDaemonService(
         
         while (coroutineContext.isActive) {
             try {
-            onStatus("Fetching token…")
+                onStatus("[POLL] Loop iteration starting…")
+                onStatus("Fetching token…")
                 val tokenBytes = fetchQRToken()
+                Log.d(TAG, "fetchQRToken returned ${tokenBytes.size} bytes")
                 
                 if (tokenBytes.isEmpty()) {
-                    Log.w(TAG, "Empty token payload")
+                    Log.w(TAG, "Empty token payload - will retry")
+                    onStatus("No token yet - retrying in 1.5s")
                     delay(1500)
                     continue
                 }
@@ -238,7 +295,7 @@ class QRDaemonService(
                 
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                Log.e(TAG, "Token fetch error: ${e.message}", e)
+                Log.e(TAG, "pollTokens caught exception: ${e.javaClass.simpleName}: ${e.message}", e)
                 
                 // If 401, re-authenticate
                 if (e.message?.contains("401") == true) {
@@ -252,8 +309,8 @@ class QRDaemonService(
                     onStatus("Session expired, re-authenticating…")
                     performLogin()
                 } else {
-                    onError("Token fetch error: ${e.message}")
-                    onStatus("Token fetch error: ${e.message}")
+                    onError("Unexpected error: ${e.message}")
+                    onStatus("Error in poll loop: ${e.message}")
                     delay(5000)
                 }
             }
@@ -261,6 +318,7 @@ class QRDaemonService(
     }
 
     private suspend fun fetchQRToken(): ByteArray {
+        onStatus("[FETCH] Building token request…")
         val body = FormBody.Builder()
             .add("post[serialnumber]", serialNumber)
             .build()
@@ -292,10 +350,30 @@ class QRDaemonService(
             .build()
         
         return try {
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string() ?: ""
+            onStatus("[TOKEN] Making HTTP request…")
+            val response = try {
+                client.newCall(request).execute()
+            } catch (e: CancellationException) {
+                onStatus("[TOKEN] Coroutine cancelled!")
+                throw e
+            } catch (e: Exception) {
+                onStatus("[TOKEN] HTTP call failed: ${e.javaClass.simpleName}: ${e.message}")
+                Log.e(TAG, "HTTP execute failed", e)
+                throw e
+            }
+            
+            onStatus("[TOKEN] HTTP call succeeded")
+            response.use {
+                onStatus("[TOKEN] Response received")
+                val responseBody = try {
+                    response.body?.string() ?: ""
+                } catch (e: Exception) {
+                    onStatus("[TOKEN] Body read failed: ${e.message}")
+                    throw e
+                }
+                onStatus("[TOKEN] Body read: ${responseBody.length} chars")
                 val finalUrl = response.request.url.toString()
-                onStatus("Token response: HTTP ${response.code}")
+                onStatus("[TOKEN] Got HTTP ${response.code}")
                 
                 // Handle 401 as a special error that needs re-authentication
                 if (response.code == 401) {
@@ -318,9 +396,12 @@ class QRDaemonService(
                     val success = json.get("success")?.asBoolean ?: false
                     val data = json.get("data")?.asString ?: ""
                     
+                    Log.d(TAG, "Token response JSON: success=$success, data length=${data.length}")
+                    onStatus("Token response: success=$success")
+                    
                     if (!success || data.isEmpty()) {
                         Log.w(TAG, "No token available: $responseBody")
-                        onStatus("No token available")
+                        onStatus("No token available - waiting")
                         return ByteArray(0)
                     }
                     
@@ -333,14 +414,23 @@ class QRDaemonService(
                     onStatus("Invalid token format")
                     return ByteArray(0)
                 } catch (e: Exception) {
+                    Log.e(TAG, "Token parse error: ${e.message}", e)
                     val snippet = responseBody.take(120).replace("\n", " ").replace("\r", " ")
-                    onStatus("Token parse error: ${e.message}. Body: $snippet")
+                    onStatus("Token parse error: ${e.message}")
                     return ByteArray(0)
                 }
             }
         } catch (e: Exception) {
-            onStatus("Token request failed: ${e.message}")
-            throw e  // Re-throw to let pollTokens() handle 401
+            Log.e(TAG, "Token request failed: ${e.message}", e)
+            // Only re-throw for 401 errors to trigger re-authentication
+            if (e.message?.contains("401") == true || e.message?.contains("Unauthorized") == true) {
+                onStatus("Session expired: ${e.message}")
+                throw e
+            } else {
+                // For other errors, log and return empty to continue polling
+                onStatus("Token request error: ${e.message}")
+                return ByteArray(0)
+            }
         }
     }
 
