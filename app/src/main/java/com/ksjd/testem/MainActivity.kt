@@ -2,13 +2,15 @@ package com.ksjd.testem
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -28,11 +29,12 @@ import androidx.compose.ui.unit.TextUnit
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         setContent {
             TestEMTheme {
                 Surface(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .systemBarsPadding(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val viewModel: QRDaemonViewModel = viewModel()
@@ -53,7 +55,7 @@ fun QRDaemonApp(viewModel: QRDaemonViewModel, context: ComponentActivity) {
     }
     
     if (appState.isLoggedIn) {
-        QRDaemonScreen(viewModel, qrState)
+        QRDaemonScreen(viewModel, qrState, appState)
     } else {
         LoginScreen(viewModel, appState, context)
     }
@@ -64,7 +66,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
     var email by remember(appState.email) { mutableStateOf(appState.email) }
     var password by remember(appState.password) { mutableStateOf(appState.password) }
     var serialNumber by remember(appState.serialNumber) { mutableStateOf(appState.serialNumber) }
-    var showPassword by remember { mutableStateOf(false) }
+    
     
     Column(
         modifier = Modifier
@@ -75,7 +77,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            "QR Daemon",
+            "testEM",
             fontSize = 32.sp,
             modifier = Modifier.padding(bottom = 16.dp)
         )
@@ -106,12 +108,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
                 .fillMaxWidth()
                 .padding(bottom = 16.dp),
             singleLine = true,
-            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = {
-                Button(onClick = { showPassword = !showPassword }) {
-                    Text(if (showPassword) "Hide" else "Show")
-                }
-            }
+            visualTransformation = PasswordVisualTransformation()
         )
         
         OutlinedTextField(
@@ -152,14 +149,14 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
             if (appState.isLoading) {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp))
             } else {
-                Text("Login & Start Polling")
+                Text("Login")
             }
         }
     }
 }
 
 @Composable
-fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState) {
+fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState, appState: AppState) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     
     if (showLogoutDialog) {
@@ -178,7 +175,10 @@ fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState) {
             .background(MaterialTheme.colorScheme.background)
     ) {
         TopAppBar(
-            title = { Text("QR Daemon") },
+            title = {
+                val name = qrState.userName.ifBlank { "testEM" }
+                Text(name)
+            },
             actions = {
                 Button(
                     onClick = { showLogoutDialog = true },
@@ -201,8 +201,8 @@ fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState) {
             
             QRCodeDisplay(qrState)
             Spacer(modifier = Modifier.height(16.dp))
-            
-            TokenInfoCard(qrState)
+
+            AccountInfoCard(qrState, appState)
             Spacer(modifier = Modifier.height(16.dp))
             
             ControlButtonsRow(qrState) { isPolling ->
@@ -281,6 +281,14 @@ fun StatusCard(qrState: QRState) {
 
 @Composable
 fun QRCodeDisplay(qrState: QRState) {
+    var showTokenInfo by remember { mutableStateOf(false) }
+    if (showTokenInfo) {
+        TokenInfoDialog(
+            qrState = qrState,
+            onDismiss = { showTokenInfo = false }
+        )
+    }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
@@ -288,11 +296,24 @@ fun QRCodeDisplay(qrState: QRState) {
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                "Current QR Code",
-                modifier = Modifier.padding(bottom = 16.dp),
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Current QR Code",
+                    fontWeight = FontWeight.Bold
+                )
+                IconButton(onClick = { showTokenInfo = true }) {
+                    Icon(
+                        imageVector = Icons.Filled.Info,
+                        contentDescription = "Token info"
+                    )
+                }
+            }
             
             if (qrState.qrBitmap != null) {
                 Image(
@@ -323,33 +344,24 @@ fun PlaceholderQRCode() {
 }
 
 @Composable
-fun TokenInfoCard(qrState: QRState) {
+fun AccountInfoCard(qrState: QRState, appState: AppState) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                "Token Information",
+                "Account",
                 modifier = Modifier.padding(bottom = 12.dp),
                 fontWeight = FontWeight.Bold
             )
-            
-            if (qrState.tokenHex.isEmpty()) {
-                Text(
-                    "Waiting for token…",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp
-                )
-            } else {
-                SelectableText(
-                    "HEX: ${qrState.tokenHex}",
-                    fontSize = 10.sp,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                
-                SelectableText(
-                    "B64: ${qrState.tokenBase64}",
-                    fontSize = 10.sp
-                )
-            }
+
+            Text("Email: ${appState.email}", fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Serial: ${appState.serialNumber}", fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Last Update: ${formatTime(qrState.lastUpdateTime)}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -376,7 +388,7 @@ fun ControlButtonsRow(
             )
         ) {
             Text(
-                if (qrState.isPolling) "Stop Polling" else "Start Polling",
+                if (qrState.isPolling) "Stop" else "Get QR",
                 color = if (qrState.isPolling) 
                     MaterialTheme.colorScheme.onErrorContainer 
                 else 
@@ -384,6 +396,40 @@ fun ControlButtonsRow(
             )
         }
     }
+}
+
+@Composable
+fun TokenInfoDialog(qrState: QRState, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Token Information") },
+        text = {
+            if (qrState.tokenHex.isEmpty()) {
+                Text(
+                    "Waiting for token…",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp
+                )
+            } else {
+                Column {
+                    SelectableText(
+                        "HEX: ${qrState.tokenHex}",
+                        fontSize = 10.sp,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    SelectableText(
+                        "B64: ${qrState.tokenBase64}",
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 @Composable

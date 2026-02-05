@@ -13,6 +13,7 @@ data class QRState(
     val qrBitmap: Bitmap? = null,
     val tokenHex: String = "",
     val tokenBase64: String = "",
+    val userName: String = "",
     val errorMessage: String = "",
     val statusMessage: String = "Ready",
     val lastUpdateTime: Long = 0
@@ -136,6 +137,11 @@ class QRDaemonViewModel : ViewModel() {
                     ))
                 }
             },
+            onUserName = { name ->
+                viewModelScope.launch {
+                    _qrState.emit(_qrState.value.copy(userName = name))
+                }
+            },
             onStatus = { status ->
                 viewModelScope.launch {
                     _qrState.emit(_qrState.value.copy(
@@ -162,7 +168,8 @@ class QRDaemonViewModel : ViewModel() {
         qrService?.stopPolling()
         _qrState.value = _qrState.value.copy(
             isPolling = false,
-            statusMessage = "Polling stopped"
+            statusMessage = "Polling stopped",
+            errorMessage = ""
         )
     }
     

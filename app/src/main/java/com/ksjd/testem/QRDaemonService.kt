@@ -28,6 +28,7 @@ class QRDaemonService(
     private val serialNumber: String,
     private val onTokenUpdate: (String, String) -> Unit,
     private val onError: (String) -> Unit,
+    private val onUserName: (String) -> Unit,
     private val onStatus: (String) -> Unit
 ) {
     private val userAgent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
@@ -157,12 +158,12 @@ class QRDaemonService(
     private var isPolling = false
 
     fun startPolling() {
-        if (isPolling) {
+        if (isPolling && pollingJob?.isActive == true) {
             onStatus("[WARNING] Polling already running - ignoring duplicate call")
             Log.w(TAG, "startPolling() called while already polling - ignoring")
             return
         }
-        
+        isPolling = false
         isPolling = true
         // Cancel any existing polling job first
         pollingJob?.cancel()
@@ -181,17 +182,24 @@ class QRDaemonService(
                 pollTokens()
                 Log.d(TAG, "pollTokens() completed (should never happen)")
                 onStatus("Polling stopped unexpectedly")
+            } catch (e: CancellationException) {
+                onStatus("Polling stopped")
+                Log.d(TAG, "Polling cancelled")
             } catch (e: Exception) {
                 Log.e(TAG, "startPolling caught exception: ${e.javaClass.simpleName}: ${e.message}", e)
-                onError("Fatal error: ${e.message}")
-                onStatus("Fatal error - restarting in 5s: ${e.message}")
+                onError("Polling error: ${e.message}")
+                onStatus("Polling error - restarting in 5s: ${e.message}")
                 delay(5000)
                 startPolling()
+            } finally {
+                isPolling = false
             }
         }
+        pollingJob?.invokeOnCompletion { isPolling = false }
     }
 
     fun stopPolling() {
+        isPolling = false
         pollingJob?.cancel()
         pollingJob = null
     }
@@ -407,6 +415,36 @@ class QRDaemonService(
                     val hasSerial = bodyText.contains(serialNumber)
                     Log.d(TAG, "getAccountDetail response: ${response.code} len=${bodyText.length} hasSerial=$hasSerial")
                     onStatus("getAccountDetail HTTP ${response.code}")
+                    if (response.isSuccessful && bodyText.isNotBlank()) {
+                        try {
+                            val json = gson.fromJson(bodyText, JsonObject::class.java)
+                            val data = json.getAsJsonObject("data")
+                            fun readNameField(vararg keys: String): String {
+                                if (data == null) return ""
+                                for (key in keys) {
+                                    val value = data.get(key)?.asString?.trim().orEmpty()
+                                    if (value.isNotEmpty()) return value
+                                }
+                                return ""
+                            }
+
+                            val fullName = readNameField("fullName", "fullname", "full_name", "name")
+                            val firstName = readNameField("firstName", "firstname", "first_name")
+                            val lastName = readNameField("lastName", "lastname", "last_name")
+                            val derived = when {
+                                fullName.isNotEmpty() -> fullName
+                                firstName.isNotEmpty() || lastName.isNotEmpty() -> listOf(firstName, lastName)
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" ")
+                                else -> ""
+                            }
+                            if (derived.isNotEmpty()) {
+                                onUserName(derived)
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to parse user name: ${e.message}")
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "getAccountDetail failed: ${e.message}")
