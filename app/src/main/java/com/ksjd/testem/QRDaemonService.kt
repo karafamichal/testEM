@@ -13,6 +13,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import kotlin.coroutines.coroutineContext
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 
 data class TokenResponse(
     val success: Boolean,
@@ -57,6 +59,20 @@ class QRDaemonService(
         val httpUrl = url.toHttpUrlOrNull() ?: return ""
         val cookies = cookieJar.loadForRequest(httpUrl)
         return cookies.joinToString("; ") { "${it.name}=${it.value}" }
+    }
+    
+    private fun getCookieValue(url: String, name: String): String? {
+        val httpUrl = url.toHttpUrlOrNull() ?: return null
+        return cookieJar.loadForRequest(httpUrl)
+            .firstOrNull { it.name.equals(name, ignoreCase = true) }
+            ?.value
+    }
+    
+    private fun getCsrfToken(url: String): String? {
+        val raw = getCookieValue(url, "XSRF-TOKEN")
+            ?: getCookieValue(url, "CSRF-TOKEN")
+            ?: getCookieValue(url, "csrftoken")
+        return raw?.let { URLDecoder.decode(it, StandardCharsets.UTF_8.name()) }
     }
     private val gson = Gson()
     private val TAG = "QRDaemon"
@@ -110,6 +126,7 @@ class QRDaemonService(
                 }
                 val effectiveUrl = response.request.url
                 sessionBaseUrl = "${effectiveUrl.scheme}://${effectiveUrl.host}"
+                Log.d(TAG, "Base URL set to: $sessionBaseUrl")
             }
             
             delay(1000)
@@ -134,7 +151,7 @@ class QRDaemonService(
             // Step 3: Post login credentials
             onStatus("Submitting login…")
             val loginBody = FormBody.Builder()
-                .add("login", username)
+                .add("email", username)
                 .add("password", password)
                 .build()
             
@@ -144,16 +161,35 @@ class QRDaemonService(
                 .addHeader("User-Agent", userAgent)
                 .addHeader("Origin", sessionBaseUrl)
                 .addHeader("Referer", "$sessionBaseUrl/account")
+                .addHeader("Content-Type", "application/x-www-form-urlencoded")
+                .apply {
+                    val csrf = getCsrfToken(sessionBaseUrl)
+                    if (!csrf.isNullOrEmpty()) {
+                        addHeader("X-XSRF-TOKEN", csrf)
+                        addHeader("X-CSRF-TOKEN", csrf)
+                    }
+                }
                 .build()
             
             client.newCall(loginRequest).execute().use { response ->
+                val responseUrl = response.request.url.toString()
+                Log.d(TAG, "Login response: ${response.code} -> $responseUrl")
+                
                 when {
                     response.code == 401 -> throw Exception("Invalid credentials")
-                    response.code == 200 -> {
-                        Log.d(TAG, "Login successful")
-                        val cookieCount = cookieJar.loadForRequest(baseUrl.toHttpUrlOrNull() ?: return@use).size
+                    responseUrl.contains("/account/login") -> {
+                        throw Exception("Login redirect - credentials rejected")
+                    }
+                    response.code == 200 || response.code == 302 || response.code == 301 -> {
+                        val tokenUrl = "$sessionBaseUrl/cardapi/getQrToken".toHttpUrlOrNull() ?: return@use
+                        val allCookies = cookieJar.loadForRequest(tokenUrl)
+                        Log.d(TAG, "Login successful. Cookies for token endpoint: ${allCookies.size}")
+                        allCookies.forEach { cookie ->
+                            Log.d(TAG, "  Cookie: ${cookie.name}=${cookie.value} (domain=${cookie.domain}, path=${cookie.path})")
+                        }
+                        
                         authFailures = 0
-                        onStatus("Login successful (cookies: $cookieCount)")
+                        onStatus("Login successful (cookies: ${allCookies.size})")
                         isAuthenticated = true
                     }
                     else -> throw Exception("Login failed: ${response.code}")
@@ -231,6 +267,11 @@ class QRDaemonService(
         
         val tokenUrl = "$sessionBaseUrl/cardapi/getQrToken"
         val cookieHeaderValue = cookieHeader(tokenUrl)
+        if (cookieHeaderValue.isEmpty()) {
+            onStatus("Token request: no cookies")
+        } else {
+            onStatus("Token request cookies: ${cookieHeaderValue.split(';').size}")
+        }
         val request = Request.Builder()
             .url(tokenUrl)
             .post(body)
@@ -241,40 +282,65 @@ class QRDaemonService(
             .addHeader("Referer", "$sessionBaseUrl/account")
             .addHeader("User-Agent", userAgent)
             .addHeader("Cookie", cookieHeaderValue)
-            .build()
-        
-        return client.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string() ?: ""
-            val finalUrl = response.request.url.toString()
-            onStatus("Token response: ${response.code} -> $finalUrl")
-            
-            when {
-                response.code == 401 -> throw Exception("401 Unauthorized - Session expired")
-                finalUrl.contains("/account/login") -> throw Exception("401 Unauthorized - login redirect")
-                response.code != 200 -> return ByteArray(0)
-                else -> {
-                    try {
-                        val json = gson.fromJson(responseBody, JsonObject::class.java)
-                        val success = json.get("success")?.asBoolean ?: false
-                        val data = json.get("data")?.asString ?: ""
-                        
-                        if (!success || data.isEmpty()) {
-                            Log.w(TAG, "No token available: $responseBody")
-                            onStatus("No token available")
-                            return ByteArray(0)
-                        }
-                        
-                        val decoded = Base64.decode(data.trim(), Base64.DEFAULT)
-                        authFailures = 0
-                        decoded
-                        
-                    } catch (e: IllegalArgumentException) {
-                        Log.e(TAG, "Invalid base64: $responseBody")
-                        onStatus("Invalid token format")
-                        return ByteArray(0)
-                    }
+            .apply {
+                val csrf = getCsrfToken(tokenUrl)
+                if (!csrf.isNullOrEmpty()) {
+                    addHeader("X-XSRF-TOKEN", csrf)
+                    addHeader("X-CSRF-TOKEN", csrf)
                 }
             }
+            .build()
+        
+        return try {
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string() ?: ""
+                val finalUrl = response.request.url.toString()
+                onStatus("Token response: HTTP ${response.code}")
+                
+                // Handle 401 as a special error that needs re-authentication
+                if (response.code == 401) {
+                    throw Exception("401 Unauthorized - Session expired")
+                }
+                
+                if (finalUrl.contains("/account/login")) {
+                    onStatus("Token redirect to login")
+                    throw Exception("401 Unauthorized - Session expired")
+                }
+                
+                if (response.code != 200) {
+                    val snippet = responseBody.take(120).replace("\n", " ").replace("\r", " ")
+                    onStatus("Token HTTP ${response.code}: $snippet")
+                    return ByteArray(0)
+                }
+                
+                try {
+                    val json = gson.fromJson(responseBody, JsonObject::class.java)
+                    val success = json.get("success")?.asBoolean ?: false
+                    val data = json.get("data")?.asString ?: ""
+                    
+                    if (!success || data.isEmpty()) {
+                        Log.w(TAG, "No token available: $responseBody")
+                        onStatus("No token available")
+                        return ByteArray(0)
+                    }
+                    
+                    val decoded = Base64.decode(data.trim(), Base64.DEFAULT)
+                    authFailures = 0
+                    decoded
+                    
+                } catch (e: IllegalArgumentException) {
+                    Log.e(TAG, "Invalid base64: $responseBody")
+                    onStatus("Invalid token format")
+                    return ByteArray(0)
+                } catch (e: Exception) {
+                    val snippet = responseBody.take(120).replace("\n", " ").replace("\r", " ")
+                    onStatus("Token parse error: ${e.message}. Body: $snippet")
+                    return ByteArray(0)
+                }
+            }
+        } catch (e: Exception) {
+            onStatus("Token request failed: ${e.message}")
+            throw e  // Re-throw to let pollTokens() handle 401
         }
     }
 
