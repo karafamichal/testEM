@@ -50,6 +50,35 @@ class QRDaemonService(
             }
             cookieStore.addAll(cookies)
             
+            // Add cookie consent cookies that are normally set by JavaScript
+            // These are required for the session to work properly
+            if (url.host == "sadzv.qrbus.me" && cookies.isNotEmpty()) {
+                val consentCookies = listOf(
+                    Cookie.Builder()
+                        .name("pisnotshowhint")
+                        .value("true")
+                        .domain("sadzv.qrbus.me")
+                        .path("/")
+                        .expiresAt(System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000) // 1 year
+                        .build(),
+                    Cookie.Builder()
+                        .name("piscookiewindow")
+                        .value("{%22requiredCookies%22:true%2C%22analyticsCookies%22:true}")
+                        .domain("sadzv.qrbus.me")
+                        .path("/")
+                        .expiresAt(System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000) // 1 year
+                        .build()
+                )
+                
+                // Only add consent cookies if they don't already exist
+                consentCookies.forEach { consentCookie ->
+                    if (cookieStore.none { it.name == consentCookie.name }) {
+                        cookieStore.add(consentCookie)
+                        Log.d(TAG, "  Added consent cookie: ${consentCookie.name}")
+                    }
+                }
+            }
+            
             Log.d(TAG, "Total cookies in store: ${cookieStore.size}")
             cookieStore.forEach { cookie ->
                 Log.d(TAG, "  Stored: ${cookie.name} (domain=${cookie.domain}, path=${cookie.path})")
