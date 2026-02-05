@@ -65,7 +65,6 @@ fun QRDaemonApp(viewModel: QRDaemonViewModel, context: ComponentActivity) {
 fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: ComponentActivity) {
     var email by remember(appState.email) { mutableStateOf(appState.email) }
     var password by remember(appState.password) { mutableStateOf(appState.password) }
-    var serialNumber by remember(appState.serialNumber) { mutableStateOf(appState.serialNumber) }
     
     
     Column(
@@ -111,17 +110,6 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
             visualTransformation = PasswordVisualTransformation()
         )
         
-        OutlinedTextField(
-            value = serialNumber,
-            onValueChange = { serialNumber = it },
-            label = { Text("Serial Number") },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 24.dp),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(autoCorrect = false)
-        )
-        
         if (appState.loginError.isNotEmpty()) {
             Card(
                 modifier = Modifier
@@ -140,11 +128,11 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
         }
         
         Button(
-            onClick = { viewModel.loginAndRemember(context.applicationContext, email, password, serialNumber) },
+            onClick = { viewModel.loginAndRemember(context.applicationContext, email, password) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
-            enabled = !appState.isLoading && email.isNotEmpty() && password.isNotEmpty() && serialNumber.isNotEmpty()
+            enabled = !appState.isLoading && email.isNotEmpty() && password.isNotEmpty()
         ) {
             if (appState.isLoading) {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp))

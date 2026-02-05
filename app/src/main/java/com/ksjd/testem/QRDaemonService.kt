@@ -25,10 +25,11 @@ class QRDaemonService(
     private val baseUrl: String,
     private val username: String,
     private val password: String,
-    private val serialNumber: String,
+    initialSerialNumber: String,
     private val onTokenUpdate: (String, String) -> Unit,
     private val onError: (String) -> Unit,
     private val onUserName: (String) -> Unit,
+    private val onSerialNumber: (String) -> Unit,
     private val onStatus: (String) -> Unit
 ) {
     private val userAgent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
@@ -152,6 +153,7 @@ class QRDaemonService(
     private val TAG = "QRDaemon"
     
     private var lastTokenHex: String? = null
+    private var serialNumber: String = initialSerialNumber
     private var pollingJob: Job? = null
     private var isAuthenticated = false
     private var authFailures = 0
@@ -418,28 +420,78 @@ class QRDaemonService(
                     if (response.isSuccessful && bodyText.isNotBlank()) {
                         try {
                             val json = gson.fromJson(bodyText, JsonObject::class.java)
-                            val data = json.getAsJsonObject("data")
-                            fun readNameField(vararg keys: String): String {
-                                if (data == null) return ""
+                            val data = json.getAsJsonObject("data") ?: json
+
+                            fun readString(obj: JsonObject?, vararg keys: String): String {
+                                if (obj == null) return ""
                                 for (key in keys) {
-                                    val value = data.get(key)?.asString?.trim().orEmpty()
+                                    val value = obj.get(key)?.asString?.trim().orEmpty()
                                     if (value.isNotEmpty()) return value
                                 }
                                 return ""
                             }
 
-                            val fullName = readNameField("fullName", "fullname", "full_name", "name")
-                            val firstName = readNameField("firstName", "firstname", "first_name")
-                            val lastName = readNameField("lastName", "lastname", "last_name")
+                            fun firstCard(obj: JsonObject?): JsonObject? {
+                                if (obj == null) return null
+                                obj.getAsJsonObject("card")?.let { return it }
+                                obj.getAsJsonArray("cards")?.let { arr ->
+                                    if (arr.size() > 0 && arr[0].isJsonObject) return arr[0].asJsonObject
+                                }
+                                obj.getAsJsonObject("wertyzUser")?.let { return firstCard(it) }
+                                obj.getAsJsonObject("user")?.let { return firstCard(it) }
+                                return null
+                            }
+
+                            val userObj = data.getAsJsonObject("wertyzUser")
+                                ?: data.getAsJsonObject("user")
+                                ?: data
+                            val cardObj = firstCard(userObj) ?: firstCard(data)
+
+                            val cardFullName = readString(cardObj, "fullName", "fullname", "ownerFullName", "name")
+                            val cardFirstName = readString(cardObj, "ownerFirstName", "firstName", "firstname", "first_name")
+                            val cardLastName = readString(cardObj, "ownerLastName", "lastName", "lastname", "last_name")
+                            val dataFullName = readString(userObj, "fullName", "fullname", "name")
+                            val dataFirstName = readString(userObj, "firstName", "firstname", "first_name")
+                            val dataLastName = readString(userObj, "lastName", "lastname", "last_name")
+
                             val derived = when {
-                                fullName.isNotEmpty() -> fullName
-                                firstName.isNotEmpty() || lastName.isNotEmpty() -> listOf(firstName, lastName)
+                                cardFullName.isNotEmpty() -> cardFullName
+                                dataFullName.isNotEmpty() -> dataFullName
+                                cardFirstName.isNotEmpty() || cardLastName.isNotEmpty() -> listOf(cardFirstName, cardLastName)
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" ")
+                                dataFirstName.isNotEmpty() || dataLastName.isNotEmpty() -> listOf(dataFirstName, dataLastName)
                                     .filter { it.isNotBlank() }
                                     .joinToString(" ")
                                 else -> ""
                             }
-                            if (derived.isNotEmpty()) {
-                                onUserName(derived)
+                            if (derived.isNotEmpty()) onUserName(derived)
+
+                            val snr = readString(
+                                cardObj,
+                                "snr",
+                                "cardSnr",
+                                "cardSNR",
+                                "cardNumber",
+                                "cardnumber",
+                                "serialNumber",
+                                "serialnumber"
+                            ).ifBlank {
+                                readString(
+                                    data,
+                                    "snr",
+                                    "cardSnr",
+                                    "cardSNR",
+                                    "cardNumber",
+                                    "cardnumber",
+                                    "serialNumber",
+                                    "serialnumber"
+                                )
+                            }
+                            if (snr.isNotEmpty() && snr != serialNumber) {
+                                serialNumber = snr
+                                onSerialNumber(snr)
+                                onStatus("Loaded SNR")
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to parse user name: ${e.message}")
@@ -535,6 +587,10 @@ class QRDaemonService(
     }
 
     private suspend fun fetchQRToken(): ByteArray {
+        if (serialNumber.isBlank()) {
+            onStatus("No SNR yet - waiting")
+            return ByteArray(0)
+        }
         onStatus("[FETCH] Building token request…")
         val body = FormBody.Builder()
             .add("post[serialnumber]", serialNumber)

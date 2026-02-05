@@ -36,9 +36,11 @@ class QRDaemonViewModel : ViewModel() {
     val appState: StateFlow<AppState> = _appState
     
     private var qrService: QRDaemonService? = null
+    private var credentialsManager: CredentialsManager? = null
 
     fun loadSavedCredentials(context: Context) {
         val manager = CredentialsManager(context)
+        credentialsManager = manager
         if (!manager.isConfigured()) return
 
         val (email, password, serialNumber) = manager.getCredentials()
@@ -50,22 +52,24 @@ class QRDaemonViewModel : ViewModel() {
         )
     }
 
-    fun loginAndRemember(context: Context, email: String, password: String, serialNumber: String) {
-        login(email, password, serialNumber)
+    fun loginAndRemember(context: Context, email: String, password: String) {
+        credentialsManager = CredentialsManager(context)
+        login(email, password)
         if (_appState.value.isLoggedIn) {
-            CredentialsManager(context).saveCredentials(email, password, serialNumber)
+            val currentSerial = _appState.value.serialNumber
+            credentialsManager?.saveCredentials(email, password, currentSerial)
         }
     }
     
-    fun login(email: String, password: String, serialNumber: String) {
+    fun login(email: String, password: String) {
         val emailTrimmed = email.trim()
-        val serialTrimmed = serialNumber.trim()
-        if (emailTrimmed.isEmpty() || password.isEmpty() || serialTrimmed.isEmpty()) {
+        if (emailTrimmed.isEmpty() || password.isEmpty()) {
             _appState.value = _appState.value.copy(
                 loginError = "Please fill in all fields"
             )
             return
         }
+        val cachedSerial = _appState.value.serialNumber.trim()
         
         _appState.value = _appState.value.copy(
             isLoading = true,
@@ -76,7 +80,7 @@ class QRDaemonViewModel : ViewModel() {
             baseUrl = QRDaemonConfig.BASE_URL,
             username = emailTrimmed,
             password = password,
-            serialNumber = serialTrimmed
+            serialNumber = cachedSerial
         )
         
         _appState.value = _appState.value.copy(
@@ -84,7 +88,7 @@ class QRDaemonViewModel : ViewModel() {
             isLoading = false,
             email = emailTrimmed,
             password = password,
-            serialNumber = serialTrimmed
+            serialNumber = cachedSerial
         )
         
         // Auto-start polling
@@ -116,7 +120,7 @@ class QRDaemonViewModel : ViewModel() {
             baseUrl = baseUrl,
             username = username,
             password = password,
-            serialNumber = serialNumber,
+            initialSerialNumber = serialNumber,
             onTokenUpdate = { hex, base64 ->
                 viewModelScope.launch {
                     val bitmap = QRCodeGenerator.generateQRCode(base64, 512, 512)
@@ -140,6 +144,13 @@ class QRDaemonViewModel : ViewModel() {
             onUserName = { name ->
                 viewModelScope.launch {
                     _qrState.emit(_qrState.value.copy(userName = name))
+                }
+            },
+            onSerialNumber = { snr ->
+                viewModelScope.launch {
+                    _appState.emit(_appState.value.copy(serialNumber = snr))
+                    val current = _appState.value
+                    credentialsManager?.saveCredentials(current.email, current.password, snr)
                 }
             },
             onStatus = { status ->
