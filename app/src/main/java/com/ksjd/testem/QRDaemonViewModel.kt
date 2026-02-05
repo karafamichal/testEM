@@ -57,7 +57,9 @@ class QRDaemonViewModel : ViewModel() {
     }
     
     fun login(email: String, password: String, serialNumber: String) {
-        if (email.isEmpty() || password.isEmpty() || serialNumber.isEmpty()) {
+        val emailTrimmed = email.trim()
+        val serialTrimmed = serialNumber.trim()
+        if (emailTrimmed.isEmpty() || password.isEmpty() || serialTrimmed.isEmpty()) {
             _appState.value = _appState.value.copy(
                 loginError = "Please fill in all fields"
             )
@@ -71,17 +73,17 @@ class QRDaemonViewModel : ViewModel() {
         
         initializeService(
             baseUrl = QRDaemonConfig.BASE_URL,
-            username = email,
+            username = emailTrimmed,
             password = password,
-            serialNumber = serialNumber
+            serialNumber = serialTrimmed
         )
         
         _appState.value = _appState.value.copy(
             isLoggedIn = true,
             isLoading = false,
-            email = email,
+            email = emailTrimmed,
             password = password,
-            serialNumber = serialNumber
+            serialNumber = serialTrimmed
         )
         
         // Auto-start polling
@@ -131,6 +133,13 @@ class QRDaemonViewModel : ViewModel() {
                     _qrState.emit(_qrState.value.copy(
                         errorMessage = error,
                         statusMessage = "Error: $error"
+                    ))
+                }
+            },
+            onStatus = { status ->
+                viewModelScope.launch {
+                    _qrState.emit(_qrState.value.copy(
+                        statusMessage = status
                     ))
                 }
             }
