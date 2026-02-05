@@ -230,6 +230,13 @@ class QRDaemonService(
             client.newCall(loginRequest).execute().use { response ->
                 Log.d(TAG, "Login response: ${response.code}")
                 
+                // Log Set-Cookie headers from login response
+                val setCookieHeaders = response.headers("Set-Cookie")
+                Log.d(TAG, "Login response Set-Cookie headers: ${setCookieHeaders.size}")
+                setCookieHeaders.forEach { header ->
+                    Log.d(TAG, "  Set-Cookie: ${header.take(100)}")
+                }
+                
                 if (response.code != 200) {
                     throw Exception("Login failed: ${response.code}")
                 }
@@ -246,8 +253,14 @@ class QRDaemonService(
                         throw Exception("Login failed: API returned success=false")
                     }
                     
+                    // Check if WPIS cookie was saved
                     val tokenUrl = "$sessionBaseUrl/cardapi/getQrToken".toHttpUrlOrNull() ?: return@use
                     val allCookies = cookieJar.loadForRequest(tokenUrl)
+                    Log.d(TAG, "After login, total cookies in store: ${allCookies.size}")
+                    allCookies.forEach { cookie ->
+                        Log.d(TAG, "  After login cookie: ${cookie.name}=${cookie.value.take(20)} (domain=${cookie.domain}, path=${cookie.path})")
+                    }
+                    
                     Log.d(TAG, "Login successful. Cookies for token endpoint: ${allCookies.size}")
                     allCookies.forEach { cookie ->
                         Log.d(TAG, "  Cookie: ${cookie.name}=${cookie.value} (domain=${cookie.domain}, path=${cookie.path})")
@@ -406,6 +419,8 @@ class QRDaemonService(
                 
                 // Handle 401 as a special error that needs re-authentication
                 if (response.code == 401) {
+                    Log.e(TAG, "Token 401 response body: $responseBody")
+                    onStatus("Token 401 body: ${responseBody.take(200)}")
                     throw Exception("401 Unauthorized - Session expired")
                 }
                 
