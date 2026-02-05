@@ -592,17 +592,26 @@ class QRDaemonService(
                     val json = gson.fromJson(responseBody, JsonObject::class.java)
                     val success = json.get("success")?.asBoolean ?: false
                     val data = json.get("data")?.asString ?: ""
+                    val base64Field = json.get("base64")?.asString ?: ""
                     
                     Log.d(TAG, "Token response JSON: success=$success, data length=${data.length}")
                     onStatus("Token response: success=$success")
                     
-                    if (!success || data.isEmpty()) {
+                    if (!success || (data.isEmpty() && base64Field.isEmpty())) {
                         Log.w(TAG, "No token available: $responseBody")
                         onStatus("No token available - waiting")
                         return ByteArray(0)
                     }
-                    
-                    val decoded = Base64.decode(data.trim(), Base64.DEFAULT)
+
+                    val rawToken = if (base64Field.isNotBlank()) base64Field else data
+                    val normalized = rawToken.replace(' ', '+')
+                    val stripped = normalized.replace(Regex("[^A-Za-z0-9+/=_-]"), "")
+                    val needsUrlSafe = stripped.contains('-') || stripped.contains('_')
+                    val base = stripped.trim()
+                    val padLen = (4 - (base.length % 4)) % 4
+                    val padded = base + "=".repeat(padLen)
+                    val flags = if (needsUrlSafe) Base64.URL_SAFE or Base64.NO_WRAP else Base64.NO_WRAP
+                    val decoded = Base64.decode(padded, flags)
                     authFailures = 0
                     decoded
                     
