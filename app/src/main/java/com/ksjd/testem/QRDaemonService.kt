@@ -30,7 +30,7 @@ class QRDaemonService(
     private val onError: (String) -> Unit,
     private val onStatus: (String) -> Unit
 ) {
-    private val userAgent = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
+    private val userAgent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
     private var sessionBaseUrl: String = baseUrl
     private val cookieJar = object : CookieJar {
         private val cookieStore = mutableListOf<Cookie>()
@@ -86,20 +86,52 @@ class QRDaemonService(
         }
 
         override fun loadForRequest(url: HttpUrl): List<Cookie> {
-            val matching = cookieStore.filter { it.matches(url) }
+            val matching = cookieStore.filter { cookie ->
+                val matches = cookie.matches(url)
+                if (!matches) {
+                    Log.d(TAG, "  Cookie REJECTED: ${cookie.name}=${cookie.value.take(20)} | domain=${cookie.domain} vs ${url.host} | path=${cookie.path} vs ${url.encodedPath}")
+                }
+                matches
+            }
             Log.d(TAG, "loadForRequest: url=$url, matched ${matching.size}/${cookieStore.size} cookies")
+            if (matching.isNotEmpty()) {
+                matching.forEach { cookie ->
+                    Log.d(TAG, "  SENT: ${cookie.name}=${cookie.value.take(20)}")
+                }
+            }
             return matching
         }
     }
 
     private val client = OkHttpClient.Builder()
         .cookieJar(cookieJar)
+        .addNetworkInterceptor { chain ->
+            val request = chain.request()
+            Log.d(TAG, ">>> REQUEST: ${request.method} ${request.url}")
+            Log.d(TAG, "    Headers:")
+            request.headers.forEach { (name, value) ->
+                if (name.lowercase() == "cookie") {
+                    val hasWpis = value.contains("WPIS=")
+                    Log.d(TAG, "    $name: len=${value.length}, hasWPIS=$hasWpis, head=${value.take(80)}...")
+                } else {
+                    Log.d(TAG, "    $name: ${value.take(60)}")
+                }
+            }
+            
+            val response = chain.proceed(request)
+            Log.d(TAG, "<<< RESPONSE: ${response.code} for ${request.url}")
+            response
+        }
         .build()
 
     private fun cookieHeader(url: String): String {
         val httpUrl = url.toHttpUrlOrNull() ?: return ""
         val cookies = cookieJar.loadForRequest(httpUrl)
-        return cookies.joinToString("; ") { "${it.name}=${it.value}" }
+        val sorted = cookies.sortedWith(
+            compareBy<Cookie> { if (it.name.equals("WPIS", ignoreCase = true)) 0 else 1 }
+                .thenBy { it.name }
+        )
+        return sorted.joinToString("; ") { "${it.name}=${it.value}" }
     }
     
     private fun getCookieValue(url: String, name: String): String? {
@@ -214,10 +246,21 @@ class QRDaemonService(
             val loginRequest = Request.Builder()
                 .url("$sessionBaseUrl/accountapi/login")
                 .post(loginBody)
-                .addHeader("User-Agent", userAgent)
+                .addHeader("Accept", "*/*")
+                .addHeader("Accept-Language", "en-US,en;q=0.9")
+                .addHeader("Cache-Control", "no-cache")
+                .addHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+                .addHeader("X-Requested-With", "XMLHttpRequest")
                 .addHeader("Origin", sessionBaseUrl)
-                .addHeader("Referer", "$sessionBaseUrl/account")
-                .addHeader("Content-Type", "application/x-www-form-urlencoded")
+                .addHeader("Pragma", "no-cache")
+                .addHeader("Referer", "$sessionBaseUrl/account/login")
+                .addHeader("Sec-CH-UA", "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"Google Chrome\";v=\"144\"")
+                .addHeader("Sec-CH-UA-Mobile", "?1")
+                .addHeader("Sec-CH-UA-Platform", "\"Android\"")
+                .addHeader("Sec-Fetch-Dest", "empty")
+                .addHeader("Sec-Fetch-Mode", "cors")
+                .addHeader("Sec-Fetch-Site", "same-origin")
+                .addHeader("User-Agent", userAgent)
                 .apply {
                     val csrf = getCsrfToken(sessionBaseUrl)
                     if (!csrf.isNullOrEmpty()) {
@@ -235,6 +278,37 @@ class QRDaemonService(
                 Log.d(TAG, "Login response Set-Cookie headers: ${setCookieHeaders.size}")
                 setCookieHeaders.forEach { header ->
                     Log.d(TAG, "  Set-Cookie: ${header.take(100)}")
+                }
+                
+                // Manually parse and add WPIS cookie since OkHttp isn't capturing it automatically
+                // The cookie domain might not match, so we manually create it for sadzv.qrbus.me
+                val loginUrl = response.request.url
+                Log.d(TAG, "Attempting to manually parse ${setCookieHeaders.size} Set-Cookie headers")
+                setCookieHeaders.forEach { setCookieHeader ->
+                    try {
+                        // Extract WPIS value using regex
+                        val wpisMatch = Regex("WPIS=([^;]+)").find(setCookieHeader)
+                        if (wpisMatch != null) {
+                            val wpisValue = wpisMatch.groupValues[1]
+                            Log.d(TAG, "Found WPIS value: ${wpisValue.take(30)}")
+                            
+                            // Manually create the cookie for sadzv.qrbus.me domain
+                            // IMPORTANT: Must set secure(true) for HTTPS so OkHttp will actually send it
+                            val wpisCookie = Cookie.Builder()
+                                .name("WPIS")
+                                .value(wpisValue)
+                                .domain("sadzv.qrbus.me")
+                                .path("/")
+                                    .secure()  // Required for HTTPS cookies
+                                .expiresAt(System.currentTimeMillis() + 2592000 * 1000L) // 30 days
+                                .build()
+                            
+                                Log.d(TAG, "Manually saving WPIS cookie to sadzv.qrbus.me")
+                            cookieJar.saveFromResponse(loginUrl, listOf(wpisCookie))
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to parse WPIS cookie: ${e.javaClass.simpleName}: ${e.message}")
+                    }
                 }
                 
                 if (response.code != 200) {
@@ -273,6 +347,69 @@ class QRDaemonService(
                     Log.e(TAG, "Failed to parse login response: ${e.message}")
                     throw Exception("Login response parsing failed: ${e.message}")
                 }
+            }
+
+            // Step 3b: Verify session with getUId (browser does this periodically)
+            try {
+                onStatus("Verifying session (getUId)…")
+                val uidRequest = Request.Builder()
+                    .url("$sessionBaseUrl/accountapi/getUId")
+                    .get()
+                    .addHeader("Accept", "*/*")
+                    .addHeader("Accept-Language", "en-US,en;q=0.9")
+                    .addHeader("Cache-Control", "no-cache")
+                    .addHeader("Pragma", "no-cache")
+                    .addHeader("Referer", "$sessionBaseUrl/")
+                    .addHeader("Sec-CH-UA", "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"Google Chrome\";v=\"144\"")
+                    .addHeader("Sec-CH-UA-Mobile", "?1")
+                    .addHeader("Sec-CH-UA-Platform", "\"Android\"")
+                    .addHeader("Sec-Fetch-Dest", "empty")
+                    .addHeader("Sec-Fetch-Mode", "cors")
+                    .addHeader("Sec-Fetch-Site", "same-origin")
+                    .addHeader("User-Agent", userAgent)
+                    .addHeader("X-Requested-With", "XMLHttpRequest")
+                    .addHeader("Cookie", cookieHeader("$sessionBaseUrl/accountapi/getUId"))
+                    .build()
+
+                client.newCall(uidRequest).execute().use { response ->
+                    val bodyText = response.body?.string() ?: ""
+                    Log.d(TAG, "getUId response: ${response.code} body=$bodyText")
+                    onStatus("getUId HTTP ${response.code}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "getUId failed: ${e.message}")
+            }
+
+            // Step 3c: Load account detail (browser does this after login)
+            try {
+                onStatus("Loading account detail…")
+                val detailRequest = Request.Builder()
+                    .url("$sessionBaseUrl/userapi/getAccountDetail")
+                    .get()
+                    .addHeader("Accept", "*/*")
+                    .addHeader("Accept-Language", "en-US,en;q=0.9")
+                    .addHeader("Cache-Control", "no-cache")
+                    .addHeader("Pragma", "no-cache")
+                    .addHeader("Referer", "$sessionBaseUrl/account/login")
+                    .addHeader("Sec-CH-UA", "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"Google Chrome\";v=\"144\"")
+                    .addHeader("Sec-CH-UA-Mobile", "?1")
+                    .addHeader("Sec-CH-UA-Platform", "\"Android\"")
+                    .addHeader("Sec-Fetch-Dest", "empty")
+                    .addHeader("Sec-Fetch-Mode", "cors")
+                    .addHeader("Sec-Fetch-Site", "same-origin")
+                    .addHeader("User-Agent", userAgent)
+                    .addHeader("X-Requested-With", "XMLHttpRequest")
+                    .addHeader("Cookie", cookieHeader("$sessionBaseUrl/userapi/getAccountDetail"))
+                    .build()
+
+                client.newCall(detailRequest).execute().use { response ->
+                    val bodyText = response.body?.string() ?: ""
+                    val hasSerial = bodyText.contains(serialNumber)
+                    Log.d(TAG, "getAccountDetail response: ${response.code} len=${bodyText.length} hasSerial=$hasSerial")
+                    onStatus("getAccountDetail HTTP ${response.code}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "getAccountDetail failed: ${e.message}")
             }
             
             // Warm up session by visiting /account page
@@ -364,22 +501,37 @@ class QRDaemonService(
         val body = FormBody.Builder()
             .add("post[serialnumber]", serialNumber)
             .build()
+        Log.d(TAG, "[TOKEN] serialNumber='${serialNumber}' len=${serialNumber.length}")
+        if (body.size > 0) {
+            Log.d(TAG, "[TOKEN] form body: ${body.name(0)}=${body.value(0)}")
+        }
         
         val tokenUrl = "$sessionBaseUrl/cardapi/getQrToken"
+        val httpUrl = tokenUrl.toHttpUrlOrNull()
+        val matchedCookies = if (httpUrl != null) cookieJar.loadForRequest(httpUrl).size else 0
+        onStatus("[TOKEN] URL=$tokenUrl, matched cookies=$matchedCookies/4")
         val cookieHeaderValue = cookieHeader(tokenUrl)
-        if (cookieHeaderValue.isEmpty()) {
-            onStatus("Token request: no cookies")
-        } else {
-            onStatus("Token request cookies: ${cookieHeaderValue.split(';').size}")
-        }
+        val hasWpis = cookieHeaderValue.contains("WPIS=")
+        onStatus("[TOKEN] Cookie header ${if (hasWpis) "contains" else "missing"} WPIS")
+        Log.d(TAG, "[TOKEN] Cookie header contains WPIS=$hasWpis, len=${cookieHeaderValue.length}")
+        
         val request = Request.Builder()
             .url(tokenUrl)
             .post(body)
             .addHeader("Accept", "*/*")
+            .addHeader("Accept-Language", "en-US,en;q=0.9")
+            .addHeader("Cache-Control", "no-cache")
             .addHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
             .addHeader("X-Requested-With", "XMLHttpRequest")
             .addHeader("Origin", sessionBaseUrl)
+            .addHeader("Pragma", "no-cache")
             .addHeader("Referer", "$sessionBaseUrl/account")
+            .addHeader("Sec-CH-UA", "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"Google Chrome\";v=\"144\"")
+            .addHeader("Sec-CH-UA-Mobile", "?1")
+            .addHeader("Sec-CH-UA-Platform", "\"Android\"")
+            .addHeader("Sec-Fetch-Dest", "empty")
+            .addHeader("Sec-Fetch-Mode", "cors")
+            .addHeader("Sec-Fetch-Site", "same-origin")
             .addHeader("User-Agent", userAgent)
             .addHeader("Cookie", cookieHeaderValue)
             .apply {
@@ -420,6 +572,7 @@ class QRDaemonService(
                 // Handle 401 as a special error that needs re-authentication
                 if (response.code == 401) {
                     Log.e(TAG, "Token 401 response body: $responseBody")
+                    Log.e(TAG, "Token 401 response headers: ${response.headers}")
                     onStatus("Token 401 body: ${responseBody.take(200)}")
                     throw Exception("401 Unauthorized - Session expired")
                 }
