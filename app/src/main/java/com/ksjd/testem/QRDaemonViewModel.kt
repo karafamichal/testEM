@@ -1,5 +1,6 @@
 package com.ksjd.testem
 
+import android.content.Context
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -34,6 +35,26 @@ class QRDaemonViewModel : ViewModel() {
     val appState: StateFlow<AppState> = _appState
     
     private var qrService: QRDaemonService? = null
+
+    fun loadSavedCredentials(context: Context) {
+        val manager = CredentialsManager(context)
+        if (!manager.isConfigured()) return
+
+        val (email, password, serialNumber) = manager.getCredentials()
+        _appState.value = _appState.value.copy(
+            email = email,
+            password = password,
+            serialNumber = serialNumber,
+            loginError = ""
+        )
+    }
+
+    fun loginAndRemember(context: Context, email: String, password: String, serialNumber: String) {
+        login(email, password, serialNumber)
+        if (_appState.value.isLoggedIn) {
+            CredentialsManager(context).saveCredentials(email, password, serialNumber)
+        }
+    }
     
     fun login(email: String, password: String, serialNumber: String) {
         if (email.isEmpty() || password.isEmpty() || serialNumber.isEmpty()) {
@@ -70,7 +91,15 @@ class QRDaemonViewModel : ViewModel() {
     fun logout() {
         stopPolling()
         qrService = null
-        _appState.value = AppState()
+        val current = _appState.value
+        _appState.value = AppState(
+            isLoggedIn = false,
+            isLoading = false,
+            loginError = "",
+            email = current.email,
+            password = current.password,
+            serialNumber = current.serialNumber
+        )
         _qrState.value = QRState()
     }
     

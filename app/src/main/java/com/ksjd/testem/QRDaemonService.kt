@@ -1,13 +1,16 @@
 package com.ksjd.testem
 
 import android.util.Log
+import android.util.Base64
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import kotlinx.coroutines.*
 import okhttp3.FormBody
+import okhttp3.JavaNetCookieJar
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.Base64
+import java.net.CookieManager
+import java.net.CookiePolicy
 import kotlin.coroutines.coroutineContext
 
 data class TokenResponse(
@@ -23,7 +26,12 @@ class QRDaemonService(
     private val onTokenUpdate: (String, String) -> Unit,
     private val onError: (String) -> Unit
 ) {
-    private val client = OkHttpClient()
+    private val cookieManager = CookieManager().apply {
+        setCookiePolicy(CookiePolicy.ACCEPT_ALL)
+    }
+    private val client = OkHttpClient.Builder()
+        .cookieJar(JavaNetCookieJar(cookieManager))
+        .build()
     private val gson = Gson()
     private val TAG = "QRDaemon"
     
@@ -137,7 +145,7 @@ class QRDaemonService(
                 // Only update if token changed
                 if (hex != lastTokenHex) {
                     lastTokenHex = hex
-                    val base64 = Base64.getEncoder().encodeToString(tokenBytes)
+                    val base64 = Base64.encodeToString(tokenBytes, Base64.NO_WRAP)
                     
                     Log.d(TAG, "New token: $hex")
                     onTokenUpdate(hex, base64)
@@ -192,7 +200,7 @@ class QRDaemonService(
                             throw Exception("No token available")
                         }
                         
-                        Base64.getDecoder().decode(data.trim())
+                        Base64.decode(data.trim(), Base64.DEFAULT)
                         
                     } catch (e: IllegalArgumentException) {
                         Log.e(TAG, "Invalid base64: $responseBody")

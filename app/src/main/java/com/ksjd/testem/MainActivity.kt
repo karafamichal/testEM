@@ -47,6 +47,10 @@ class MainActivity : ComponentActivity() {
 fun QRDaemonApp(viewModel: QRDaemonViewModel, context: ComponentActivity) {
     val appState by viewModel.appState.collectAsState()
     val qrState by viewModel.qrState.collectAsState()
+
+    LaunchedEffect(Unit) {
+        viewModel.loadSavedCredentials(context.applicationContext)
+    }
     
     if (appState.isLoggedIn) {
         QRDaemonScreen(viewModel, qrState)
@@ -57,9 +61,9 @@ fun QRDaemonApp(viewModel: QRDaemonViewModel, context: ComponentActivity) {
 
 @Composable
 fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: ComponentActivity) {
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var serialNumber by remember { mutableStateOf("") }
+    var email by remember(appState.email) { mutableStateOf(appState.email) }
+    var password by remember(appState.password) { mutableStateOf(appState.password) }
+    var serialNumber by remember(appState.serialNumber) { mutableStateOf(appState.serialNumber) }
     var showPassword by remember { mutableStateOf(false) }
     
     Column(
@@ -139,7 +143,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
         }
         
         Button(
-            onClick = { viewModel.login(email, password, serialNumber) },
+            onClick = { viewModel.loginAndRemember(context.applicationContext, email, password, serialNumber) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
