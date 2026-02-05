@@ -1,163 +1,159 @@
-# Build Instructions for testEM Android App
+# Build Instructions for QR Daemon App
 
-## Current Status
-✅ All code is complete and ready to build  
-✅ Project structure is correctly configured  
-✅ .gitignore is set up for safe commits (no hardcoded credentials)  
-⚠️ SSL certificate issues prevent command-line Gradle build  
+## Prerequisites
 
-## Recommended Build Method: Android Studio
+1. **Java Development Kit (JDK)**
+   - Required: Java 17 or later
+   - Recommended: Java 25.0.2
+   - Location: `C:\Program Files\Java\jdk-17` or `C:\Program Files\Java\jdk-25.0.2`
 
-### Step 1: Open in Android Studio
-1. Open Android Studio
-2. Click **File** → **Open**
-3. Navigate to `C:\Users\micha\Downloads\EMtest\testEM`
-4. Click **OK**
+2. **Android SDK**
+   - Required for compilation
+   - Typically configured via Android Studio
 
-### Step 2: Let Android Studio Sync
-1. Android Studio will automatically detect the Gradle project
-2. It will download the Gradle wrapper and dependencies
-3. Wait for "Gradle sync" to complete (status bar at bottom)
-4. Android Studio handles SSL certificates automatically
+## Building the Project
 
-### Step 3: Build the App
-1. Click **Build** → **Make Project** (or press `Ctrl+F9`)
-2. Wait for build to complete
-3. Check **Build** panel at bottom for any errors
+### Windows (Command Prompt)
 
-### Step 4: Run on Device/Emulator
-1. Connect an Android device via USB (with USB debugging enabled)
-   OR create an emulator: **Tools** → **AVD Manager** → **Create Virtual Device**
-2. Select your device from the device dropdown (top toolbar)
-3. Click the green **Run** button (▶️) or press `Shift+F10`
-4. App will install and launch automatically
+```batch
+cd c:\Users\micha\Downloads\EMtest\testEM
+set JAVA_HOME=C:\Program Files\Java\jdk-17
+gradlew.bat build
+```
 
-## Alternative: Fix SSL Certificates for Command Line Build
+If using Java 25.0.2:
+```batch
+set JAVA_HOME=C:\Program Files\Java\jdk-25.0.2
+gradlew.bat build
+```
 
-If you must use command-line Gradle, you need to fix Java's SSL trust store:
+### Windows (PowerShell)
 
-### Option A: Use Corporate Network SSL Fix
 ```powershell
-# If behind corporate proxy, export certificates and add to Java trust store
-# This requires admin access to your Java installation
+cd c:\Users\micha\Downloads\EMtest\testEM
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
+& ".\gradlew.bat" build
 ```
 
-### Option B: Disable SSL Verification (NOT RECOMMENDED FOR PRODUCTION)
-Create `gradle.properties` in the project root:
-```properties
-systemProp.javax.net.ssl.trustStore=NUL
-systemProp.javax.net.ssl.trustStorePassword=
+### macOS/Linux
+
+```bash
+cd ~/Downloads/EMtest/testEM
+export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home
+./gradlew build
 ```
+
+## Common Build Commands
+
+- **Clean build**: `gradlew clean build`
+- **Build APK**: `gradlew assembleDebug`
+- **Run tests**: `gradlew test`
+- **View dependencies**: `gradlew dependencies`
+- **Check for updates**: `gradlew dependencyUpdates` (if plugin installed)
+
+## Troubleshooting
+
+### "Gradle requires JVM 17 or later"
+- Set JAVA_HOME to Java 17+ installation directory
+- Verify with: `java -version`
+
+### "Unable to find method 'DependencyHandler.module()'"
+- This was a Java 8 compatibility issue
+- Use Java 17 or later (Java 25.0.2 is recommended)
+
+### Gradle daemon issues
+- Clear daemon: `gradlew --stop`
+- Rebuild: `gradlew clean build --no-daemon`
+
+### Build hangs on "INITIALIZING"
+- Try with `--no-daemon` flag
+- Check JAVA_HOME is set correctly
+- Increase heap memory: `set GRADLE_OPTS=-Xmx2048m`
 
 ## Project Structure
 
 ```
 testEM/
-├── app/                           # Android app module
+├── app/
 │   ├── src/
 │   │   └── main/
-│   │       ├── java/com/example/testem/
-│   │       │   ├── MainActivity.kt              # Entry point + UI screens
-│   │       │   ├── QRDaemonViewModel.kt         # State management
-│   │       │   ├── QRDaemonService.kt           # Network layer
-│   │       │   ├── QRCodeGenerator.kt           # QR generation
-│   │       │   ├── CredentialsManager.kt        # Local storage
-│   │       │   └── QRDaemonConfig.kt            # Configuration
+│   │       ├── java/com/ksjd/testem/
+│   │       │   ├── MainActivity.kt
+│   │       │   ├── QRDaemonViewModel.kt
+│   │       │   ├── QRDaemonService.kt
+│   │       │   ├── api/QrTokenService.kt
+│   │       │   └── ...
+│   │       ├── res/
 │   │       └── AndroidManifest.xml
-│   └── build.gradle.kts          # App module dependencies
-├── build.gradle.kts              # Root project config (minimal)
-├── settings.gradle.kts           # Multi-module settings
-├── gradle/wrapper/               # Gradle wrapper files
-│   ├── gradle-wrapper.jar
-│   └── gradle-wrapper.properties
-├── gradlew.bat                   # Windows Gradle wrapper script
-└── local.properties              # SDK location (auto-generated)
+│   └── build.gradle.kts
+├── build.gradle.kts (root)
+├── settings.gradle.kts
+├── gradle/ (wrapper)
+└── gradlew.bat / gradlew (wrapper scripts)
 ```
 
-## App Features
+## Configuration
 
-### Login Screen
-- Email input field
-- Password input field (with visibility toggle)
-- Serial Number input field
-- Automatic credential validation
-- Saves credentials locally in SharedPreferences
+### Default Credentials (in QRDaemonConfig.kt)
+- Base URL: `https://sadzv.qrbus.me`
+- Update USERNAME, PASSWORD, and SERIAL_NUMBER as needed
 
-### QR Display Screen
-- Auto-starts polling for QR tokens (every 25 seconds)
-- Displays QR code bitmap (512x512px)
-- Shows token metadata (hex string, timestamp, etc.)
-- Logout button to return to login screen
-- Auto-reauthenticates on 401 errors
+### Polling Settings
+- Interval: 25 seconds (adjustable in QRDaemonConfig.kt)
+- Token length validation: 57 bytes
 
-### Technical Details
-- **Min SDK**: 24 (Android 7.0)
-- **Target SDK**: 33 (Android 13)
-- **Compile SDK**: 33
-- **Build Tool**: Gradle 7.6 + Android Gradle Plugin 7.4.2
-- **Language**: Kotlin 1.8.0
-- **UI Framework**: Jetpack Compose 1.3.3
-- **Architecture**: MVVM with StateFlow
+## Running the App
+
+### Via Android Studio
+1. Open project in Android Studio
+2. Run > Run 'app' (or press Shift+F10)
+3. Select emulator or connected device
+
+### Via Gradle
+```bash
+gradlew installDebug
+adb shell am start -n com.ksjd.testem/.MainActivity
+```
+
+### Via Command Line
+```bash
+gradlew assembleDebug
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+## Build Output
+
+- **APK files**: `app/build/outputs/apk/`
+- **Build artifacts**: `app/build/intermediates/`
+- **Reports**: `app/build/reports/` (after build)
 
 ## Dependencies
 
-### Core Android
-- AndroidX Core KTX 1.9.0
-- Lifecycle Runtime KTX 2.5.1
-- Activity Compose 1.6.1
+Key dependencies are declared in `app/build.gradle.kts`:
+- AndroidX Compose for UI
+- OkHttp for HTTP requests
+- ZXing for QR code generation
+- Gson for JSON parsing
+- Kotlinx Coroutines for async operations
 
-### UI
-- Compose UI 1.3.3
-- Compose Material 3 1.0.1
-- Compose ViewModel 2.5.1
+All are managed by Gradle and downloaded from Maven Central.
 
-### Networking
-- OkHttp 4.10.0 (with logging interceptor)
-- Gson 2.10
+## Environment Variables
 
-### QR Generation
-- ZXing Core 3.5.1
+For automated builds or CI/CD:
 
-### Async
-- Kotlin Coroutines 1.6.4
-
-## Troubleshooting
-
-### "SDK location not found"
-Android Studio will auto-create `local.properties` with your SDK path.  
-Or manually create it:
-```properties
-sdk.dir=C\:\\Users\\<YourUsername>\\AppData\\Local\\Android\\Sdk
+```bash
+JAVA_HOME=C:\Program Files\Java\jdk-17
+ANDROID_HOME=C:\Users\[username]\AppData\Local\Android\Sdk
+GRADLE_OPTS=-Xmx2048m
 ```
 
-### "Unable to resolve dependency"
-1. File → Invalidate Caches → Invalidate and Restart
-2. Delete `.gradle` and `.idea` folders, then reopen project
+## Next Steps After Build
 
-### "Gradle sync failed"
-1. Check internet connection
-2. File → Settings → Build Tools → Gradle → Use Gradle from 'gradle-wrapper.properties'
-3. Tools → SDK Manager → ensure Android SDK 33 is installed
+1. Verify successful compilation (no errors)
+2. Test on emulator or device
+3. Check login functionality
+4. Verify QR token polling works
+5. Validate QR code display
 
-### "Error running app: No target device found"
-1. For physical device: Enable USB debugging in Developer Options
-2. For emulator: Create one in AVD Manager (Tools → AVD Manager)
-
-## Next Steps
-
-1. **Open in Android Studio** (recommended path)
-2. **Sync Gradle** (automatic on open)
-3. **Build** (Ctrl+F9)
-4. **Run** (Shift+F10)
-
-## Support
-
-If you encounter issues:
-1. Check the **Build** panel in Android Studio for specific errors
-2. Ensure Android SDK 33 is installed
-3. Verify Java 11 or later is installed
-4. Check that your device/emulator is running API 24+
-
----
-
-**Note**: This project uses in-app credential entry. No sensitive data is hardcoded. Safe to commit to version control.
+For issues, check the IMPLEMENTATION_SUMMARY.md file for architecture details and known limitations.
