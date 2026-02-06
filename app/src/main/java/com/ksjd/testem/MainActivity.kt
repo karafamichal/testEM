@@ -226,6 +226,7 @@ fun QRDaemonScreen(
 
             AccountActionsCard(
                 nfcEnabled = appState.nfcEnabled,
+                isQrReady = qrState.qrBitmap != null,
                 onToggleNfc = {
                     val createdUid = viewModel.toggleNfc(context.applicationContext)
                     if (!createdUid.isNullOrBlank()) {
@@ -375,12 +376,13 @@ fun PlaceholderQRCode() {
 }
 
 @Composable
-fun AccountActionsCard(nfcEnabled: Boolean, onToggleNfc: () -> Unit) {
+fun AccountActionsCard(nfcEnabled: Boolean, isQrReady: Boolean, onToggleNfc: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Button(
                 onClick = onToggleNfc,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = isQrReady
             ) {
                 Text(if (nfcEnabled) "Switch to QR" else "Switch to NFC")
             }

@@ -10,15 +10,13 @@ class CredentialsManager(context: Context) {
         email: String,
         password: String,
         serialNumber: String,
-        nfcUid: String,
-        nfcEnabled: Boolean
+        nfcUid: String
     ) {
         prefs.edit().apply {
             putString("email", email)
             putString("password", password)
             putString("serial_number", serialNumber)
             putString("nfc_uid", nfcUid)
-            putBoolean("nfc_enabled", nfcEnabled)
             putBoolean("is_configured", true)
             apply()
         }
@@ -35,9 +33,6 @@ class CredentialsManager(context: Context) {
         return prefs.getString("nfc_uid", "") ?: ""
     }
 
-    fun getNfcEnabled(): Boolean {
-        return prefs.getBoolean("nfc_enabled", false)
-    }
     
     fun isConfigured(): Boolean {
         return prefs.getBoolean("is_configured", false)
@@ -49,7 +44,6 @@ class CredentialsManager(context: Context) {
             remove("password")
             remove("serial_number")
             remove("nfc_uid")
-            remove("nfc_enabled")
             putBoolean("is_configured", false)
             apply()
         }

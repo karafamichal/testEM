@@ -69,13 +69,12 @@ class QRDaemonViewModel : ViewModel() {
 
         val (email, password, serialNumber) = manager.getCredentials()
         val nfcUid = manager.getNfcUid()
-        val nfcEnabled = manager.getNfcEnabled()
         _appState.value = _appState.value.copy(
             email = email,
             password = password,
             serialNumber = serialNumber,
             nfcUid = nfcUid,
-            nfcEnabled = nfcEnabled,
+            nfcEnabled = false,
             loginError = ""
         )
     }
@@ -89,8 +88,7 @@ class QRDaemonViewModel : ViewModel() {
                 email,
                 password,
                 current.serialNumber,
-                current.nfcUid,
-                current.nfcEnabled
+                current.nfcUid
             )
         }
     }
@@ -105,7 +103,7 @@ class QRDaemonViewModel : ViewModel() {
         }
         val cachedSerial = _appState.value.serialNumber.trim()
         val cachedNfcUid = _appState.value.nfcUid.trim()
-        val cachedNfcEnabled = _appState.value.nfcEnabled
+        val cachedNfcEnabled = false
         
         _appState.value = _appState.value.copy(
             isLoading = true,
@@ -199,8 +197,7 @@ class QRDaemonViewModel : ViewModel() {
                         current.email,
                         current.password,
                         snr,
-                        current.nfcUid,
-                        current.nfcEnabled
+                        current.nfcUid
                     )
                 }
             },
@@ -255,8 +252,7 @@ class QRDaemonViewModel : ViewModel() {
             current.email,
             current.password,
             current.serialNumber,
-            uid,
-            enabling
+            uid
         )
         return if (enabling && current.nfcUid.isBlank()) uid else null
     }
