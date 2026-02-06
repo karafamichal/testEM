@@ -173,7 +173,7 @@ fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState, appState: App
         TopAppBar(
             title = {
                 val name = qrState.userName.ifBlank { "testEM" }
-                val topBarStyle = MaterialTheme.typography.labelLarge
+                val topBarStyle = MaterialTheme.typography.titleMedium
                 TextButton(onClick = { showAccountDialog = true }) {
                     Text(
                         name,
@@ -184,7 +184,7 @@ fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState, appState: App
             },
             actions = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val topBarStyle = MaterialTheme.typography.labelLarge
+                    val topBarStyle = MaterialTheme.typography.titleMedium
                     TextButton(onClick = { showLogoutDialog = true }) {
                         Text(
                             "Logout",
