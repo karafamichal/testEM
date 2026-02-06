@@ -38,6 +38,27 @@ class QRDaemonViewModel : ViewModel() {
     private var qrService: QRDaemonService? = null
     private var credentialsManager: CredentialsManager? = null
 
+    private fun escapeVCard(value: String): String {
+        return value
+            .replace("\\", "\\\\")
+            .replace(";", "\\;")
+            .replace(",", "\\,")
+            .replace("\n", "\\n")
+    }
+
+    private fun buildVCard(name: String, email: String, token: String): String {
+        val safeName = escapeVCard(name.ifBlank { "testEM" })
+        val safeEmail = escapeVCard(email)
+        val safeToken = escapeVCard(token)
+        return "BEGIN:VCARD\r\n" +
+            "VERSION:3.0\r\n" +
+            "FN:$safeName\r\n" +
+            "N:$safeName;;;;\r\n" +
+            (if (safeEmail.isNotBlank()) "EMAIL:$safeEmail\r\n" else "") +
+            "NOTE:QR_TOKEN=$safeToken\r\n" +
+            "END:VCARD"
+    }
+
     fun loadSavedCredentials(context: Context) {
         val manager = CredentialsManager(context)
         credentialsManager = manager
@@ -123,7 +144,10 @@ class QRDaemonViewModel : ViewModel() {
             initialSerialNumber = serialNumber,
             onTokenUpdate = { hex, base64 ->
                 viewModelScope.launch {
-                    val bitmap = QRCodeGenerator.generateQRCode(base64, 512, 512)
+                    val name = _qrState.value.userName
+                    val email = _appState.value.email
+                    val vcard = buildVCard(name, email, base64)
+                    val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
                     _qrState.emit(_qrState.value.copy(
                         qrBitmap = bitmap,
                         tokenHex = hex,
