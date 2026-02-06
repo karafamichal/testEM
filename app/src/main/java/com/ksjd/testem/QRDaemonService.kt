@@ -30,6 +30,7 @@ class QRDaemonService(
     private val onError: (String) -> Unit,
     private val onUserName: (String) -> Unit,
     private val onSerialNumber: (String) -> Unit,
+    private val onAccountInfo: (AccountDetails) -> Unit,
     private val onStatus: (String) -> Unit
 ) {
     private val userAgent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
@@ -431,6 +432,36 @@ class QRDaemonService(
                                 return ""
                             }
 
+                            fun readLong(obj: JsonObject?, vararg keys: String): Long {
+                                if (obj == null) return 0
+                                for (key in keys) {
+                                    val value = obj.get(key)
+                                    if (value != null && value.isJsonPrimitive) {
+                                        try {
+                                            return value.asLong
+                                        } catch (_: Exception) {
+                                            // Ignore
+                                        }
+                                    }
+                                }
+                                return 0
+                            }
+
+                            fun readDouble(obj: JsonObject?, vararg keys: String): Double? {
+                                if (obj == null) return null
+                                for (key in keys) {
+                                    val value = obj.get(key)
+                                    if (value != null && value.isJsonPrimitive) {
+                                        try {
+                                            return value.asDouble
+                                        } catch (_: Exception) {
+                                            // Ignore
+                                        }
+                                    }
+                                }
+                                return null
+                            }
+
                             fun firstCard(obj: JsonObject?): JsonObject? {
                                 if (obj == null) return null
                                 obj.getAsJsonObject("card")?.let { return it }
@@ -442,10 +473,25 @@ class QRDaemonService(
                                 return null
                             }
 
+                            fun firstTicket(card: JsonObject?): JsonObject? {
+                                if (card == null) return null
+                                val tickets = card.getAsJsonArray("tickets") ?: return null
+                                var first: JsonObject? = null
+                                for (i in 0 until tickets.size()) {
+                                    val t = tickets[i]
+                                    if (!t.isJsonObject) continue
+                                    val obj = t.asJsonObject
+                                    if (first == null) first = obj
+                                    if (obj.get("active")?.asBoolean == true) return obj
+                                }
+                                return first
+                            }
+
                             val userObj = data.getAsJsonObject("wertyzUser")
                                 ?: data.getAsJsonObject("user")
                                 ?: data
                             val cardObj = firstCard(userObj) ?: firstCard(data)
+                            val ticketObj = firstTicket(cardObj)
 
                             val cardFullName = readString(cardObj, "fullName", "fullname", "ownerFullName", "name")
                             val cardFirstName = readString(cardObj, "ownerFirstName", "firstName", "firstname", "first_name")
@@ -493,6 +539,20 @@ class QRDaemonService(
                                 onSerialNumber(snr)
                                 onStatus("Loaded SNR")
                             }
+
+                            val details = AccountDetails(
+                                cardTypeName = readString(cardObj, "cardTypeName", "typeName", "cardType"),
+                                organizationName = readString(cardObj, "organizationName", "organization", "companyName"),
+                                cardValidFrom = readLong(cardObj, "validFrom", "cardValidFrom"),
+                                cardValidTo = readLong(cardObj, "validTo", "cardValidTo"),
+                                ticketValidFrom = readLong(ticketObj, "timeValidityFrom", "validFrom"),
+                                ticketValidTo = readLong(ticketObj, "timeValidityTo", "validTo"),
+                                discountValidFrom = readLong(cardObj, "discountValidFrom"),
+                                discountValidTo = readLong(cardObj, "discountValidTo"),
+                                creditLastBalance = readDouble(cardObj, "creditLastBalance", "credit"),
+                                currencySymbol = readString(cardObj, "currencySymbol", "currency")
+                            )
+                            onAccountInfo(details)
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to parse user name: ${e.message}")
                         }

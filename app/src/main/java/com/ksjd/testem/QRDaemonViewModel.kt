@@ -14,6 +14,7 @@ data class QRState(
     val tokenHex: String = "",
     val tokenBase64: String = "",
     val userName: String = "",
+    val accountDetails: AccountDetails = AccountDetails(),
     val errorMessage: String = "",
     val statusMessage: String = "Ready",
     val lastUpdateTime: Long = 0
@@ -175,6 +176,11 @@ class QRDaemonViewModel : ViewModel() {
                     _appState.emit(_appState.value.copy(serialNumber = snr))
                     val current = _appState.value
                     credentialsManager?.saveCredentials(current.email, current.password, snr)
+                }
+            },
+            onAccountInfo = { details ->
+                viewModelScope.launch {
+                    _qrState.emit(_qrState.value.copy(accountDetails = details))
                 }
             },
             onStatus = { status ->

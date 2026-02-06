@@ -146,6 +146,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
 @Composable
 fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState, appState: AppState) {
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showAccountDialog by remember { mutableStateOf(false) }
     
     if (showLogoutDialog) {
         LogoutDialog(
@@ -156,6 +157,13 @@ fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState, appState: App
             onDismiss = { showLogoutDialog = false }
         )
     }
+    if (showAccountDialog) {
+        AccountDialog(
+            qrState = qrState,
+            appState = appState,
+            onDismiss = { showAccountDialog = false }
+        )
+    }
     
     Column(
         modifier = Modifier
@@ -164,10 +172,13 @@ fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState, appState: App
     ) {
         TopAppBar(
             title = {
-                val name = qrState.userName.ifBlank { "testEM" }
-                Text(name)
+                Text("testEM")
             },
             actions = {
+                val name = qrState.userName.ifBlank { "testEM" }
+                TextButton(onClick = { showAccountDialog = true }) {
+                    Text(name, color = MaterialTheme.colorScheme.onPrimary)
+                }
                 Button(
                     onClick = { showLogoutDialog = true },
                     modifier = Modifier.padding(end = 8.dp)
@@ -190,7 +201,7 @@ fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState, appState: App
             QRCodeDisplay(qrState)
             Spacer(modifier = Modifier.height(16.dp))
 
-            AccountInfoCard(qrState, appState)
+            AccountActionsCard()
             Spacer(modifier = Modifier.height(16.dp))
             
             ControlButtonsRow(qrState) { isPolling ->
@@ -332,7 +343,7 @@ fun PlaceholderQRCode() {
 }
 
 @Composable
-fun AccountInfoCard(qrState: QRState, appState: AppState) {
+fun AccountActionsCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -341,17 +352,75 @@ fun AccountInfoCard(qrState: QRState, appState: AppState) {
                 fontWeight = FontWeight.Bold
             )
 
-            Text("Email: ${appState.email}", fontSize = 12.sp)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Serial: ${appState.serialNumber}", fontSize = 12.sp)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "Last Update: ${formatTime(qrState.lastUpdateTime)}",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Button(
+                onClick = { },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Switch to NFC")
+            }
         }
     }
+}
+
+@Composable
+fun AccountDialog(qrState: QRState, appState: AppState, onDismiss: () -> Unit) {
+    val details = qrState.accountDetails
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Account") },
+        text = {
+            Column {
+                Text("Name: ${qrState.userName.ifBlank { "testEM" }}", fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("Email: ${appState.email}", fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("SNR: ${appState.serialNumber}", fontSize = 12.sp)
+
+                if (details.cardTypeName.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Card Type: ${details.cardTypeName}", fontSize = 12.sp)
+                }
+                if (details.organizationName.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Organization: ${details.organizationName}", fontSize = 12.sp)
+                }
+                if (details.cardValidFrom > 0 || details.cardValidTo > 0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Card Valid: ${formatDate(details.cardValidFrom)} - ${formatDate(details.cardValidTo)}",
+                        fontSize = 12.sp
+                    )
+                }
+                if (details.ticketValidFrom > 0 || details.ticketValidTo > 0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Ticket Valid: ${formatDate(details.ticketValidFrom)} - ${formatDate(details.ticketValidTo)}",
+                        fontSize = 12.sp
+                    )
+                }
+                if (details.discountValidFrom > 0 || details.discountValidTo > 0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Discount Valid: ${formatDate(details.discountValidFrom)} - ${formatDate(details.discountValidTo)}",
+                        fontSize = 12.sp
+                    )
+                }
+                if (details.creditLastBalance != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val currency = details.currencySymbol.ifBlank { "" }
+                    Text(
+                        "Credit: ${details.creditLastBalance}$currency",
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 @Composable
@@ -446,6 +515,17 @@ private fun formatTime(timestampMs: Long): String {
         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         sdf.format(Date(timestampMs))
     }
+}
+
+private fun formatDate(timestampSeconds: Long): String {
+    if (timestampSeconds <= 0L) return "-"
+    val timestampMs = if (timestampSeconds < 10_000_000_000L) {
+        timestampSeconds * 1000L
+    } else {
+        timestampSeconds
+    }
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    return sdf.format(Date(timestampMs))
 }
 
 @Composable
