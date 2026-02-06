@@ -62,6 +62,15 @@ class QRDaemonViewModel : ViewModel() {
             "END:VCARD"
     }
 
+    private fun buildNfcVCard(uid: String): String {
+        val safeUid = escapeVCard(uid)
+        return "BEGIN:VCARD\r\n" +
+            "VERSION:3.0\r\n" +
+            "FN:NFC UID\r\n" +
+            "NOTE:NFC_UID=$safeUid\r\n" +
+            "END:VCARD"
+    }
+
     fun loadSavedCredentials(context: Context) {
         val manager = CredentialsManager(context)
         credentialsManager = manager
@@ -163,17 +172,29 @@ class QRDaemonViewModel : ViewModel() {
             initialNfcEnabled = _appState.value.nfcEnabled,
             onTokenUpdate = { hex, base64 ->
                 viewModelScope.launch {
-                    val name = _qrState.value.userName
-                    val email = _appState.value.email
-                    val vcard = buildVCard(name, email, base64)
-                    val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
-                    _qrState.emit(_qrState.value.copy(
-                        qrBitmap = bitmap,
-                        tokenHex = hex,
-                        tokenBase64 = base64,
-                        lastUpdateTime = System.currentTimeMillis(),
-                        statusMessage = "Token updated: ${hex.take(16)}…"
-                    ))
+                    val appState = _appState.value
+                    val current = _qrState.value
+                    val updated = if (appState.nfcEnabled) {
+                        current.copy(
+                            tokenHex = hex,
+                            tokenBase64 = base64,
+                            lastUpdateTime = System.currentTimeMillis(),
+                            statusMessage = "NFC UID active"
+                        )
+                    } else {
+                        val name = current.userName
+                        val email = appState.email
+                        val vcard = buildVCard(name, email, base64)
+                        val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
+                        current.copy(
+                            qrBitmap = bitmap,
+                            tokenHex = hex,
+                            tokenBase64 = base64,
+                            lastUpdateTime = System.currentTimeMillis(),
+                            statusMessage = "Token updated: ${hex.take(16)}…"
+                        )
+                    }
+                    _qrState.emit(updated)
                 }
             },
             onError = { error ->
@@ -241,8 +262,9 @@ class QRDaemonViewModel : ViewModel() {
         credentialsManager = credentialsManager ?: CredentialsManager(context)
         val current = _appState.value
         val enabling = !current.nfcEnabled
-        val uid = if (enabling && current.nfcUid.isBlank()) {
-            generateUid()
+        val storedUid = credentialsManager?.getNfcUid().orEmpty()
+        val uid = if (enabling) {
+            current.nfcUid.ifBlank { storedUid }.ifBlank { generateUid() }
         } else {
             current.nfcUid
         }
@@ -254,7 +276,22 @@ class QRDaemonViewModel : ViewModel() {
             current.serialNumber,
             uid
         )
-        return if (enabling && current.nfcUid.isBlank()) uid else null
+        if (enabling && uid.isNotBlank()) {
+            val vcard = buildNfcVCard(uid)
+            val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
+            _qrState.value = _qrState.value.copy(
+                qrBitmap = bitmap,
+                statusMessage = "NFC UID active"
+            )
+        } else if (!enabling && current.tokenBase64.isNotBlank()) {
+            val vcard = buildVCard(_qrState.value.userName, current.email, current.tokenBase64)
+            val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
+            _qrState.value = _qrState.value.copy(
+                qrBitmap = bitmap,
+                statusMessage = "Token updated"
+            )
+        }
+        return if (enabling && current.nfcUid.isBlank() && storedUid.isBlank()) uid else null
     }
 
     private fun generateUid(): String {
