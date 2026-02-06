@@ -663,7 +663,7 @@ class QRDaemonService(
                 // Only update if token changed
                 if (hex != lastTokenHex) {
                     lastTokenHex = hex
-                    val base64 = Base64.encodeToString(tokenBytes, Base64.NO_WRAP)
+                    val base64 = Base64.encodeToString(tokenBytes, Base64.NO_WRAP).replace("+", " ")
                     
                     Log.d(TAG, "New token: $hex")
                     onTokenUpdate(hex, base64)
