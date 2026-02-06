@@ -283,8 +283,8 @@ class QRDaemonViewModel : ViewModel() {
                 qrBitmap = bitmap,
                 statusMessage = "NFC UID active"
             )
-        } else if (!enabling && current.tokenBase64.isNotBlank()) {
-            val vcard = buildVCard(_qrState.value.userName, current.email, current.tokenBase64)
+        } else if (!enabling && _qrState.value.tokenBase64.isNotBlank()) {
+            val vcard = buildVCard(_qrState.value.userName, current.email, _qrState.value.tokenBase64)
             val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
             _qrState.value = _qrState.value.copy(
                 qrBitmap = bitmap,
