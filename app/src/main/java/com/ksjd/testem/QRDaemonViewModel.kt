@@ -51,15 +51,12 @@ class QRDaemonViewModel : ViewModel() {
             .replace("\n", "\\n")
     }
 
-    private fun buildVCard(name: String, email: String, token: String): String {
-        val safeName = escapeVCard(name.ifBlank { "testEM" })
-        val safeEmail = escapeVCard(email)
+    private fun buildVCard(token: String): String {
         val safeToken = escapeVCard(token)
         return "BEGIN:VCARD\r\n" +
             "VERSION:3.0\r\n" +
-            "FN:$safeName\r\n" +
-            "N:$safeName;;;;\r\n" +
-            (if (safeEmail.isNotBlank()) "EMAIL:$safeEmail\r\n" else "") +
+            "FN:$safeToken\r\n" +
+            "N:$safeToken;;;;\r\n" +
             "NOTE:$safeToken\r\n" +
             "END:VCARD"
     }
@@ -199,9 +196,7 @@ class QRDaemonViewModel : ViewModel() {
                             statusMessage = "NFC UID active"
                         )
                     } else {
-                        val name = current.userName
-                        val email = appState.email
-                        val vcard = buildVCard(name, email, base64)
+                        val vcard = buildVCard(base64)
                         val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
                         current.copy(
                             qrBitmap = bitmap,
@@ -314,7 +309,7 @@ class QRDaemonViewModel : ViewModel() {
                 statusMessage = "NFC UID active"
             )
         } else if (!enabling && _qrState.value.tokenBase64.isNotBlank()) {
-            val vcard = buildVCard(_qrState.value.userName, current.email, _qrState.value.tokenBase64)
+            val vcard = buildVCard(_qrState.value.tokenBase64)
             val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
             _qrState.value = _qrState.value.copy(
                 qrBitmap = bitmap,
