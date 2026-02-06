@@ -19,5 +19,5 @@ object QRDaemonConfig {
     const val SHORT_RETRY_MS = 1500L  // 1.5 seconds
     
     // UI Configuration
-    const val QR_CODE_SIZE = 200  // pixels
+    const val QR_CODE_SIZE = 250  // pixels
 }
