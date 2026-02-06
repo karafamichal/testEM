@@ -262,7 +262,7 @@ class QRDaemonViewModel : ViewModel() {
     }
 
     private fun generateUid(): String {
-        val bytes = ByteArray(8)
+        val bytes = ByteArray(4)
         java.security.SecureRandom().nextBytes(bytes)
         return bytes.joinToString("") { "%02x".format(it) }
     }
