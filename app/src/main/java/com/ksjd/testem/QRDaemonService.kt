@@ -302,7 +302,7 @@ class QRDaemonService(
                             val wpisValue = wpisMatch.groupValues[1]
                             Log.d(TAG, "Found WPIS value: ${wpisValue.take(30)}")
                             
-                            // Manually create the cookie for sadzv.qrbus.me domain
+                            // Manually create the cookie for sadzv.qrbu    s.me domain
                             // IMPORTANT: Must set secure(true) for HTTPS so OkHttp will actually send it
                             val wpisCookie = Cookie.Builder()
                                 .name("WPIS")
