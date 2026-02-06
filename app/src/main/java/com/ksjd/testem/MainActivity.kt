@@ -16,7 +16,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -55,7 +57,7 @@ fun QRDaemonApp(viewModel: QRDaemonViewModel, context: ComponentActivity) {
     }
     
     if (appState.isLoggedIn) {
-        QRDaemonScreen(viewModel, qrState, appState)
+        QRDaemonScreen(viewModel, qrState, appState, context)
     } else {
         LoginScreen(viewModel, appState, context)
     }
@@ -144,9 +146,16 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
 }
 
 @Composable
-fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState, appState: AppState) {
+fun QRDaemonScreen(
+    viewModel: QRDaemonViewModel,
+    qrState: QRState,
+    appState: AppState,
+    context: ComponentActivity
+) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showAccountDialog by remember { mutableStateOf(false) }
+    var showNfcDialog by remember { mutableStateOf(false) }
+    var nfcUidToShow by remember { mutableStateOf("") }
     
     if (showLogoutDialog) {
         LogoutDialog(
@@ -162,6 +171,12 @@ fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState, appState: App
             qrState = qrState,
             appState = appState,
             onDismiss = { showAccountDialog = false }
+        )
+    }
+    if (showNfcDialog) {
+        NfcUidDialog(
+            uid = nfcUidToShow,
+            onDismiss = { showNfcDialog = false }
         )
     }
     
@@ -209,7 +224,16 @@ fun QRDaemonScreen(viewModel: QRDaemonViewModel, qrState: QRState, appState: App
             QRCodeDisplay(qrState)
             Spacer(modifier = Modifier.height(16.dp))
 
-            AccountActionsCard()
+            AccountActionsCard(
+                nfcEnabled = appState.nfcEnabled,
+                onToggleNfc = {
+                    val createdUid = viewModel.toggleNfc(context.applicationContext)
+                    if (!createdUid.isNullOrBlank()) {
+                        nfcUidToShow = createdUid
+                        showNfcDialog = true
+                    }
+                }
+            )
             Spacer(modifier = Modifier.height(16.dp))
             
             ControlButtonsRow(qrState) { isPolling ->
@@ -351,17 +375,46 @@ fun PlaceholderQRCode() {
 }
 
 @Composable
-fun AccountActionsCard() {
+fun AccountActionsCard(nfcEnabled: Boolean, onToggleNfc: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Button(
-                onClick = { },
+                onClick = onToggleNfc,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Switch to NFC")
+                Text(if (nfcEnabled) "Switch to QR" else "Switch to NFC")
             }
         }
     }
+}
+
+@Composable
+fun NfcUidDialog(uid: String, onDismiss: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("NFC UID") },
+        text = {
+            Column {
+                Text("Copy this UID to set it on the website:", fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                SelectableText(uid, fontSize = 14.sp)
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                clipboard.setText(AnnotatedString(uid))
+                onDismiss()
+            }) {
+                Text("Copy")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 @Composable
@@ -377,6 +430,10 @@ fun AccountDialog(qrState: QRState, appState: AppState, onDismiss: () -> Unit) {
                 Text("Email: ${appState.email}", fontSize = 12.sp)
                 Spacer(modifier = Modifier.height(6.dp))
                 Text("SNR: ${appState.serialNumber}", fontSize = 12.sp)
+                if (appState.nfcUid.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("NFC UID: ${appState.nfcUid}", fontSize = 12.sp)
+                }
 
                 if (details.cardTypeName.isNotBlank()) {
                     Spacer(modifier = Modifier.height(6.dp))

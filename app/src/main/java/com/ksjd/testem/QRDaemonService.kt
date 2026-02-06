@@ -26,6 +26,8 @@ class QRDaemonService(
     private val username: String,
     private val password: String,
     initialSerialNumber: String,
+    initialNfcUid: String,
+    initialNfcEnabled: Boolean,
     private val onTokenUpdate: (String, String) -> Unit,
     private val onError: (String) -> Unit,
     private val onUserName: (String) -> Unit,
@@ -155,10 +157,22 @@ class QRDaemonService(
     
     private var lastTokenHex: String? = null
     private var serialNumber: String = initialSerialNumber
+    private var nfcUid: String = initialNfcUid
+    private var nfcEnabled: Boolean = initialNfcEnabled
     private var pollingJob: Job? = null
     private var isAuthenticated = false
     private var authFailures = 0
     private var isPolling = false
+
+    fun setNfcMode(enabled: Boolean, uid: String) {
+        nfcEnabled = enabled
+        nfcUid = uid
+        if (enabled) {
+            onStatus("NFC mode enabled")
+        } else {
+            onStatus("NFC mode disabled")
+        }
+    }
 
     fun startPolling() {
         if (isPolling && pollingJob?.isActive == true) {
@@ -647,15 +661,16 @@ class QRDaemonService(
     }
 
     private suspend fun fetchQRToken(): ByteArray {
-        if (serialNumber.isBlank()) {
+        val identifier = if (nfcEnabled && nfcUid.isNotBlank()) nfcUid else serialNumber
+        if (identifier.isBlank()) {
             onStatus("No SNR yet - waiting")
             return ByteArray(0)
         }
         onStatus("[FETCH] Building token request…")
         val body = FormBody.Builder()
-            .add("post[serialnumber]", serialNumber)
+            .add("post[serialnumber]", identifier)
             .build()
-        Log.d(TAG, "[TOKEN] serialNumber='${serialNumber}' len=${serialNumber.length}")
+        Log.d(TAG, "[TOKEN] identifier='${identifier}' len=${identifier.length} (nfc=$nfcEnabled)")
         if (body.size > 0) {
             Log.d(TAG, "[TOKEN] form body: ${body.name(0)}=${body.value(0)}")
         }

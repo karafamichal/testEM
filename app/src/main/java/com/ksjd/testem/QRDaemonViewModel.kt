@@ -26,7 +26,9 @@ data class AppState(
     val loginError: String = "",
     val email: String = "",
     val password: String = "",
-    val serialNumber: String = ""
+    val serialNumber: String = "",
+    val nfcUid: String = "",
+    val nfcEnabled: Boolean = false
 )
 
 class QRDaemonViewModel : ViewModel() {
@@ -66,10 +68,14 @@ class QRDaemonViewModel : ViewModel() {
         if (!manager.isConfigured()) return
 
         val (email, password, serialNumber) = manager.getCredentials()
+        val nfcUid = manager.getNfcUid()
+        val nfcEnabled = manager.getNfcEnabled()
         _appState.value = _appState.value.copy(
             email = email,
             password = password,
             serialNumber = serialNumber,
+            nfcUid = nfcUid,
+            nfcEnabled = nfcEnabled,
             loginError = ""
         )
     }
@@ -78,8 +84,14 @@ class QRDaemonViewModel : ViewModel() {
         credentialsManager = CredentialsManager(context)
         login(email, password)
         if (_appState.value.isLoggedIn) {
-            val currentSerial = _appState.value.serialNumber
-            credentialsManager?.saveCredentials(email, password, currentSerial)
+            val current = _appState.value
+            credentialsManager?.saveCredentials(
+                email,
+                password,
+                current.serialNumber,
+                current.nfcUid,
+                current.nfcEnabled
+            )
         }
     }
     
@@ -92,6 +104,8 @@ class QRDaemonViewModel : ViewModel() {
             return
         }
         val cachedSerial = _appState.value.serialNumber.trim()
+        val cachedNfcUid = _appState.value.nfcUid.trim()
+        val cachedNfcEnabled = _appState.value.nfcEnabled
         
         _appState.value = _appState.value.copy(
             isLoading = true,
@@ -110,7 +124,9 @@ class QRDaemonViewModel : ViewModel() {
             isLoading = false,
             email = emailTrimmed,
             password = password,
-            serialNumber = cachedSerial
+            serialNumber = cachedSerial,
+            nfcUid = cachedNfcUid,
+            nfcEnabled = cachedNfcEnabled
         )
         
         // Auto-start polling
@@ -127,7 +143,9 @@ class QRDaemonViewModel : ViewModel() {
             loginError = "",
             email = current.email,
             password = current.password,
-            serialNumber = current.serialNumber
+            serialNumber = current.serialNumber,
+            nfcUid = current.nfcUid,
+            nfcEnabled = current.nfcEnabled
         )
         _qrState.value = QRState()
     }
@@ -143,6 +161,8 @@ class QRDaemonViewModel : ViewModel() {
             username = username,
             password = password,
             initialSerialNumber = serialNumber,
+            initialNfcUid = _appState.value.nfcUid,
+            initialNfcEnabled = _appState.value.nfcEnabled,
             onTokenUpdate = { hex, base64 ->
                 viewModelScope.launch {
                     val name = _qrState.value.userName
@@ -175,7 +195,13 @@ class QRDaemonViewModel : ViewModel() {
                 viewModelScope.launch {
                     _appState.emit(_appState.value.copy(serialNumber = snr))
                     val current = _appState.value
-                    credentialsManager?.saveCredentials(current.email, current.password, snr)
+                    credentialsManager?.saveCredentials(
+                        current.email,
+                        current.password,
+                        snr,
+                        current.nfcUid,
+                        current.nfcEnabled
+                    )
                 }
             },
             onAccountInfo = { details ->
@@ -212,6 +238,33 @@ class QRDaemonViewModel : ViewModel() {
             statusMessage = "Polling stopped",
             errorMessage = ""
         )
+    }
+
+    fun toggleNfc(context: Context): String? {
+        credentialsManager = credentialsManager ?: CredentialsManager(context)
+        val current = _appState.value
+        val enabling = !current.nfcEnabled
+        val uid = if (enabling && current.nfcUid.isBlank()) {
+            generateUid()
+        } else {
+            current.nfcUid
+        }
+        _appState.value = current.copy(nfcEnabled = enabling, nfcUid = uid)
+        qrService?.setNfcMode(enabling, uid)
+        credentialsManager?.saveCredentials(
+            current.email,
+            current.password,
+            current.serialNumber,
+            uid,
+            enabling
+        )
+        return if (enabling && current.nfcUid.isBlank()) uid else null
+    }
+
+    private fun generateUid(): String {
+        val bytes = ByteArray(8)
+        java.security.SecureRandom().nextBytes(bytes)
+        return bytes.joinToString("") { "%02x".format(it) }
     }
     
     override fun onCleared() {
