@@ -446,6 +446,20 @@ class QRDaemonService(
                                 return ""
                             }
 
+                            fun extractTemplateBase64(templateRaw: String): String {
+                                if (templateRaw.isBlank()) return ""
+                                val cleaned = templateRaw
+                                    .replace("\\\\", "\\")
+                                    .replace("\\\"", "\"")
+                                return try {
+                                    val templateJson = gson.fromJson(cleaned, JsonObject::class.java)
+                                    templateJson.get("base64")?.asString?.trim().orEmpty()
+                                } catch (_: Exception) {
+                                    val match = Regex("base64\\\\\":\\\\\"([^\\\\\"]+)").find(templateRaw)
+                                    match?.groupValues?.getOrNull(1)?.trim().orEmpty()
+                                }
+                            }
+
                             fun readLong(obj: JsonObject?, vararg keys: String): Long {
                                 if (obj == null) return 0
                                 for (key in keys) {
@@ -554,6 +568,11 @@ class QRDaemonService(
                                 onStatus("Loaded SNR")
                             }
 
+                            val templateRaw = readString(cardObj, "template")
+                            val templateBase64 = readString(cardObj, "base64", "cardBase64").ifBlank {
+                                extractTemplateBase64(templateRaw)
+                            }
+
                             val details = AccountDetails(
                                 cardTypeName = readString(cardObj, "cardTypeName", "typeName", "cardType"),
                                 organizationName = readString(cardObj, "organizationName", "organization", "companyName"),
@@ -564,7 +583,8 @@ class QRDaemonService(
                                 discountValidFrom = readLong(cardObj, "discountValidFrom"),
                                 discountValidTo = readLong(cardObj, "discountValidTo"),
                                 creditLastBalance = readDouble(cardObj, "creditLastBalance", "credit"),
-                                currencySymbol = readString(cardObj, "currencySymbol", "currency")
+                                currencySymbol = readString(cardObj, "currencySymbol", "currency"),
+                                cardTemplateBase64 = templateBase64
                             )
                             onAccountInfo(details)
                         } catch (e: Exception) {

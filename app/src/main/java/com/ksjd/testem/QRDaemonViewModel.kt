@@ -2,6 +2,8 @@ package com.ksjd.testem
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -71,6 +73,20 @@ class QRDaemonViewModel : ViewModel() {
             "END:VCARD"
     }
 
+    private fun decodeTemplateBitmap(base64: String): Bitmap? {
+        return try {
+            val cleaned = base64.replace(Regex("[^A-Za-z0-9+/=_-]"), "")
+            val needsUrlSafe = cleaned.contains('-') || cleaned.contains('_')
+            val padLen = (4 - (cleaned.length % 4)) % 4
+            val padded = cleaned + "=".repeat(padLen)
+            val flags = if (needsUrlSafe) Base64.URL_SAFE or Base64.NO_WRAP else Base64.NO_WRAP
+            val bytes = Base64.decode(padded, flags)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun loadSavedCredentials(context: Context) {
         val manager = CredentialsManager(context)
         credentialsManager = manager
@@ -111,7 +127,8 @@ class QRDaemonViewModel : ViewModel() {
             return
         }
         val cachedSerial = _appState.value.serialNumber.trim()
-        val cachedNfcUid = _appState.value.nfcUid.trim()
+        val storedNfcUid = credentialsManager?.getNfcUid().orEmpty().trim()
+        val cachedNfcUid = _appState.value.nfcUid.trim().ifBlank { storedNfcUid }
         val cachedNfcEnabled = false
         
         _appState.value = _appState.value.copy(
@@ -224,7 +241,15 @@ class QRDaemonViewModel : ViewModel() {
             },
             onAccountInfo = { details ->
                 viewModelScope.launch {
-                    _qrState.emit(_qrState.value.copy(accountDetails = details))
+                    val current = _qrState.value
+                    var updated = current.copy(accountDetails = details)
+                    if (_appState.value.nfcEnabled && details.cardTemplateBase64.isNotBlank()) {
+                        val bmp = decodeTemplateBitmap(details.cardTemplateBase64)
+                        if (bmp != null) {
+                            updated = updated.copy(qrBitmap = bmp)
+                        }
+                    }
+                    _qrState.emit(updated)
                 }
             },
             onStatus = { status ->
@@ -277,8 +302,13 @@ class QRDaemonViewModel : ViewModel() {
             uid
         )
         if (enabling && uid.isNotBlank()) {
-            val vcard = buildNfcVCard(uid)
-            val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
+            val template = _qrState.value.accountDetails.cardTemplateBase64
+            val bitmap = if (template.isNotBlank()) {
+                decodeTemplateBitmap(template)
+            } else {
+                val vcard = buildNfcVCard(uid)
+                QRCodeGenerator.generateQRCode(vcard, 512, 512)
+            }
             _qrState.value = _qrState.value.copy(
                 qrBitmap = bitmap,
                 statusMessage = "NFC UID active"

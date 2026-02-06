@@ -10,5 +10,6 @@ data class AccountDetails(
     val discountValidFrom: Long = 0,
     val discountValidTo: Long = 0,
     val creditLastBalance: Double? = null,
-    val currencySymbol: String = ""
+    val currencySymbol: String = "",
+    val cardTemplateBase64: String = ""
 )
