@@ -477,14 +477,31 @@ class QRDaemonService(
 
                             fun readDouble(obj: JsonObject?, vararg keys: String): Double? {
                                 if (obj == null) return null
+                                val centKeys = setOf("creditLastBalance", "credit")
                                 for (key in keys) {
                                     val value = obj.get(key)
-                                    if (value != null && value.isJsonPrimitive) {
-                                        try {
-                                            return value.asDouble
-                                        } catch (_: Exception) {
-                                            // Ignore
+                                    if (value == null || !value.isJsonPrimitive) continue
+                                    val prim = value.asJsonPrimitive
+                                    if (prim.isString) {
+                                        val raw = prim.asString.trim()
+                                        if (raw.isEmpty()) continue
+                                        val normalized = raw.replace(",", ".")
+                                        val parsed = normalized.toDoubleOrNull() ?: continue
+                                        if (key in centKeys && !normalized.contains(".")) {
+                                            return parsed / 100.0
                                         }
+                                        return parsed
+                                    }
+                                    if (prim.isNumber) {
+                                        val parsed = try {
+                                            prim.asDouble
+                                        } catch (_: Exception) {
+                                            continue
+                                        }
+                                        if (key in centKeys && parsed % 1.0 == 0.0) {
+                                            return parsed / 100.0
+                                        }
+                                        return parsed
                                     }
                                 }
                                 return null

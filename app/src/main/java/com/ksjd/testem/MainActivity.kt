@@ -348,10 +348,11 @@ fun QRCodeDisplay(qrState: QRState) {
             }
             
             if (qrState.qrBitmap != null) {
+                val size = QRDaemonConfig.QR_CODE_SIZE.dp
                 Image(
                     bitmap = qrState.qrBitmap.asImageBitmap(),
                     contentDescription = "QR Code",
-                    modifier = Modifier.size(256.dp)
+                    modifier = Modifier.size(size)
                 )
             } else {
                 PlaceholderQRCode()
@@ -364,7 +365,7 @@ fun QRCodeDisplay(qrState: QRState) {
 fun PlaceholderQRCode() {
     Box(
         modifier = Modifier
-            .size(256.dp)
+            .size(QRDaemonConfig.QR_CODE_SIZE.dp)
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center
     ) {
