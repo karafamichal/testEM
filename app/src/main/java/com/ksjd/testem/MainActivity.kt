@@ -346,12 +346,6 @@ fun PlaceholderQRCode() {
 fun AccountActionsCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                "Account",
-                modifier = Modifier.padding(bottom = 12.dp),
-                fontWeight = FontWeight.Bold
-            )
-
             Button(
                 onClick = { },
                 modifier = Modifier.fillMaxWidth()
@@ -546,15 +540,23 @@ fun TopAppBar(title: @Composable () -> Unit, actions: @Composable () -> Unit = {
             .height(56.dp),
         color = MaterialTheme.colorScheme.primary
     ) {
-        Row(
+        Box(
             modifier = Modifier
                 .padding(horizontal = 16.dp)
-                .fillMaxSize(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
         ) {
-            title()
-            actions()
+            Row(
+                modifier = Modifier.align(Alignment.CenterStart),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                title()
+            }
+            Row(
+                modifier = Modifier.align(Alignment.CenterEnd),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                actions()
+            }
         }
     }
 }
