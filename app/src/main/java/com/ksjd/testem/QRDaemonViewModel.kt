@@ -60,7 +60,7 @@ class QRDaemonViewModel : ViewModel() {
             "FN:$safeName\r\n" +
             "N:$safeName;;;;\r\n" +
             (if (safeEmail.isNotBlank()) "EMAIL:$safeEmail\r\n" else "") +
-            "NOTE:QR_TOKEN=$safeToken\r\n" +
+            "NOTE:$safeToken\r\n" +
             "END:VCARD"
     }
 
