@@ -51,16 +51,6 @@ class QRDaemonViewModel : ViewModel() {
             .replace("\n", "\\n")
     }
 
-    private fun buildVCard(token: String): String {
-        val safeToken = escapeVCard(token)
-        return "BEGIN:VCARD\r\n" +
-            "VERSION:3.0\r\n" +
-            "FN:$safeToken\r\n" +
-            "N:$safeToken;;;;\r\n" +
-            "NOTE:$safeToken\r\n" +
-            "END:VCARD"
-    }
-
     private fun buildNfcVCard(uid: String): String {
         val safeUid = escapeVCard(uid)
         return "BEGIN:VCARD\r\n" +
@@ -196,8 +186,7 @@ class QRDaemonViewModel : ViewModel() {
                             statusMessage = "NFC UID active"
                         )
                     } else {
-                        val vcard = buildVCard(base64)
-                        val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
+                        val bitmap = QRCodeGenerator.generateQRCode(base64, 512, 512)
                         current.copy(
                             qrBitmap = bitmap,
                             tokenHex = hex,
@@ -309,8 +298,7 @@ class QRDaemonViewModel : ViewModel() {
                 statusMessage = "NFC UID active"
             )
         } else if (!enabling && _qrState.value.tokenBase64.isNotBlank()) {
-            val vcard = buildVCard(_qrState.value.tokenBase64)
-            val bitmap = QRCodeGenerator.generateQRCode(vcard, 512, 512)
+            val bitmap = QRCodeGenerator.generateQRCode(_qrState.value.tokenBase64, 512, 512)
             _qrState.value = _qrState.value.copy(
                 qrBitmap = bitmap,
                 statusMessage = "Token updated"
