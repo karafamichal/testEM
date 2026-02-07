@@ -32,7 +32,9 @@ data class AppState(
     val nfcUid: String = "",
     val nfcEnabled: Boolean = false,
     val themePresets: List<ThemePreset> = emptyList(),
-    val selectedThemeId: String = ""
+    val selectedThemeId: String = "",
+    val layoutOrder: List<String> = emptyList(),
+    val hiddenSections: Set<String> = emptySet()
 )
 
 class QRDaemonViewModel : ViewModel() {
@@ -69,10 +71,19 @@ class QRDaemonViewModel : ViewModel() {
         )
     )
 
+    private val defaultLayoutOrder = listOf(
+        "status",
+        "qr",
+        "nfc",
+        "controls",
+        "error"
+    )
+
     init {
         _appState.value = _appState.value.copy(
             themePresets = defaultThemePresets,
-            selectedThemeId = defaultThemePresets.first().id
+            selectedThemeId = defaultThemePresets.first().id,
+            layoutOrder = defaultLayoutOrder
         )
     }
 
@@ -111,6 +122,7 @@ class QRDaemonViewModel : ViewModel() {
         val manager = CredentialsManager(context)
         credentialsManager = manager
         loadThemeSettings(context)
+        loadLayoutSettings(context)
         if (!manager.isConfigured()) return
 
         val (email, password, serialNumber) = manager.getCredentials()
@@ -134,6 +146,41 @@ class QRDaemonViewModel : ViewModel() {
             themePresets = presets,
             selectedThemeId = selectedId
         )
+    }
+
+    fun loadLayoutSettings(context: Context) {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        val order = manager.getLayoutOrder(defaultLayoutOrder)
+        val hidden = manager.getHiddenSections()
+        _appState.value = _appState.value.copy(
+            layoutOrder = order,
+            hiddenSections = hidden
+        )
+    }
+
+    fun setSectionHidden(context: Context, id: String, hidden: Boolean) {
+        val current = _appState.value.hiddenSections
+        val updated = if (hidden) current + id else current - id
+        _appState.value = _appState.value.copy(hiddenSections = updated)
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        manager.saveHiddenSections(updated)
+    }
+
+    fun moveLayoutItem(context: Context, id: String, direction: Int) {
+        val current = _appState.value.layoutOrder
+        val index = current.indexOf(id)
+        if (index == -1) return
+        val newIndex = index + direction
+        if (newIndex !in current.indices) return
+        val updated = current.toMutableList()
+        val moved = updated.removeAt(index)
+        updated.add(newIndex, moved)
+        _appState.value = _appState.value.copy(layoutOrder = updated)
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        manager.saveLayoutOrder(updated)
     }
 
     fun selectThemePreset(context: Context, presetId: String) {

@@ -93,4 +93,24 @@ class CredentialsManager(context: Context) {
     fun getSelectedThemeId(defaultId: String): String {
         return prefs.getString("selected_theme_id", defaultId) ?: defaultId
     }
+
+    fun saveLayoutOrder(order: List<String>) {
+        prefs.edit().putString("layout_order", order.joinToString("||")).apply()
+    }
+
+    fun getLayoutOrder(defaultOrder: List<String>): List<String> {
+        val stored = prefs.getString("layout_order", null) ?: return defaultOrder
+        val order = stored.split("||").map { it.trim() }.filter { it.isNotEmpty() }
+        return if (order.isEmpty()) defaultOrder else order
+    }
+
+    fun saveHiddenSections(hidden: Set<String>) {
+        val stored = hidden.joinToString("||")
+        prefs.edit().putString("layout_hidden", stored).apply()
+    }
+
+    fun getHiddenSections(): Set<String> {
+        val stored = prefs.getString("layout_hidden", null) ?: return emptySet()
+        return stored.split("||").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    }
 }

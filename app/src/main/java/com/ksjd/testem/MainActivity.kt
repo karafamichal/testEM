@@ -28,11 +28,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ksjd.testem.ui.theme.TestEMTheme
 import java.text.SimpleDateFormat
 import java.util.*
 import androidx.compose.ui.unit.TextUnit
+import android.view.WindowManager
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
@@ -166,6 +169,7 @@ fun QRDaemonScreen(
     var showAccountDialog by remember { mutableStateOf(false) }
     var showNfcDialog by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showFullscreenQr by remember { mutableStateOf(false) }
     var nfcUidToShow by remember { mutableStateOf("") }
 
     if (showAccountDialog) {
@@ -190,6 +194,14 @@ fun QRDaemonScreen(
             onBack = { showSettings = false }
         )
         return
+    }
+
+    if (showFullscreenQr) {
+        FullscreenQrDialog(
+            qrState = qrState,
+            context = context,
+            onDismiss = { showFullscreenQr = false }
+        )
     }
     
     Column(
@@ -222,54 +234,94 @@ fun QRDaemonScreen(
             }
         )
         
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            StatusCard(qrState)
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            QRCodeDisplay(qrState)
-            Spacer(modifier = Modifier.height(16.dp))
-
-            AccountActionsCard(
-                nfcEnabled = appState.nfcEnabled,
-                isQrReady = qrState.qrBitmap != null,
-                onToggleNfc = {
-                    val createdUid = viewModel.toggleNfc(context.applicationContext)
-                    if (!createdUid.isNullOrBlank()) {
-                        nfcUidToShow = createdUid
-                        showNfcDialog = true
-                    }
+        LayoutContent(
+            appState = appState,
+            qrState = qrState,
+            onShowFullscreenQr = { showFullscreenQr = true },
+            onToggleNfc = {
+                val createdUid = viewModel.toggleNfc(context.applicationContext)
+                if (!createdUid.isNullOrBlank()) {
+                    nfcUidToShow = createdUid
+                    showNfcDialog = true
                 }
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            ControlButtonsRow(qrState) { isPolling ->
+            },
+            onTogglePolling = { isPolling ->
                 if (isPolling) {
                     viewModel.stopPolling()
                 } else {
                     viewModel.startPolling()
                 }
             }
-            
-            if (qrState.errorMessage.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Text(
-                        qrState.errorMessage,
-                        modifier = Modifier.padding(16.dp),
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
+        )
+    }
+}
+
+@Composable
+fun LayoutContent(
+    appState: AppState,
+    qrState: QRState,
+    onShowFullscreenQr: () -> Unit,
+    onToggleNfc: () -> Unit,
+    onTogglePolling: (Boolean) -> Unit
+) {
+    val order = if (appState.layoutOrder.isNotEmpty()) {
+        appState.layoutOrder
+    } else {
+        defaultLayoutOrderIds()
+    }
+    val hidden = appState.hiddenSections
+    val sections = order.mapNotNull { id ->
+        when (id) {
+            "status" -> if (hidden.contains(id)) null else LayoutSectionContent { StatusCard(qrState) }
+            "qr" -> LayoutSectionContent { QRCodeDisplay(qrState, onShowFullscreenQr) }
+            "nfc" -> if (hidden.contains(id)) null else LayoutSectionContent {
+                AccountActionsCard(
+                    nfcEnabled = appState.nfcEnabled,
+                    isQrReady = qrState.qrBitmap != null,
+                    onToggleNfc = onToggleNfc
+                )
+            }
+            "controls" -> LayoutSectionContent {
+                ControlButtonsRow(qrState, onTogglePolling)
+            }
+            "error" -> {
+                if (hidden.contains(id)) {
+                    null
+                } else
+                if (qrState.errorMessage.isNotEmpty()) {
+                    LayoutSectionContent {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Text(
+                                qrState.errorMessage,
+                                modifier = Modifier.padding(16.dp),
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                } else {
+                    null
                 }
+            }
+            else -> null
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        sections.forEachIndexed { index, section ->
+            section.content()
+            if (index < sections.lastIndex) {
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
@@ -353,6 +405,56 @@ fun SettingsScreen(
                                 viewModel.selectThemePreset(
                                     context.applicationContext,
                                     preset.id
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        "Layout",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    val order = if (appState.layoutOrder.isNotEmpty()) {
+                        appState.layoutOrder
+                    } else {
+                        defaultLayoutOrderIds()
+                    }
+                    val titles = layoutSectionTitles()
+                    val hideable = setOf("status", "nfc", "error")
+                    val hidden = appState.hiddenSections
+                    order.forEachIndexed { index, id ->
+                        LayoutOrderRow(
+                            title = titles[id] ?: id,
+                            canMoveUp = index > 0,
+                            canMoveDown = index < order.lastIndex,
+                            onMoveUp = {
+                                viewModel.moveLayoutItem(
+                                    context.applicationContext,
+                                    id,
+                                    -1
+                                )
+                            },
+                            onMoveDown = {
+                                viewModel.moveLayoutItem(
+                                    context.applicationContext,
+                                    id,
+                                    1
+                                )
+                            },
+                            canToggleVisibility = hideable.contains(id),
+                            visible = !hidden.contains(id),
+                            onToggleVisibility = { visible ->
+                                viewModel.setSectionHidden(
+                                    context.applicationContext,
+                                    id,
+                                    !visible
                                 )
                             }
                         )
@@ -567,6 +669,11 @@ fun StatusCard(qrState: QRState) {
 
 @Composable
 fun QRCodeDisplay(qrState: QRState) {
+    QRCodeDisplay(qrState = qrState, onShowFullscreen = {})
+}
+
+@Composable
+fun QRCodeDisplay(qrState: QRState, onShowFullscreen: () -> Unit) {
     var showTokenInfo by remember { mutableStateOf(false) }
     if (showTokenInfo) {
         TokenInfoDialog(
@@ -606,21 +713,24 @@ fun QRCodeDisplay(qrState: QRState) {
                 Image(
                     bitmap = qrState.qrBitmap.asImageBitmap(),
                     contentDescription = "QR Code",
-                    modifier = Modifier.size(size)
+                    modifier = Modifier
+                        .size(size)
+                        .clickable(onClick = onShowFullscreen)
                 )
             } else {
-                PlaceholderQRCode()
+                PlaceholderQRCode(onShowFullscreen)
             }
         }
     }
 }
 
 @Composable
-fun PlaceholderQRCode() {
+fun PlaceholderQRCode(onShowFullscreen: () -> Unit = {}) {
     Box(
         modifier = Modifier
             .size(QRDaemonConfig.QR_CODE_SIZE.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onShowFullscreen),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -628,6 +738,124 @@ fun PlaceholderQRCode() {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+}
+
+@Composable
+fun FullscreenQrDialog(
+    qrState: QRState,
+    context: ComponentActivity,
+    onDismiss: () -> Unit
+) {
+    val window = context.window
+    val previousBrightness = remember { window.attributes.screenBrightness }
+    DisposableEffect(Unit) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val params = window.attributes
+        params.screenBrightness = 1f
+        window.attributes = params
+        onDispose {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            val restore = window.attributes
+            restore.screenBrightness = previousBrightness
+            window.attributes = restore
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.White)
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center
+        ) {
+            if (qrState.qrBitmap != null) {
+                Image(
+                    bitmap = qrState.qrBitmap.asImageBitmap(),
+                    contentDescription = "QR Code Fullscreen",
+                    modifier = Modifier.size(250.dp)
+                )
+            } else {
+                Text(
+                    "No Token",
+                    color = Color.Black
+                )
+            }
+        }
+    }
+}
+
+data class LayoutSectionContent(val content: @Composable () -> Unit)
+
+@Composable
+fun LayoutOrderRow(
+    title: String,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    canToggleVisibility: Boolean,
+    visible: Boolean,
+    onToggleVisibility: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                fontWeight = FontWeight.Medium
+            )
+            if (canToggleVisibility) {
+                Text(
+                    if (visible) "Visible" else "Hidden",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    "Always visible",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (canToggleVisibility) {
+            TextButton(onClick = { onToggleVisibility(!visible) }) {
+                Text(if (visible) "Hide" else "Show")
+            }
+        }
+        TextButton(onClick = onMoveUp, enabled = canMoveUp) {
+            Text("Up")
+        }
+        TextButton(onClick = onMoveDown, enabled = canMoveDown) {
+            Text("Down")
+        }
+    }
+}
+
+private fun layoutSectionTitles(): Map<String, String> {
+    return mapOf(
+        "status" to "Polling status",
+        "qr" to "QR code",
+        "nfc" to "NFC button",
+        "controls" to "Controls",
+        "error" to "Errors"
+    )
+}
+
+private fun defaultLayoutOrderIds(): List<String> {
+    return listOf(
+        "status",
+        "qr",
+        "nfc",
+        "controls",
+        "error"
+    )
 }
 
 @Composable
