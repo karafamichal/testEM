@@ -4,21 +4,27 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -32,14 +38,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            TestEMTheme {
+            val viewModel: QRDaemonViewModel = viewModel()
+            val appState by viewModel.appState.collectAsState()
+            val activePreset = appState.themePresets
+                .firstOrNull { it.id == appState.selectedThemeId }
+                ?: appState.themePresets.firstOrNull()
+
+            TestEMTheme(themePreset = activePreset) {
                 Surface(
                     modifier = Modifier
                         .fillMaxSize()
                         .systemBarsPadding(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val viewModel: QRDaemonViewModel = viewModel()
                     QRDaemonApp(viewModel, this)
                 }
             }
@@ -152,20 +163,11 @@ fun QRDaemonScreen(
     appState: AppState,
     context: ComponentActivity
 ) {
-    var showLogoutDialog by remember { mutableStateOf(false) }
     var showAccountDialog by remember { mutableStateOf(false) }
     var showNfcDialog by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
     var nfcUidToShow by remember { mutableStateOf("") }
-    
-    if (showLogoutDialog) {
-        LogoutDialog(
-            onConfirm = {
-                viewModel.logout()
-                showLogoutDialog = false
-            },
-            onDismiss = { showLogoutDialog = false }
-        )
-    }
+
     if (showAccountDialog) {
         AccountDialog(
             qrState = qrState,
@@ -178,6 +180,16 @@ fun QRDaemonScreen(
             uid = nfcUidToShow,
             onDismiss = { showNfcDialog = false }
         )
+    }
+
+    if (showSettings) {
+        SettingsScreen(
+            viewModel = viewModel,
+            appState = appState,
+            context = context,
+            onBack = { showSettings = false }
+        )
+        return
     }
     
     Column(
@@ -199,12 +211,11 @@ fun QRDaemonScreen(
             },
             actions = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val topBarStyle = MaterialTheme.typography.titleMedium
-                    TextButton(onClick = { showLogoutDialog = true }) {
-                        Text(
-                            "Logout",
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            style = topBarStyle
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }
@@ -262,6 +273,249 @@ fun QRDaemonScreen(
             }
         }
     }
+}
+
+@Composable
+fun SettingsScreen(
+    viewModel: QRDaemonViewModel,
+    appState: AppState,
+    context: ComponentActivity,
+    onBack: () -> Unit
+) {
+    var showLogoutDialog by remember { mutableStateOf(false) }
+    var presetName by remember { mutableStateOf("") }
+    var primaryHex by remember { mutableStateOf("") }
+    var secondaryHex by remember { mutableStateOf("") }
+    var tertiaryHex by remember { mutableStateOf("") }
+
+    val primaryColor = parseColorHex(primaryHex)
+    val secondaryColor = parseColorHex(secondaryHex)
+    val tertiaryColor = parseColorHex(tertiaryHex)
+    val canSavePreset = presetName.isNotBlank()
+        && primaryColor != null
+        && secondaryColor != null
+        && tertiaryColor != null
+
+    if (showLogoutDialog) {
+        LogoutDialog(
+            onConfirm = {
+                viewModel.logout()
+                showLogoutDialog = false
+                onBack()
+            },
+            onDismiss = { showLogoutDialog = false }
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        TopAppBar(
+            navigation = {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            },
+            title = {
+                Text(
+                    "Settings",
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text(
+                "Theme presets",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    appState.themePresets.forEach { preset ->
+                        ThemePresetRow(
+                            preset = preset,
+                            selected = preset.id == appState.selectedThemeId,
+                            onSelect = {
+                                viewModel.selectThemePreset(
+                                    context.applicationContext,
+                                    preset.id
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        "Create preset",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = presetName,
+                        onValueChange = { presetName = it },
+                        label = { Text("Preset name") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = primaryHex,
+                        onValueChange = { primaryHex = it },
+                        label = { Text("Primary hex (RRGGBB or AARRGGBB)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = secondaryHex,
+                        onValueChange = { secondaryHex = it },
+                        label = { Text("Secondary hex (RRGGBB or AARRGGBB)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = tertiaryHex,
+                        onValueChange = { tertiaryHex = it },
+                        label = { Text("Tertiary hex (RRGGBB or AARRGGBB)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ColorPreviewSwatch(label = "P", color = primaryColor)
+                        ColorPreviewSwatch(label = "S", color = secondaryColor)
+                        ColorPreviewSwatch(label = "T", color = tertiaryColor)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            viewModel.addThemePreset(
+                                context.applicationContext,
+                                presetName.trim(),
+                                primaryColor ?: 0xFF000000,
+                                secondaryColor ?: 0xFF000000,
+                                tertiaryColor ?: 0xFF000000
+                            )
+                            presetName = ""
+                            primaryHex = ""
+                            secondaryHex = ""
+                            tertiaryHex = ""
+                        },
+                        enabled = canSavePreset,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Save preset")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        "Account",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = { showLogoutDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Text(
+                            "Logout",
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ThemePresetRow(
+    preset: ThemePreset,
+    selected: Boolean,
+    onSelect: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = onSelect)
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(preset.name, fontWeight = FontWeight.Medium)
+            Text(
+                "Primary / Secondary / Tertiary",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ColorPreviewSwatch(color = preset.primary)
+            ColorPreviewSwatch(color = preset.secondary)
+            ColorPreviewSwatch(color = preset.tertiary)
+        }
+    }
+}
+
+@Composable
+fun ColorPreviewSwatch(label: String? = null, color: Long?) {
+    val swatchColor = color?.let { Color(it) } ?: MaterialTheme.colorScheme.surfaceVariant
+    Box(
+        modifier = Modifier
+            .size(20.dp)
+            .background(swatchColor, CircleShape)
+    )
+    if (!label.isNullOrBlank()) {
+        Text(
+            label,
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun parseColorHex(raw: String): Long? {
+    val cleaned = raw.trim().removePrefix("#")
+    val normalized = when (cleaned.length) {
+        6 -> "FF$cleaned"
+        8 -> cleaned
+        else -> return null
+    }
+    if (!normalized.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
+    return normalized.toLongOrNull(16)
 }
 
 @Composable
@@ -601,7 +855,11 @@ fun SelectableText(text: String, fontSize: TextUnit = 12.sp, modifier: Modifier 
 }
 
 @Composable
-fun TopAppBar(title: @Composable () -> Unit, actions: @Composable () -> Unit = {}) {
+fun TopAppBar(
+    title: @Composable () -> Unit,
+    actions: @Composable () -> Unit = {},
+    navigation: @Composable () -> Unit = {}
+) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -617,6 +875,8 @@ fun TopAppBar(title: @Composable () -> Unit, actions: @Composable () -> Unit = {
                 modifier = Modifier.align(Alignment.CenterStart),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                navigation()
+                Spacer(modifier = Modifier.width(8.dp))
                 title()
             }
             Row(

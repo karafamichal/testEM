@@ -30,7 +30,9 @@ data class AppState(
     val password: String = "",
     val serialNumber: String = "",
     val nfcUid: String = "",
-    val nfcEnabled: Boolean = false
+    val nfcEnabled: Boolean = false,
+    val themePresets: List<ThemePreset> = emptyList(),
+    val selectedThemeId: String = ""
 )
 
 class QRDaemonViewModel : ViewModel() {
@@ -42,6 +44,37 @@ class QRDaemonViewModel : ViewModel() {
     
     private var qrService: QRDaemonService? = null
     private var credentialsManager: CredentialsManager? = null
+
+    private val defaultThemePresets = listOf(
+        ThemePreset(
+            id = "classic",
+            name = "Classic",
+            primary = 0xFF6650A4,
+            secondary = 0xFF625B71,
+            tertiary = 0xFF7D5260
+        ),
+        ThemePreset(
+            id = "ocean",
+            name = "Ocean",
+            primary = 0xFF136F63,
+            secondary = 0xFF0B4F6C,
+            tertiary = 0xFF177E89
+        ),
+        ThemePreset(
+            id = "sunset",
+            name = "Sunset",
+            primary = 0xFFE85D04,
+            secondary = 0xFFDC2F02,
+            tertiary = 0xFF6A040F
+        )
+    )
+
+    init {
+        _appState.value = _appState.value.copy(
+            themePresets = defaultThemePresets,
+            selectedThemeId = defaultThemePresets.first().id
+        )
+    }
 
     private fun escapeVCard(value: String): String {
         return value
@@ -77,6 +110,7 @@ class QRDaemonViewModel : ViewModel() {
     fun loadSavedCredentials(context: Context) {
         val manager = CredentialsManager(context)
         credentialsManager = manager
+        loadThemeSettings(context)
         if (!manager.isConfigured()) return
 
         val (email, password, serialNumber) = manager.getCredentials()
@@ -89,6 +123,50 @@ class QRDaemonViewModel : ViewModel() {
             nfcEnabled = false,
             loginError = ""
         )
+    }
+
+    fun loadThemeSettings(context: Context) {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        val presets = manager.getThemePresets(defaultThemePresets)
+        val selectedId = manager.getSelectedThemeId(presets.first().id)
+        _appState.value = _appState.value.copy(
+            themePresets = presets,
+            selectedThemeId = selectedId
+        )
+    }
+
+    fun selectThemePreset(context: Context, presetId: String) {
+        if (presetId == _appState.value.selectedThemeId) return
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        _appState.value = _appState.value.copy(selectedThemeId = presetId)
+        manager.saveSelectedThemeId(presetId)
+    }
+
+    fun addThemePreset(
+        context: Context,
+        name: String,
+        primary: Long,
+        secondary: Long,
+        tertiary: Long
+    ) {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        val newPreset = ThemePreset(
+            id = java.util.UUID.randomUUID().toString(),
+            name = name,
+            primary = primary,
+            secondary = secondary,
+            tertiary = tertiary
+        )
+        val updated = _appState.value.themePresets + newPreset
+        _appState.value = _appState.value.copy(
+            themePresets = updated,
+            selectedThemeId = newPreset.id
+        )
+        manager.saveThemePresets(updated)
+        manager.saveSelectedThemeId(newPreset.id)
     }
 
     fun loginAndRemember(context: Context, email: String, password: String) {
@@ -156,7 +234,9 @@ class QRDaemonViewModel : ViewModel() {
             password = current.password,
             serialNumber = current.serialNumber,
             nfcUid = current.nfcUid,
-            nfcEnabled = current.nfcEnabled
+            nfcEnabled = current.nfcEnabled,
+            themePresets = current.themePresets,
+            selectedThemeId = current.selectedThemeId
         )
         _qrState.value = QRState()
     }
