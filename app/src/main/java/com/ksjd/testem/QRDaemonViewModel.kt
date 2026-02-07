@@ -34,7 +34,11 @@ data class AppState(
     val themePresets: List<ThemePreset> = emptyList(),
     val selectedThemeId: String = "",
     val layoutOrder: List<String> = emptyList(),
-    val hiddenSections: Set<String> = emptySet()
+    val hiddenSections: Set<String> = emptySet(),
+    val isPinSet: Boolean = false,
+    val isAppUnlocked: Boolean = false,
+    val biometricEnabled: Boolean = true,
+    val lockTimeoutSeconds: Int = 0
 )
 
 class QRDaemonViewModel : ViewModel() {
@@ -46,6 +50,7 @@ class QRDaemonViewModel : ViewModel() {
     
     private var qrService: QRDaemonService? = null
     private var credentialsManager: CredentialsManager? = null
+    private var lastBackgroundTimeMs: Long = 0
 
     private val defaultThemePresets = listOf(
         ThemePreset(
@@ -123,6 +128,7 @@ class QRDaemonViewModel : ViewModel() {
         credentialsManager = manager
         loadThemeSettings(context)
         loadLayoutSettings(context)
+        loadSecuritySettings(context)
         if (!manager.isConfigured()) return
 
         val (email, password, serialNumber) = manager.getCredentials()
@@ -166,6 +172,77 @@ class QRDaemonViewModel : ViewModel() {
         val manager = credentialsManager ?: CredentialsManager(context)
         credentialsManager = manager
         manager.saveHiddenSections(updated)
+    }
+
+    fun loadSecuritySettings(context: Context) {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        val pinSet = manager.isPinSet()
+        val biometricEnabled = manager.getBiometricEnabled()
+        val lockTimeout = manager.getLockTimeoutSeconds()
+        _appState.value = _appState.value.copy(
+            isPinSet = pinSet,
+            isAppUnlocked = !pinSet,
+            biometricEnabled = biometricEnabled,
+            lockTimeoutSeconds = lockTimeout
+        )
+    }
+
+    fun setPin(context: Context, pin: String) {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        manager.savePin(pin)
+        _appState.value = _appState.value.copy(
+            isPinSet = true,
+            isAppUnlocked = true
+        )
+    }
+
+    fun changePin(context: Context, currentPin: String, newPin: String): Boolean {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        if (!manager.verifyPin(currentPin)) return false
+        manager.savePin(newPin)
+        return true
+    }
+
+    fun verifyPin(context: Context, pin: String): Boolean {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        val ok = pin.isBlank() || manager.verifyPin(pin)
+        if (ok) {
+            _appState.value = _appState.value.copy(isAppUnlocked = true)
+        }
+        return ok
+    }
+
+    fun setBiometricEnabled(context: Context, enabled: Boolean) {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        manager.saveBiometricEnabled(enabled)
+        _appState.value = _appState.value.copy(biometricEnabled = enabled)
+    }
+
+    fun setLockTimeoutSeconds(context: Context, seconds: Int) {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        manager.saveLockTimeoutSeconds(seconds)
+        _appState.value = _appState.value.copy(lockTimeoutSeconds = seconds)
+    }
+
+    fun onAppBackgrounded() {
+        if (!_appState.value.isPinSet) return
+        lastBackgroundTimeMs = System.currentTimeMillis()
+    }
+
+    fun onAppForegrounded() {
+        val state = _appState.value
+        if (!state.isPinSet || lastBackgroundTimeMs == 0L) return
+        val timeoutMs = state.lockTimeoutSeconds * 1000L
+        val elapsed = System.currentTimeMillis() - lastBackgroundTimeMs
+        if (timeoutMs == 0L || elapsed >= timeoutMs) {
+            _appState.value = state.copy(isAppUnlocked = false)
+        }
     }
 
     fun moveLayoutItem(context: Context, id: String, direction: Int) {

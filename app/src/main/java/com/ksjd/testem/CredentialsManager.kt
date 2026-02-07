@@ -3,6 +3,8 @@ package com.ksjd.testem
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
+import java.security.MessageDigest
+import java.security.SecureRandom
 
 class CredentialsManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("qr_daemon", Context.MODE_PRIVATE)
@@ -112,5 +114,52 @@ class CredentialsManager(context: Context) {
     fun getHiddenSections(): Set<String> {
         val stored = prefs.getString("layout_hidden", null) ?: return emptySet()
         return stored.split("||").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    }
+
+    fun isPinSet(): Boolean {
+        return prefs.getString("pin_hash", null) != null && prefs.getString("pin_salt", null) != null
+    }
+
+    fun savePin(pin: String) {
+        val salt = ByteArray(16)
+        SecureRandom().nextBytes(salt)
+        val hash = hashPin(pin, salt)
+        prefs.edit().apply {
+            putString("pin_salt", Base64.encodeToString(salt, Base64.NO_WRAP))
+            putString("pin_hash", Base64.encodeToString(hash, Base64.NO_WRAP))
+            apply()
+        }
+    }
+
+    fun verifyPin(pin: String): Boolean {
+        val saltEncoded = prefs.getString("pin_salt", null) ?: return false
+        val hashEncoded = prefs.getString("pin_hash", null) ?: return false
+        val salt = Base64.decode(saltEncoded, Base64.NO_WRAP)
+        val expected = Base64.decode(hashEncoded, Base64.NO_WRAP)
+        val actual = hashPin(pin, salt)
+        return expected.contentEquals(actual)
+    }
+
+    fun saveBiometricEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("biometric_enabled", enabled).apply()
+    }
+
+    fun getBiometricEnabled(): Boolean {
+        return prefs.getBoolean("biometric_enabled", true)
+    }
+
+    fun saveLockTimeoutSeconds(seconds: Int) {
+        prefs.edit().putInt("lock_timeout_seconds", seconds).apply()
+    }
+
+    fun getLockTimeoutSeconds(): Int {
+        return prefs.getInt("lock_timeout_seconds", 0)
+    }
+
+    private fun hashPin(pin: String, salt: ByteArray): ByteArray {
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update(salt)
+        digest.update(pin.toByteArray(Charsets.UTF_8))
+        return digest.digest()
     }
 }

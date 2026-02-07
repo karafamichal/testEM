@@ -1,7 +1,9 @@
 package com.ksjd.testem
 
-import androidx.activity.ComponentActivity
+import android.view.WindowManager
 import androidx.activity.compose.setContent
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,22 +24,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ksjd.testem.ui.theme.TestEMTheme
 import java.text.SimpleDateFormat
 import java.util.*
-import androidx.compose.ui.unit.TextUnit
-import android.view.WindowManager
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -62,27 +68,236 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun QRDaemonApp(viewModel: QRDaemonViewModel, context: ComponentActivity) {
+fun QRDaemonApp(viewModel: QRDaemonViewModel, context: FragmentActivity) {
     val appState by viewModel.appState.collectAsState()
     val qrState by viewModel.qrState.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(Unit) {
         viewModel.loadSavedCredentials(context.applicationContext)
     }
-    
-    if (appState.isLoggedIn) {
-        QRDaemonScreen(viewModel, qrState, appState, context)
-    } else {
-        LoginScreen(viewModel, appState, context)
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.onAppForegrounded()
+                Lifecycle.Event.ON_STOP -> {
+                    if (!context.isChangingConfigurations) {
+                        viewModel.onAppBackgrounded()
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    when {
+        !appState.isPinSet -> PinSetupScreen(viewModel, context)
+        !appState.isAppUnlocked -> PinUnlockScreen(viewModel, appState, context)
+        appState.isLoggedIn -> QRDaemonScreen(viewModel, qrState, appState, context)
+        else -> LoginScreen(viewModel, appState, context)
     }
 }
 
 @Composable
-fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: ComponentActivity) {
+fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
+    var pin by remember { mutableStateOf("") }
+    var confirmPin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Set App PIN", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            "Create a PIN to unlock the app before login.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = pin,
+            onValueChange = {
+                if (it.length <= 8 && it.all { ch -> ch.isDigit() }) pin = it
+            },
+            label = { Text("PIN (4-8 digits)") },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            visualTransformation = PasswordVisualTransformation()
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedTextField(
+            value = confirmPin,
+            onValueChange = {
+                if (it.length <= 8 && it.all { ch -> ch.isDigit() }) confirmPin = it
+            },
+            label = { Text("Confirm PIN") },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            visualTransformation = PasswordVisualTransformation()
+        )
+
+        if (error.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = {
+                error = when {
+                    pin.length < 4 -> "PIN must be at least 4 digits."
+                    pin != confirmPin -> "PINs do not match."
+                    else -> ""
+                }
+                if (error.isEmpty()) {
+                    viewModel.setPin(context.applicationContext, pin)
+                    pin = ""
+                    confirmPin = ""
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Save PIN")
+        }
+    }
+}
+
+@Composable
+fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: FragmentActivity) {
+    var pin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    var hasPrompted by remember { mutableStateOf(false) }
+
+    val biometricManager = remember { BiometricManager.from(context) }
+    val canAuthenticate = biometricManager.canAuthenticate(
+        BiometricManager.Authenticators.BIOMETRIC_WEAK
+    )
+    val biometricsAvailable = canAuthenticate == BiometricManager.BIOMETRIC_SUCCESS
+
+    val prompt = rememberBiometricPrompt(
+        activity = context,
+        onSuccess = {
+            viewModel.verifyPin(context.applicationContext, "")
+        },
+        onError = { message ->
+            error = message
+        }
+    )
+    val promptInfo = remember {
+        BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Unlock app")
+            .setSubtitle("Use biometrics to continue")
+            .setNegativeButtonText("Use PIN")
+            .build()
+    }
+
+    LaunchedEffect(biometricsAvailable, appState.biometricEnabled) {
+        if (biometricsAvailable && appState.biometricEnabled && !hasPrompted) {
+            hasPrompted = true
+            prompt.authenticate(promptInfo)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Unlock", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            "Enter your PIN or use biometrics.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = pin,
+            onValueChange = {
+                if (it.length <= 8 && it.all { ch -> ch.isDigit() }) pin = it
+            },
+            label = { Text("PIN") },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            visualTransformation = PasswordVisualTransformation()
+        )
+
+        if (error.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = {
+                val ok = viewModel.verifyPin(context.applicationContext, pin)
+                error = if (ok) "" else "Incorrect PIN."
+                if (ok) pin = ""
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Unlock")
+        }
+
+        if (biometricsAvailable && appState.biometricEnabled) {
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = { prompt.authenticate(promptInfo) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Use biometrics")
+            }
+        }
+    }
+}
+
+@Composable
+fun rememberBiometricPrompt(
+    activity: FragmentActivity,
+    onSuccess: () -> Unit,
+    onError: (String) -> Unit
+): BiometricPrompt {
+    val onSuccessState by rememberUpdatedState(onSuccess)
+    val onErrorState by rememberUpdatedState(onError)
+    val executor = remember { ContextCompat.getMainExecutor(activity) }
+    return remember {
+        BiometricPrompt(
+            activity,
+            executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    onSuccessState()
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    onErrorState(errString.toString())
+                }
+
+                override fun onAuthenticationFailed() {
+                    onErrorState("Biometric not recognized.")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: FragmentActivity) {
     var email by remember(appState.email) { mutableStateOf(appState.email) }
     var password by remember(appState.password) { mutableStateOf(appState.password) }
-    
-    
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -96,14 +311,14 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
             fontSize = 32.sp,
             modifier = Modifier.padding(bottom = 16.dp)
         )
-        
+
         Text(
             "Real-time QR Token Generator",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 32.dp)
         )
-        
+
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
@@ -114,7 +329,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
             singleLine = true,
             keyboardOptions = KeyboardOptions(autoCorrect = false)
         )
-        
+
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
@@ -125,7 +340,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
             singleLine = true,
             visualTransformation = PasswordVisualTransformation()
         )
-        
+
         if (appState.loginError.isNotEmpty()) {
             Card(
                 modifier = Modifier
@@ -142,7 +357,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Compo
                 )
             }
         }
-        
+
         Button(
             onClick = { viewModel.loginAndRemember(context.applicationContext, email, password) },
             modifier = Modifier
@@ -164,7 +379,7 @@ fun QRDaemonScreen(
     viewModel: QRDaemonViewModel,
     qrState: QRState,
     appState: AppState,
-    context: ComponentActivity
+    context: FragmentActivity
 ) {
     var showAccountDialog by remember { mutableStateOf(false) }
     var showNfcDialog by remember { mutableStateOf(false) }
@@ -203,7 +418,7 @@ fun QRDaemonScreen(
             onDismiss = { showFullscreenQr = false }
         )
     }
-    
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -233,7 +448,7 @@ fun QRDaemonScreen(
                 }
             }
         )
-        
+
         LayoutContent(
             appState = appState,
             qrState = qrState,
@@ -287,8 +502,7 @@ fun LayoutContent(
             "error" -> {
                 if (hidden.contains(id)) {
                     null
-                } else
-                if (qrState.errorMessage.isNotEmpty()) {
+                } else if (qrState.errorMessage.isNotEmpty()) {
                     LayoutSectionContent {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -331,22 +545,11 @@ fun LayoutContent(
 fun SettingsScreen(
     viewModel: QRDaemonViewModel,
     appState: AppState,
-    context: ComponentActivity,
+    context: FragmentActivity,
     onBack: () -> Unit
 ) {
     var showLogoutDialog by remember { mutableStateOf(false) }
-    var presetName by remember { mutableStateOf("") }
-    var primaryHex by remember { mutableStateOf("") }
-    var secondaryHex by remember { mutableStateOf("") }
-    var tertiaryHex by remember { mutableStateOf("") }
-
-    val primaryColor = parseColorHex(primaryHex)
-    val secondaryColor = parseColorHex(secondaryHex)
-    val tertiaryColor = parseColorHex(tertiaryHex)
-    val canSavePreset = presetName.isNotBlank()
-        && primaryColor != null
-        && secondaryColor != null
-        && tertiaryColor != null
+    var page by remember { mutableStateOf(SettingsPage.Root) }
 
     if (showLogoutDialog) {
         LogoutDialog(
@@ -366,7 +569,13 @@ fun SettingsScreen(
     ) {
         TopAppBar(
             navigation = {
-                IconButton(onClick = onBack) {
+                IconButton(onClick = {
+                    if (page == SettingsPage.Root) {
+                        onBack()
+                    } else {
+                        page = SettingsPage.Root
+                    }
+                }) {
                     Icon(
                         imageVector = Icons.Filled.ArrowBack,
                         contentDescription = "Back",
@@ -376,189 +585,493 @@ fun SettingsScreen(
             },
             title = {
                 Text(
-                    "Settings",
+                    when (page) {
+                        SettingsPage.Root -> "Settings"
+                        SettingsPage.Layout -> "Layout"
+                        SettingsPage.Security -> "Security"
+                    },
                     color = MaterialTheme.colorScheme.onPrimary,
                     style = MaterialTheme.typography.titleMedium
                 )
             }
         )
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
-            Text(
-                "Theme presets",
-                style = MaterialTheme.typography.titleMedium
+        when (page) {
+            SettingsPage.Root -> SettingsRootContent(
+                appState = appState,
+                context = context,
+                viewModel = viewModel,
+                onLogout = { showLogoutDialog = true },
+                onOpenLayout = { page = SettingsPage.Layout },
+                onOpenSecurity = { page = SettingsPage.Security }
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            SettingsPage.Layout -> LayoutSettingsContent(
+                appState = appState,
+                context = context,
+                viewModel = viewModel
+            )
+            SettingsPage.Security -> SecuritySettingsContent(
+                appState = appState,
+                context = context,
+                viewModel = viewModel
+            )
+        }
+    }
+}
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    appState.themePresets.forEach { preset ->
-                        ThemePresetRow(
-                            preset = preset,
-                            selected = preset.id == appState.selectedThemeId,
-                            onSelect = {
-                                viewModel.selectThemePreset(
-                                    context.applicationContext,
-                                    preset.id
-                                )
-                            }
-                        )
-                    }
-                }
-            }
+private enum class SettingsPage {
+    Root,
+    Layout,
+    Security
+}
 
-            Spacer(modifier = Modifier.height(16.dp))
+@Composable
+fun SettingsRootContent(
+    appState: AppState,
+    context: FragmentActivity,
+    viewModel: QRDaemonViewModel,
+    onLogout: () -> Unit,
+    onOpenLayout: () -> Unit,
+    onOpenSecurity: () -> Unit
+) {
+    var presetName by remember { mutableStateOf("") }
+    var primaryHex by remember { mutableStateOf("") }
+    var secondaryHex by remember { mutableStateOf("") }
+    var tertiaryHex by remember { mutableStateOf("") }
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        "Layout",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    val order = if (appState.layoutOrder.isNotEmpty()) {
-                        appState.layoutOrder
-                    } else {
-                        defaultLayoutOrderIds()
-                    }
-                    val titles = layoutSectionTitles()
-                    val hideable = setOf("status", "nfc", "error")
-                    val hidden = appState.hiddenSections
-                    order.forEachIndexed { index, id ->
-                        LayoutOrderRow(
-                            title = titles[id] ?: id,
-                            canMoveUp = index > 0,
-                            canMoveDown = index < order.lastIndex,
-                            onMoveUp = {
-                                viewModel.moveLayoutItem(
-                                    context.applicationContext,
-                                    id,
-                                    -1
-                                )
-                            },
-                            onMoveDown = {
-                                viewModel.moveLayoutItem(
-                                    context.applicationContext,
-                                    id,
-                                    1
-                                )
-                            },
-                            canToggleVisibility = hideable.contains(id),
-                            visible = !hidden.contains(id),
-                            onToggleVisibility = { visible ->
-                                viewModel.setSectionHidden(
-                                    context.applicationContext,
-                                    id,
-                                    !visible
-                                )
-                            }
-                        )
-                    }
-                }
-            }
+    val primaryColor = parseColorHex(primaryHex)
+    val secondaryColor = parseColorHex(secondaryHex)
+    val tertiaryColor = parseColorHex(tertiaryHex)
+    val canSavePreset = presetName.isNotBlank()
+        && primaryColor != null
+        && secondaryColor != null
+        && tertiaryColor != null
 
-            Spacer(modifier = Modifier.height(16.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(
+            "Theme presets",
+            style = MaterialTheme.typography.titleMedium
+        )
+        Spacer(modifier = Modifier.height(12.dp))
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        "Create preset",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    OutlinedTextField(
-                        value = presetName,
-                        onValueChange = { presetName = it },
-                        label = { Text("Preset name") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    OutlinedTextField(
-                        value = primaryHex,
-                        onValueChange = { primaryHex = it },
-                        label = { Text("Primary hex (RRGGBB or AARRGGBB)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = secondaryHex,
-                        onValueChange = { secondaryHex = it },
-                        label = { Text("Secondary hex (RRGGBB or AARRGGBB)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = tertiaryHex,
-                        onValueChange = { tertiaryHex = it },
-                        label = { Text("Tertiary hex (RRGGBB or AARRGGBB)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ColorPreviewSwatch(label = "P", color = primaryColor)
-                        ColorPreviewSwatch(label = "S", color = secondaryColor)
-                        ColorPreviewSwatch(label = "T", color = tertiaryColor)
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            viewModel.addThemePreset(
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                appState.themePresets.forEach { preset ->
+                    ThemePresetRow(
+                        preset = preset,
+                        selected = preset.id == appState.selectedThemeId,
+                        onSelect = {
+                            viewModel.selectThemePreset(
                                 context.applicationContext,
-                                presetName.trim(),
-                                primaryColor ?: 0xFF000000,
-                                secondaryColor ?: 0xFF000000,
-                                tertiaryColor ?: 0xFF000000
+                                preset.id
                             )
-                            presetName = ""
-                            primaryHex = ""
-                            secondaryHex = ""
-                            tertiaryHex = ""
-                        },
-                        enabled = canSavePreset,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Save preset")
-                    }
+                        }
+                    )
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        "Account",
-                        style = MaterialTheme.typography.titleMedium
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    "Create preset",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = presetName,
+                    onValueChange = { presetName = it },
+                    label = { Text("Preset name") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = primaryHex,
+                    onValueChange = { primaryHex = it },
+                    label = { Text("Primary hex (RRGGBB or AARRGGBB)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = secondaryHex,
+                    onValueChange = { secondaryHex = it },
+                    label = { Text("Secondary hex (RRGGBB or AARRGGBB)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = tertiaryHex,
+                    onValueChange = { tertiaryHex = it },
+                    label = { Text("Tertiary hex (RRGGBB or AARRGGBB)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ColorPreviewSwatch(label = "P", color = primaryColor)
+                    ColorPreviewSwatch(label = "S", color = secondaryColor)
+                    ColorPreviewSwatch(label = "T", color = tertiaryColor)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        viewModel.addThemePreset(
+                            context.applicationContext,
+                            presetName.trim(),
+                            primaryColor ?: 0xFF000000,
+                            secondaryColor ?: 0xFF000000,
+                            tertiaryColor ?: 0xFF000000
+                        )
+                        presetName = ""
+                        primaryHex = ""
+                        secondaryHex = ""
+                        tertiaryHex = ""
+                    },
+                    enabled = canSavePreset,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Save preset")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("Layout", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Reorder or hide sections",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onOpenLayout,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Open layout settings")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("Security", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "PIN, biometrics, and lock timeout",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onOpenSecurity,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Open security settings")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    "Account",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onLogout,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = { showLogoutDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
-                        )
-                    ) {
-                        Text(
-                            "Logout",
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
+                ) {
+                    Text(
+                        "Logout",
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+fun LayoutSettingsContent(
+    appState: AppState,
+    context: FragmentActivity,
+    viewModel: QRDaemonViewModel
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        val order = if (appState.layoutOrder.isNotEmpty()) {
+            appState.layoutOrder
+        } else {
+            defaultLayoutOrderIds()
+        }
+        val titles = layoutSectionTitles()
+        val hideable = setOf("status", "nfc", "error")
+        val hidden = appState.hiddenSections
+        order.forEachIndexed { index, id ->
+            LayoutOrderRow(
+                title = titles[id] ?: id,
+                canMoveUp = index > 0,
+                canMoveDown = index < order.lastIndex,
+                onMoveUp = {
+                    viewModel.moveLayoutItem(
+                        context.applicationContext,
+                        id,
+                        -1
+                    )
+                },
+                onMoveDown = {
+                    viewModel.moveLayoutItem(
+                        context.applicationContext,
+                        id,
+                        1
+                    )
+                },
+                canToggleVisibility = hideable.contains(id),
+                visible = !hidden.contains(id),
+                onToggleVisibility = { visible ->
+                    viewModel.setSectionHidden(
+                        context.applicationContext,
+                        id,
+                        !visible
+                    )
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun SecuritySettingsContent(
+    appState: AppState,
+    context: FragmentActivity,
+    viewModel: QRDaemonViewModel
+) {
+    var showChangePin by remember { mutableStateOf(false) }
+    var customTimeout by remember { mutableStateOf("") }
+    var lastAppliedTimeout by remember { mutableStateOf<Int?>(null) }
+    val timeoutOptions = listOf(0, 30, 60, 300)
+
+    LaunchedEffect(appState.lockTimeoutSeconds) {
+        if (appState.lockTimeoutSeconds !in timeoutOptions) {
+            customTimeout = appState.lockTimeoutSeconds.toString()
+            lastAppliedTimeout = appState.lockTimeoutSeconds
+        }
+    }
+
+    if (showChangePin) {
+        ChangePinDialog(
+            onDismiss = { showChangePin = false },
+            onConfirm = { currentPin, newPin ->
+                viewModel.changePin(
+                    context.applicationContext,
+                    currentPin,
+                    newPin
+                )
+            }
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(
+            "Lock timeout",
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        timeoutOptions.forEach { seconds ->
+            val label = when (seconds) {
+                0 -> "Immediately"
+                30 -> "After 30 seconds"
+                60 -> "After 1 minute"
+                300 -> "After 5 minutes"
+                else -> "After ${seconds}s"
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        viewModel.setLockTimeoutSeconds(
+                            context.applicationContext,
+                            seconds
+                        )
+                    },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = appState.lockTimeoutSeconds == seconds,
+                    onClick = {
+                        viewModel.setLockTimeoutSeconds(
+                            context.applicationContext,
+                            seconds
+                        )
+                    }
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(label)
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = customTimeout,
+            onValueChange = {
+                if (it.length <= 6 && it.all { ch -> ch.isDigit() }) {
+                    customTimeout = it
+                    val value = it.toIntOrNull()
+                    if (value != null && value >= 0 && value != lastAppliedTimeout) {
+                        viewModel.setLockTimeoutSeconds(
+                            context.applicationContext,
+                            value
+                        )
+                        lastAppliedTimeout = value
+                    }
+                }
+            },
+            label = { Text("Custom seconds") },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Biometrics",
+                modifier = Modifier.weight(1f),
+                fontWeight = FontWeight.Medium
+            )
+            Switch(
+                checked = appState.biometricEnabled,
+                onCheckedChange = {
+                    viewModel.setBiometricEnabled(
+                        context.applicationContext,
+                        it
+                    )
+                }
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Button(
+            onClick = { showChangePin = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Change PIN")
+        }
+    }
+}
+
+@Composable
+fun ChangePinDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String, String) -> Boolean
+) {
+    var currentPin by remember { mutableStateOf("") }
+    var newPin by remember { mutableStateOf("") }
+    var confirmPin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Change PIN") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = currentPin,
+                    onValueChange = {
+                        if (it.length <= 8 && it.all { ch -> ch.isDigit() }) currentPin = it
+                    },
+                    label = { Text("Current PIN") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = newPin,
+                    onValueChange = {
+                        if (it.length <= 8 && it.all { ch -> ch.isDigit() }) newPin = it
+                    },
+                    label = { Text("New PIN (4-8 digits)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = confirmPin,
+                    onValueChange = {
+                        if (it.length <= 8 && it.all { ch -> ch.isDigit() }) confirmPin = it
+                    },
+                    label = { Text("Confirm new PIN") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (error.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                error = when {
+                    currentPin.length < 4 -> "Enter your current PIN."
+                    newPin.length < 4 -> "New PIN must be at least 4 digits."
+                    newPin != confirmPin -> "New PINs do not match."
+                    else -> ""
+                }
+                if (error.isNotEmpty()) return@Button
+                val ok = onConfirm(currentPin, newPin)
+                if (ok) {
+                    onDismiss()
+                } else {
+                    error = "Current PIN is incorrect."
+                }
+            }) {
+                Text("Update")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
@@ -625,9 +1138,9 @@ fun StatusCard(qrState: QRState) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (qrState.isPolling) 
-                MaterialTheme.colorScheme.primaryContainer 
-            else 
+            containerColor = if (qrState.isPolling)
+                MaterialTheme.colorScheme.primaryContainer
+            else
                 MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
@@ -640,21 +1153,21 @@ fun StatusCard(qrState: QRState) {
                 Text("Status:", fontWeight = FontWeight.Bold)
                 Text(
                     if (qrState.isPolling) "Polling Active" else "Polling Paused",
-                    color = if (qrState.isPolling) 
-                        MaterialTheme.colorScheme.onPrimaryContainer 
-                    else 
+                    color = if (qrState.isPolling)
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    else
                         MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             Text(
                 "Last Update: ${formatTime(qrState.lastUpdateTime)}",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            
+
             if (qrState.statusMessage.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -707,7 +1220,7 @@ fun QRCodeDisplay(qrState: QRState, onShowFullscreen: () -> Unit) {
                     )
                 }
             }
-            
+
             if (qrState.qrBitmap != null) {
                 val size = QRDaemonConfig.QR_CODE_SIZE.dp
                 Image(
@@ -743,7 +1256,7 @@ fun PlaceholderQRCode(onShowFullscreen: () -> Unit = {}) {
 @Composable
 fun FullscreenQrDialog(
     qrState: QRState,
-    context: ComponentActivity,
+    context: FragmentActivity,
     onDismiss: () -> Unit
 ) {
     val window = context.window
@@ -982,17 +1495,17 @@ fun ControlButtonsRow(
                 .weight(1f)
                 .height(48.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (qrState.isPolling) 
-                    MaterialTheme.colorScheme.errorContainer 
-                else 
+                containerColor = if (qrState.isPolling)
+                    MaterialTheme.colorScheme.errorContainer
+                else
                     MaterialTheme.colorScheme.primaryContainer
             )
         ) {
             Text(
                 if (qrState.isPolling) "Stop" else "Get QR",
-                color = if (qrState.isPolling) 
-                    MaterialTheme.colorScheme.onErrorContainer 
-                else 
+                color = if (qrState.isPolling)
+                    MaterialTheme.colorScheme.onErrorContainer
+                else
                     MaterialTheme.colorScheme.onPrimaryContainer
             )
         }
