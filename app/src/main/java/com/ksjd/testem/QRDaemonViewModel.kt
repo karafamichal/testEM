@@ -84,11 +84,14 @@ class QRDaemonViewModel : ViewModel() {
         "error"
     )
 
+    private val defaultHiddenSections = setOf("error")
+
     init {
         _appState.value = _appState.value.copy(
             themePresets = defaultThemePresets,
             selectedThemeId = defaultThemePresets.first().id,
-            layoutOrder = defaultLayoutOrder
+            layoutOrder = defaultLayoutOrder,
+            hiddenSections = defaultHiddenSections
         )
     }
 
@@ -158,7 +161,13 @@ class QRDaemonViewModel : ViewModel() {
         val manager = credentialsManager ?: CredentialsManager(context)
         credentialsManager = manager
         val order = manager.getLayoutOrder(defaultLayoutOrder)
-        val hidden = manager.getHiddenSections()
+        val storedHidden = manager.getHiddenSections()
+        val hidden = if (storedHidden.isEmpty()) {
+            manager.saveHiddenSections(defaultHiddenSections)
+            defaultHiddenSections
+        } else {
+            storedHidden
+        }
         _appState.value = _appState.value.copy(
             layoutOrder = order,
             hiddenSections = hidden
