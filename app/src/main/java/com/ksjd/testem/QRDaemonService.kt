@@ -21,6 +21,11 @@ data class TokenResponse(
     val data: String
 )
 
+data class QrTokenPayload(
+    val rawBase64: String,
+    val decodedBytes: ByteArray
+)
+
 class QRDaemonService(
     private val baseUrl: String,
     private val username: String,
@@ -156,6 +161,7 @@ class QRDaemonService(
     private val TAG = "QRDaemon"
     
     private var lastTokenHex: String? = null
+    private var lastTokenBase64: String? = null
     private var serialNumber: String = initialSerialNumber
     private var nfcUid: String = initialNfcUid
     private var nfcEnabled: Boolean = initialNfcEnabled
@@ -648,25 +654,31 @@ class QRDaemonService(
             try {
                 onStatus("[POLL] Loop iteration starting…")
                 onStatus("Fetching token…")
-                val tokenBytes = fetchQRToken()
-                Log.d(TAG, "fetchQRToken returned ${tokenBytes.size} bytes")
+                val payload = fetchQRToken()
+                if (payload == null) {
+                    Log.w(TAG, "Empty token payload - will retry")
+                    onStatus("No token yet - retrying in 1.5s")
+                    delay(1500)
+                    continue
+                }
+                Log.d(TAG, "fetchQRToken returned ${payload.decodedBytes.size} bytes")
                 
-                if (tokenBytes.isEmpty()) {
+                if (payload.decodedBytes.isEmpty() || payload.rawBase64.isBlank()) {
                     Log.w(TAG, "Empty token payload - will retry")
                     onStatus("No token yet - retrying in 1.5s")
                     delay(1500)
                     continue
                 }
                 
-                val hex = bytesToHex(tokenBytes)
+                val hex = bytesToHex(payload.decodedBytes)
                 
                 // Only update if token changed
-                if (hex != lastTokenHex) {
+                if (hex != lastTokenHex || payload.rawBase64 != lastTokenBase64) {
                     lastTokenHex = hex
-                    val base64 = Base64.encodeToString(tokenBytes, Base64.NO_WRAP).replace("+", " ")
+                    lastTokenBase64 = payload.rawBase64
                     
                     Log.d(TAG, "New token: $hex")
-                    onTokenUpdate(hex, base64)
+                    onTokenUpdate(hex, payload.rawBase64)
                     onStatus("Token updated")
                 }
                 
@@ -697,11 +709,11 @@ class QRDaemonService(
         }
     }
 
-    private suspend fun fetchQRToken(): ByteArray {
+    private suspend fun fetchQRToken(): QrTokenPayload? {
         val identifier = if (nfcEnabled && nfcUid.isNotBlank()) nfcUid else serialNumber
         if (identifier.isBlank()) {
             onStatus("No SNR yet - waiting")
-            return ByteArray(0)
+            return null
         }
         onStatus("[FETCH] Building token request…")
         val body = FormBody.Builder()
@@ -791,7 +803,7 @@ class QRDaemonService(
                 if (response.code != 200) {
                     val snippet = responseBody.take(120).replace("\n", " ").replace("\r", " ")
                     onStatus("Token HTTP ${response.code}: $snippet")
-                    return ByteArray(0)
+                    return null
                 }
                 
                 try {
@@ -806,7 +818,7 @@ class QRDaemonService(
                     if (!success || (data.isEmpty() && base64Field.isEmpty())) {
                         Log.w(TAG, "No token available: $responseBody")
                         onStatus("No token available - waiting")
-                        return ByteArray(0)
+                        return null
                     }
 
                     val rawToken = if (base64Field.isNotBlank()) base64Field else data
@@ -819,17 +831,20 @@ class QRDaemonService(
                     val flags = if (needsUrlSafe) Base64.URL_SAFE or Base64.NO_WRAP else Base64.NO_WRAP
                     val decoded = Base64.decode(padded, flags)
                     authFailures = 0
-                    decoded
+                    QrTokenPayload(
+                        rawBase64 = normalized,
+                        decodedBytes = decoded
+                    )
                     
                 } catch (e: IllegalArgumentException) {
                     Log.e(TAG, "Invalid base64: $responseBody")
                     onStatus("Invalid token format")
-                    return ByteArray(0)
+                    return null
                 } catch (e: Exception) {
                     Log.e(TAG, "Token parse error: ${e.message}", e)
                     val snippet = responseBody.take(120).replace("\n", " ").replace("\r", " ")
                     onStatus("Token parse error: ${e.message}")
-                    return ByteArray(0)
+                    return null
                 }
             }
         } catch (e: Exception) {
@@ -841,7 +856,7 @@ class QRDaemonService(
             } else {
                 // For other errors, log and return empty to continue polling
                 onStatus("Token request error: ${e.message}")
-                return ByteArray(0)
+                return null
             }
         }
     }

@@ -400,7 +400,8 @@ class QRDaemonViewModel : ViewModel() {
                         )
                     } else {
                         val size = QRDaemonConfig.QR_CODE_SIZE
-                        val bitmap = QRCodeGenerator.generateQRCode(base64, size, size)
+                        val bitmap = decodeTemplateBitmap(base64)
+                            ?: QRCodeGenerator.generateQRCode(base64, size, size)
                         current.copy(
                             qrBitmap = bitmap,
                             tokenHex = hex,
@@ -513,7 +514,8 @@ class QRDaemonViewModel : ViewModel() {
             )
         } else if (!enabling && _qrState.value.tokenBase64.isNotBlank()) {
             val size = QRDaemonConfig.QR_CODE_SIZE
-            val bitmap = QRCodeGenerator.generateQRCode(_qrState.value.tokenBase64, size, size)
+            val bitmap = decodeTemplateBitmap(_qrState.value.tokenBase64)
+                ?: QRCodeGenerator.generateQRCode(_qrState.value.tokenBase64, size, size)
             _qrState.value = _qrState.value.copy(
                 qrBitmap = bitmap,
                 statusMessage = "Token updated"
