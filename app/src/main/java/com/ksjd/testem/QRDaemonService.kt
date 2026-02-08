@@ -832,7 +832,7 @@ class QRDaemonService(
                     val decoded = Base64.decode(padded, flags)
                     authFailures = 0
                     QrTokenPayload(
-                        rawBase64 = normalized,
+                        rawBase64 = rawToken,
                         decodedBytes = decoded
                     )
                     
