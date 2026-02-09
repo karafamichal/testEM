@@ -29,7 +29,15 @@ android {
     signingConfigs {
         create("release") {
             if (keystorePropertiesFile.exists()) {
-                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
+                val storeFilePath = (keystoreProperties["storeFile"] as String?)?.trim().orEmpty()
+                val resolvedStoreFile = when {
+                    storeFilePath.isBlank() -> rootProject.file("app/testEM-release.keystore")
+                    storeFilePath.endsWith(".properties", ignoreCase = true) -> {
+                        rootProject.file("app/testEM-release.keystore")
+                    }
+                    else -> rootProject.file(storeFilePath)
+                }
+                storeFile = resolvedStoreFile
                 storePassword = keystoreProperties["storePassword"] as String
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
