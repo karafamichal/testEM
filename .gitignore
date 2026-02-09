@@ -10,6 +10,14 @@
 .cxx
 local.properties
 
+# Local signing/config files
+/keystore.properties
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.pk8
+
 *.jks
 *.apk
 *.aab
