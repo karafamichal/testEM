@@ -18,6 +18,10 @@ local.properties
 *.pem
 *.pk8
 
+# Local helper scripts (not needed in repo)
+/build.bat
+/BUILD_REFERENCE.bat
+
 *.jks
 *.apk
 *.aab
