@@ -11,7 +11,7 @@
 local.properties
 
 # Local signing/config files
-/keystore.properties
+keystore.properties
 *.keystore
 *.p12
 *.pfx
@@ -19,8 +19,8 @@ local.properties
 *.pk8
 
 # Local helper scripts (not needed in repo)
-/build.bat
-/BUILD_REFERENCE.bat
+build.bat
+BUILD_REFERENCE.bat
 
 *.jks
 *.apk

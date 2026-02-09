@@ -61,6 +61,7 @@ Artifacts:
 - Token polling interval is 25 seconds.
 - If QR updates stall, verify network connectivity and login status.
 - This app does not guarantee that a vehicle inspector will see your ticket as valid in their system.
+- NFC mode is early-stage and may not work reliably.
 
 ## Documentation
 - [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)
