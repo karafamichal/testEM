@@ -38,7 +38,8 @@ data class AppState(
     val isPinSet: Boolean = false,
     val isAppUnlocked: Boolean = false,
     val biometricEnabled: Boolean = true,
-    val lockTimeoutSeconds: Int = 0
+    val lockTimeoutSeconds: Int = 0,
+    val languageCode: String = "sk"
 )
 
 class QRDaemonViewModel : ViewModel() {
@@ -84,7 +85,7 @@ class QRDaemonViewModel : ViewModel() {
         "error"
     )
 
-    private val defaultHiddenSections = setOf("error")
+    private val defaultHiddenSections = setOf("error", "nfc")
 
     init {
         _appState.value = _appState.value.copy(
@@ -132,6 +133,7 @@ class QRDaemonViewModel : ViewModel() {
         loadThemeSettings(context)
         loadLayoutSettings(context)
         loadSecuritySettings(context)
+        loadLanguageSettings(context)
         if (!manager.isConfigured()) return
 
         val (email, password, serialNumber) = manager.getCredentials()
@@ -197,6 +199,13 @@ class QRDaemonViewModel : ViewModel() {
         )
     }
 
+    fun loadLanguageSettings(context: Context) {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        val languageCode = manager.getLanguageCode()
+        _appState.value = _appState.value.copy(languageCode = languageCode)
+    }
+
     fun setPin(context: Context, pin: String) {
         val manager = credentialsManager ?: CredentialsManager(context)
         credentialsManager = manager
@@ -237,6 +246,13 @@ class QRDaemonViewModel : ViewModel() {
         credentialsManager = manager
         manager.saveLockTimeoutSeconds(seconds)
         _appState.value = _appState.value.copy(lockTimeoutSeconds = seconds)
+    }
+
+    fun setLanguageCode(context: Context, languageCode: String) {
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        manager.saveLanguageCode(languageCode)
+        _appState.value = _appState.value.copy(languageCode = languageCode)
     }
 
     fun onAppBackgrounded() {
@@ -369,7 +385,8 @@ class QRDaemonViewModel : ViewModel() {
             nfcUid = current.nfcUid,
             nfcEnabled = current.nfcEnabled,
             themePresets = current.themePresets,
-            selectedThemeId = current.selectedThemeId
+            selectedThemeId = current.selectedThemeId,
+            languageCode = current.languageCode
         )
         _qrState.value = QRState()
     }

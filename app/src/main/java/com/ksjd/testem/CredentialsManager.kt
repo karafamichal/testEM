@@ -156,6 +156,14 @@ class CredentialsManager(context: Context) {
         return prefs.getInt("lock_timeout_seconds", 0)
     }
 
+    fun saveLanguageCode(code: String) {
+        prefs.edit().putString("language_code", code).apply()
+    }
+
+    fun getLanguageCode(): String {
+        return prefs.getString("language_code", "sk") ?: "sk"
+    }
+
     private fun hashPin(pin: String, salt: ByteArray): ByteArray {
         val digest = MessageDigest.getInstance("SHA-256")
         digest.update(salt)

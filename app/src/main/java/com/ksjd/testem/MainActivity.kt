@@ -646,6 +646,11 @@ fun SettingsRootContent(
         && primaryColor != null
         && secondaryColor != null
         && tertiaryColor != null
+    val languageOptions = listOf(
+        "sk" to "Slovak (preferred)",
+        "en" to "English"
+    )
+    val nfcVisible = !appState.hiddenSections.contains("nfc")
 
     Column(
         modifier = Modifier
@@ -744,6 +749,73 @@ fun SettingsRootContent(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Save preset")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    "Language",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                languageOptions.forEach { (code, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.setLanguageCode(
+                                    context.applicationContext,
+                                    code
+                                )
+                            },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = appState.languageCode == code,
+                            onClick = {
+                                viewModel.setLanguageCode(
+                                    context.applicationContext,
+                                    code
+                                )
+                            }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(label)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("NFC button", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        if (nfcVisible) "Shown on main screen" else "Hidden on main screen",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = nfcVisible,
+                        onCheckedChange = { visible ->
+                            viewModel.setSectionHidden(
+                                context.applicationContext,
+                                "nfc",
+                                !visible
+                            )
+                        }
+                    )
                 }
             }
         }
