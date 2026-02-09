@@ -107,6 +107,8 @@ fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
     var pin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
+    val pinTooShortMessage = stringResource(R.string.pin_error_too_short)
+    val pinMismatchMessage = stringResource(R.string.pin_error_mismatch)
 
     Column(
         modifier = Modifier
@@ -155,8 +157,8 @@ fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
         Button(
             onClick = {
                 error = when {
-                    pin.length < 4 -> stringResource(R.string.pin_error_too_short)
-                    pin != confirmPin -> stringResource(R.string.pin_error_mismatch)
+                    pin.length < 4 -> pinTooShortMessage
+                    pin != confirmPin -> pinMismatchMessage
                     else -> ""
                 }
                 if (error.isEmpty()) {
@@ -177,6 +179,7 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var hasPrompted by remember { mutableStateOf(false) }
+    val incorrectPinMessage = stringResource(R.string.pin_error_incorrect)
 
     val biometricManager = remember { BiometricManager.from(context) }
     val canAuthenticate = biometricManager.canAuthenticate(
@@ -248,7 +251,7 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
         Button(
             onClick = {
                 val ok = viewModel.verifyPin(context.applicationContext, pin)
-                error = if (ok) "" else stringResource(R.string.pin_error_incorrect)
+                error = if (ok) "" else incorrectPinMessage
                 if (ok) pin = ""
             },
             modifier = Modifier.fillMaxWidth()
@@ -1057,6 +1060,10 @@ fun ChangePinDialog(
     var newPin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
+    val enterCurrentMessage = stringResource(R.string.change_pin_error_enter_current)
+    val newPinShortMessage = stringResource(R.string.change_pin_error_new_short)
+    val pinMismatchMessage = stringResource(R.string.change_pin_error_mismatch)
+    val incorrectPinMessage = stringResource(R.string.change_pin_error_incorrect)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1104,9 +1111,9 @@ fun ChangePinDialog(
         confirmButton = {
             Button(onClick = {
                 error = when {
-                    currentPin.length < 4 -> stringResource(R.string.change_pin_error_enter_current)
-                    newPin.length < 4 -> stringResource(R.string.change_pin_error_new_short)
-                    newPin != confirmPin -> stringResource(R.string.change_pin_error_mismatch)
+                    currentPin.length < 4 -> enterCurrentMessage
+                    newPin.length < 4 -> newPinShortMessage
+                    newPin != confirmPin -> pinMismatchMessage
                     else -> ""
                 }
                 if (error.isNotEmpty()) return@Button
@@ -1114,7 +1121,7 @@ fun ChangePinDialog(
                 if (ok) {
                     onDismiss()
                 } else {
-                    error = stringResource(R.string.change_pin_error_incorrect)
+                    error = incorrectPinMessage
                 }
             }) {
                 Text(stringResource(R.string.update_button))
