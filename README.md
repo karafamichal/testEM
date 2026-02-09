@@ -62,6 +62,7 @@ Artifacts:
 - If QR updates stall, verify network connectivity and login status.
 - This app does not guarantee that a vehicle inspector will see your ticket as valid in their system.
 - NFC mode is early-stage and may not work reliably.
+- This is an unofficial client for sadzv.qrbus.me, which is owned by EMtest. This app is not affiliated with or endorsed by EMtest.
 
 ## Documentation
 - [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)
