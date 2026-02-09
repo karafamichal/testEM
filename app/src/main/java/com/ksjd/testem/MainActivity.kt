@@ -2,6 +2,7 @@ package com.ksjd.testem
 
 import android.view.WindowManager
 import androidx.activity.compose.setContent
+import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.Image
@@ -44,7 +45,7 @@ import com.ksjd.testem.ui.theme.TestEMTheme
 import java.text.SimpleDateFormat
 import java.util.*
 
-class MainActivity : FragmentActivity() {
+class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
