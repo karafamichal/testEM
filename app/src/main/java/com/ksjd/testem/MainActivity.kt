@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -114,10 +115,10 @@ fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Set App PIN", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.pin_setup_title), fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            "Create a PIN to unlock the app before login.",
+            stringResource(R.string.pin_setup_subtitle),
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -128,7 +129,7 @@ fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
             onValueChange = {
                 if (it.length <= 8 && it.all { ch -> ch.isDigit() }) pin = it
             },
-            label = { Text("PIN (4-8 digits)") },
+            label = { Text(stringResource(R.string.pin_label_range)) },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
             visualTransformation = PasswordVisualTransformation()
@@ -139,7 +140,7 @@ fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
             onValueChange = {
                 if (it.length <= 8 && it.all { ch -> ch.isDigit() }) confirmPin = it
             },
-            label = { Text("Confirm PIN") },
+            label = { Text(stringResource(R.string.pin_label_confirm)) },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
             visualTransformation = PasswordVisualTransformation()
@@ -154,8 +155,8 @@ fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
         Button(
             onClick = {
                 error = when {
-                    pin.length < 4 -> "PIN must be at least 4 digits."
-                    pin != confirmPin -> "PINs do not match."
+                    pin.length < 4 -> stringResource(R.string.pin_error_too_short)
+                    pin != confirmPin -> stringResource(R.string.pin_error_mismatch)
                     else -> ""
                 }
                 if (error.isEmpty()) {
@@ -166,7 +167,7 @@ fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Save PIN")
+            Text(stringResource(R.string.pin_save_button))
         }
     }
 }
@@ -190,13 +191,17 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
         },
         onError = { message ->
             error = message
-        }
+        },
+        onFailedMessage = stringResource(R.string.biometric_not_recognized)
     )
-    val promptInfo = remember {
+    val promptTitle = stringResource(R.string.unlock_prompt_title)
+    val promptSubtitle = stringResource(R.string.unlock_prompt_subtitle)
+    val promptNegative = stringResource(R.string.unlock_prompt_use_pin)
+    val promptInfo = remember(promptTitle, promptSubtitle, promptNegative) {
         BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Unlock app")
-            .setSubtitle("Use biometrics to continue")
-            .setNegativeButtonText("Use PIN")
+            .setTitle(promptTitle)
+            .setSubtitle(promptSubtitle)
+            .setNegativeButtonText(promptNegative)
             .build()
     }
 
@@ -214,10 +219,10 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Unlock", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.unlock_title), fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            "Enter your PIN or use biometrics.",
+            stringResource(R.string.unlock_subtitle),
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -228,7 +233,7 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
             onValueChange = {
                 if (it.length <= 8 && it.all { ch -> ch.isDigit() }) pin = it
             },
-            label = { Text("PIN") },
+            label = { Text(stringResource(R.string.pin_label)) },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
             visualTransformation = PasswordVisualTransformation()
@@ -243,12 +248,12 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
         Button(
             onClick = {
                 val ok = viewModel.verifyPin(context.applicationContext, pin)
-                error = if (ok) "" else "Incorrect PIN."
+                error = if (ok) "" else stringResource(R.string.pin_error_incorrect)
                 if (ok) pin = ""
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Unlock")
+            Text(stringResource(R.string.unlock_button))
         }
 
         if (biometricsAvailable && appState.biometricEnabled) {
@@ -257,7 +262,7 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
                 onClick = { prompt.authenticate(promptInfo) },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Use biometrics")
+                Text(stringResource(R.string.use_biometrics))
             }
         }
     }
@@ -267,10 +272,12 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
 fun rememberBiometricPrompt(
     activity: FragmentActivity,
     onSuccess: () -> Unit,
-    onError: (String) -> Unit
+    onError: (String) -> Unit,
+    onFailedMessage: String
 ): BiometricPrompt {
     val onSuccessState by rememberUpdatedState(onSuccess)
     val onErrorState by rememberUpdatedState(onError)
+    val onFailedMessageState by rememberUpdatedState(onFailedMessage)
     val executor = remember { ContextCompat.getMainExecutor(activity) }
     return remember {
         BiometricPrompt(
@@ -286,7 +293,7 @@ fun rememberBiometricPrompt(
                 }
 
                 override fun onAuthenticationFailed() {
-                    onErrorState("Biometric not recognized.")
+                    onErrorState(onFailedMessageState)
                 }
             }
         )
@@ -307,13 +314,13 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Fragm
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            "testEM",
+            stringResource(R.string.app_name),
             fontSize = 32.sp,
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
         Text(
-            "Real-time QR Token Generator",
+            stringResource(R.string.login_subtitle),
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 32.dp)
@@ -322,7 +329,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Fragm
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
-            label = { Text("Email") },
+            label = { Text(stringResource(R.string.email_label)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 16.dp),
@@ -333,7 +340,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Fragm
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("Password") },
+            label = { Text(stringResource(R.string.password_label)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 16.dp),
@@ -368,7 +375,7 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Fragm
             if (appState.isLoading) {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp))
             } else {
-                Text("Login")
+                Text(stringResource(R.string.login_button))
             }
         }
     }
@@ -426,7 +433,7 @@ fun QRDaemonScreen(
     ) {
         TopAppBar(
             title = {
-                val name = qrState.userName.ifBlank { "testEM" }
+                val name = qrState.userName.ifBlank { stringResource(R.string.app_name) }
                 val topBarStyle = MaterialTheme.typography.titleMedium
                 TextButton(onClick = { showAccountDialog = true }) {
                     Text(
@@ -441,7 +448,7 @@ fun QRDaemonScreen(
                     IconButton(onClick = { showSettings = true }) {
                         Icon(
                             imageVector = Icons.Filled.Settings,
-                            contentDescription = "Settings",
+                            contentDescription = stringResource(R.string.settings_content_desc),
                             tint = MaterialTheme.colorScheme.onPrimary
                         )
                     }
@@ -578,7 +585,7 @@ fun SettingsScreen(
                 }) {
                     Icon(
                         imageVector = Icons.Filled.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.back),
                         tint = MaterialTheme.colorScheme.onPrimary
                     )
                 }
@@ -586,9 +593,9 @@ fun SettingsScreen(
             title = {
                 Text(
                     when (page) {
-                        SettingsPage.Root -> "Settings"
-                        SettingsPage.Layout -> "Layout"
-                        SettingsPage.Security -> "Security"
+                        SettingsPage.Root -> stringResource(R.string.settings_title)
+                        SettingsPage.Layout -> stringResource(R.string.layout_title)
+                        SettingsPage.Security -> stringResource(R.string.security_title)
                     },
                     color = MaterialTheme.colorScheme.onPrimary,
                     style = MaterialTheme.typography.titleMedium
@@ -647,10 +654,9 @@ fun SettingsRootContent(
         && secondaryColor != null
         && tertiaryColor != null
     val languageOptions = listOf(
-        "sk" to "Slovak (preferred)",
-        "en" to "English"
+        "sk" to stringResource(R.string.language_slovak_preferred),
+        "en" to stringResource(R.string.language_english)
     )
-    val nfcVisible = !appState.hiddenSections.contains("nfc")
 
     Column(
         modifier = Modifier
@@ -659,7 +665,7 @@ fun SettingsRootContent(
             .verticalScroll(rememberScrollState())
     ) {
         Text(
-            "Theme presets",
+            stringResource(R.string.theme_presets_title),
             style = MaterialTheme.typography.titleMedium
         )
         Spacer(modifier = Modifier.height(12.dp))
@@ -686,7 +692,7 @@ fun SettingsRootContent(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    "Create preset",
+                    stringResource(R.string.create_preset_title),
                     style = MaterialTheme.typography.titleMedium
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -694,7 +700,7 @@ fun SettingsRootContent(
                 OutlinedTextField(
                     value = presetName,
                     onValueChange = { presetName = it },
-                    label = { Text("Preset name") },
+                    label = { Text(stringResource(R.string.preset_name_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -702,7 +708,7 @@ fun SettingsRootContent(
                 OutlinedTextField(
                     value = primaryHex,
                     onValueChange = { primaryHex = it },
-                    label = { Text("Primary hex (RRGGBB or AARRGGBB)") },
+                    label = { Text(stringResource(R.string.primary_hex_label)) },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
                 )
@@ -710,7 +716,7 @@ fun SettingsRootContent(
                 OutlinedTextField(
                     value = secondaryHex,
                     onValueChange = { secondaryHex = it },
-                    label = { Text("Secondary hex (RRGGBB or AARRGGBB)") },
+                    label = { Text(stringResource(R.string.secondary_hex_label)) },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
                 )
@@ -718,7 +724,7 @@ fun SettingsRootContent(
                 OutlinedTextField(
                     value = tertiaryHex,
                     onValueChange = { tertiaryHex = it },
-                    label = { Text("Tertiary hex (RRGGBB or AARRGGBB)") },
+                    label = { Text(stringResource(R.string.tertiary_hex_label)) },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
                 )
@@ -748,7 +754,7 @@ fun SettingsRootContent(
                     enabled = canSavePreset,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Save preset")
+                    Text(stringResource(R.string.save_preset))
                 }
             }
         }
@@ -758,7 +764,7 @@ fun SettingsRootContent(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    "Language",
+                    stringResource(R.string.language_title),
                     style = MaterialTheme.typography.titleMedium
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -794,40 +800,10 @@ fun SettingsRootContent(
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Text("NFC button", style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        if (nfcVisible) "Shown on main screen" else "Hidden on main screen",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Switch(
-                        checked = nfcVisible,
-                        onCheckedChange = { visible ->
-                            viewModel.setSectionHidden(
-                                context.applicationContext,
-                                "nfc",
-                                !visible
-                            )
-                        }
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text("Layout", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.layout_title), style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "Reorder or hide sections",
+                    stringResource(R.string.layout_subtitle),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -836,7 +812,7 @@ fun SettingsRootContent(
                     onClick = onOpenLayout,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Open layout settings")
+                    Text(stringResource(R.string.open_layout_settings))
                 }
             }
         }
@@ -845,10 +821,10 @@ fun SettingsRootContent(
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Text("Security", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.security_title), style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "PIN, biometrics, and lock timeout",
+                    stringResource(R.string.security_subtitle),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -857,7 +833,7 @@ fun SettingsRootContent(
                     onClick = onOpenSecurity,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Open security settings")
+                    Text(stringResource(R.string.open_security_settings))
                 }
             }
         }
@@ -867,7 +843,7 @@ fun SettingsRootContent(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    "Account",
+                    stringResource(R.string.account_title),
                     style = MaterialTheme.typography.titleMedium
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -879,7 +855,7 @@ fun SettingsRootContent(
                     )
                 ) {
                     Text(
-                        "Logout",
+                        stringResource(R.string.logout),
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )
                 }
@@ -905,7 +881,13 @@ fun LayoutSettingsContent(
         } else {
             defaultLayoutOrderIds()
         }
-        val titles = layoutSectionTitles()
+        val titles = mapOf(
+            "status" to stringResource(R.string.section_polling_status),
+            "qr" to stringResource(R.string.section_qr_code),
+            "nfc" to stringResource(R.string.section_nfc_button),
+            "controls" to stringResource(R.string.section_controls),
+            "error" to stringResource(R.string.section_errors)
+        )
         val hideable = setOf("status", "nfc", "error")
         val hidden = appState.hiddenSections
         order.forEachIndexed { index, id ->
@@ -979,17 +961,17 @@ fun SecuritySettingsContent(
             .verticalScroll(rememberScrollState())
     ) {
         Text(
-            "Lock timeout",
+            stringResource(R.string.lock_timeout_title),
             fontWeight = FontWeight.Medium
         )
         Spacer(modifier = Modifier.height(8.dp))
         timeoutOptions.forEach { seconds ->
             val label = when (seconds) {
-                0 -> "Immediately"
-                30 -> "After 30 seconds"
-                60 -> "After 1 minute"
-                300 -> "After 5 minutes"
-                else -> "After ${seconds}s"
+                0 -> stringResource(R.string.lock_timeout_immediately)
+                30 -> stringResource(R.string.lock_timeout_30_seconds)
+                60 -> stringResource(R.string.lock_timeout_1_minute)
+                300 -> stringResource(R.string.lock_timeout_5_minutes)
+                else -> stringResource(R.string.lock_timeout_seconds, seconds)
             }
             Row(
                 modifier = Modifier
@@ -1031,7 +1013,7 @@ fun SecuritySettingsContent(
                     }
                 }
             },
-            label = { Text("Custom seconds") },
+            label = { Text(stringResource(R.string.custom_seconds_label)) },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
         )
@@ -1042,7 +1024,7 @@ fun SecuritySettingsContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "Biometrics",
+                stringResource(R.string.biometrics_label),
                 modifier = Modifier.weight(1f),
                 fontWeight = FontWeight.Medium
             )
@@ -1061,7 +1043,7 @@ fun SecuritySettingsContent(
             onClick = { showChangePin = true },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Change PIN")
+            Text(stringResource(R.string.change_pin_button))
         }
     }
 }
@@ -1078,7 +1060,7 @@ fun ChangePinDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Change PIN") },
+        title = { Text(stringResource(R.string.change_pin_title)) },
         text = {
             Column {
                 OutlinedTextField(
@@ -1086,7 +1068,7 @@ fun ChangePinDialog(
                     onValueChange = {
                         if (it.length <= 8 && it.all { ch -> ch.isDigit() }) currentPin = it
                     },
-                    label = { Text("Current PIN") },
+                    label = { Text(stringResource(R.string.current_pin_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
@@ -1097,7 +1079,7 @@ fun ChangePinDialog(
                     onValueChange = {
                         if (it.length <= 8 && it.all { ch -> ch.isDigit() }) newPin = it
                     },
-                    label = { Text("New PIN (4-8 digits)") },
+                    label = { Text(stringResource(R.string.new_pin_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
@@ -1108,7 +1090,7 @@ fun ChangePinDialog(
                     onValueChange = {
                         if (it.length <= 8 && it.all { ch -> ch.isDigit() }) confirmPin = it
                     },
-                    label = { Text("Confirm new PIN") },
+                    label = { Text(stringResource(R.string.confirm_new_pin_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
@@ -1122,9 +1104,9 @@ fun ChangePinDialog(
         confirmButton = {
             Button(onClick = {
                 error = when {
-                    currentPin.length < 4 -> "Enter your current PIN."
-                    newPin.length < 4 -> "New PIN must be at least 4 digits."
-                    newPin != confirmPin -> "New PINs do not match."
+                    currentPin.length < 4 -> stringResource(R.string.change_pin_error_enter_current)
+                    newPin.length < 4 -> stringResource(R.string.change_pin_error_new_short)
+                    newPin != confirmPin -> stringResource(R.string.change_pin_error_mismatch)
                     else -> ""
                 }
                 if (error.isNotEmpty()) return@Button
@@ -1132,15 +1114,15 @@ fun ChangePinDialog(
                 if (ok) {
                     onDismiss()
                 } else {
-                    error = "Current PIN is incorrect."
+                    error = stringResource(R.string.change_pin_error_incorrect)
                 }
             }) {
-                Text("Update")
+                Text(stringResource(R.string.update_button))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.cancel))
             }
         }
     )
@@ -1164,7 +1146,7 @@ fun ThemePresetRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(preset.name, fontWeight = FontWeight.Medium)
             Text(
-                "Primary / Secondary / Tertiary",
+                stringResource(R.string.preset_palette_label),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1222,9 +1204,9 @@ fun StatusCard(qrState: QRState) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Status:", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.status_label), fontWeight = FontWeight.Bold)
                 Text(
-                    if (qrState.isPolling) "Polling Active" else "Polling Paused",
+                    if (qrState.isPolling) stringResource(R.string.polling_active) else stringResource(R.string.polling_paused),
                     color = if (qrState.isPolling)
                         MaterialTheme.colorScheme.onPrimaryContainer
                     else
@@ -1235,7 +1217,10 @@ fun StatusCard(qrState: QRState) {
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                "Last Update: ${formatTime(qrState.lastUpdateTime)}",
+                stringResource(
+                    R.string.last_update_label,
+                    formatTime(qrState.lastUpdateTime, stringResource(R.string.never_label))
+                ),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1282,13 +1267,13 @@ fun QRCodeDisplay(qrState: QRState, onShowFullscreen: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Current QR Code",
+                    stringResource(R.string.current_qr_code),
                     fontWeight = FontWeight.Bold
                 )
                 IconButton(onClick = { showTokenInfo = true }) {
                     Icon(
                         imageVector = Icons.Filled.Info,
-                        contentDescription = "Token info"
+                        contentDescription = stringResource(R.string.token_info_content_desc)
                     )
                 }
             }
@@ -1297,7 +1282,7 @@ fun QRCodeDisplay(qrState: QRState, onShowFullscreen: () -> Unit) {
                 val size = QRDaemonConfig.QR_CODE_SIZE.dp
                 Image(
                     bitmap = qrState.qrBitmap.asImageBitmap(),
-                    contentDescription = "QR Code",
+                    contentDescription = stringResource(R.string.qr_code_content_desc),
                     modifier = Modifier
                         .size(size)
                         .clickable(onClick = onShowFullscreen)
@@ -1319,7 +1304,7 @@ fun PlaceholderQRCode(onShowFullscreen: () -> Unit = {}) {
         contentAlignment = Alignment.Center
     ) {
         Text(
-            "No Token",
+            stringResource(R.string.no_token),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -1360,12 +1345,12 @@ fun FullscreenQrDialog(
             if (qrState.qrBitmap != null) {
                 Image(
                     bitmap = qrState.qrBitmap.asImageBitmap(),
-                    contentDescription = "QR Code Fullscreen",
+                    contentDescription = stringResource(R.string.qr_code_fullscreen_content_desc),
                     modifier = Modifier.size(250.dp)
                 )
             } else {
                 Text(
-                    "No Token",
+                    stringResource(R.string.no_token),
                     color = Color.Black
                 )
             }
@@ -1397,13 +1382,13 @@ fun LayoutOrderRow(
             )
             if (canToggleVisibility) {
                 Text(
-                    if (visible) "Visible" else "Hidden",
+                    if (visible) stringResource(R.string.visible_label) else stringResource(R.string.hidden_label),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
                 Text(
-                    "Always visible",
+                    stringResource(R.string.always_visible_label),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1411,26 +1396,16 @@ fun LayoutOrderRow(
         }
         if (canToggleVisibility) {
             TextButton(onClick = { onToggleVisibility(!visible) }) {
-                Text(if (visible) "Hide" else "Show")
+                Text(if (visible) stringResource(R.string.hide_action) else stringResource(R.string.show_action))
             }
         }
         TextButton(onClick = onMoveUp, enabled = canMoveUp) {
-            Text("Up")
+            Text(stringResource(R.string.move_up))
         }
         TextButton(onClick = onMoveDown, enabled = canMoveDown) {
-            Text("Down")
+            Text(stringResource(R.string.move_down))
         }
     }
-}
-
-private fun layoutSectionTitles(): Map<String, String> {
-    return mapOf(
-        "status" to "Polling status",
-        "qr" to "QR code",
-        "nfc" to "NFC button",
-        "controls" to "Controls",
-        "error" to "Errors"
-    )
 }
 
 private fun defaultLayoutOrderIds(): List<String> {
@@ -1452,7 +1427,7 @@ fun AccountActionsCard(nfcEnabled: Boolean, isQrReady: Boolean, onToggleNfc: () 
                 modifier = Modifier.fillMaxWidth(),
                 enabled = isQrReady
             ) {
-                Text(if (nfcEnabled) "Switch to QR" else "Switch to NFC")
+                Text(if (nfcEnabled) stringResource(R.string.switch_to_qr) else stringResource(R.string.switch_to_nfc))
             }
         }
     }
@@ -1463,10 +1438,10 @@ fun NfcUidDialog(uid: String, onDismiss: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("NFC UID") },
+        title = { Text(stringResource(R.string.nfc_uid_title)) },
         text = {
             Column {
-                Text("Copy this UID to set it on the website:", fontSize = 12.sp)
+                Text(stringResource(R.string.nfc_uid_instructions), fontSize = 12.sp)
                 Spacer(modifier = Modifier.height(6.dp))
                 SelectableText(uid, fontSize = 14.sp)
             }
@@ -1476,12 +1451,12 @@ fun NfcUidDialog(uid: String, onDismiss: () -> Unit) {
                 clipboard.setText(AnnotatedString(uid))
                 onDismiss()
             }) {
-                Text("Copy")
+                Text(stringResource(R.string.copy))
             }
         },
         dismissButton = {
             Button(onClick = onDismiss) {
-                Text("Close")
+                Text(stringResource(R.string.close))
             }
         }
     )
@@ -1492,45 +1467,65 @@ fun AccountDialog(qrState: QRState, appState: AppState, onDismiss: () -> Unit) {
     val details = qrState.accountDetails
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Account") },
+        title = { Text(stringResource(R.string.account_title)) },
         text = {
             Column {
-                Text("Name: ${qrState.userName.ifBlank { "testEM" }}", fontSize = 12.sp)
+                val appName = stringResource(R.string.app_name)
+                val dateUnknown = stringResource(R.string.date_unknown)
+                Text(
+                    stringResource(
+                        R.string.account_name_label,
+                        qrState.userName.ifBlank { appName }
+                    ),
+                    fontSize = 12.sp
+                )
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("Email: ${appState.email}", fontSize = 12.sp)
+                Text(stringResource(R.string.account_email_label, appState.email), fontSize = 12.sp)
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("SNR: ${appState.serialNumber}", fontSize = 12.sp)
+                Text(stringResource(R.string.account_snr_label, appState.serialNumber), fontSize = 12.sp)
                 if (appState.nfcUid.isNotBlank()) {
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text("NFC UID: ${appState.nfcUid}", fontSize = 12.sp)
+                    Text(stringResource(R.string.account_nfc_uid_label, appState.nfcUid), fontSize = 12.sp)
                 }
 
                 if (details.cardTypeName.isNotBlank()) {
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text("Card Type: ${details.cardTypeName}", fontSize = 12.sp)
+                    Text(stringResource(R.string.account_card_type_label, details.cardTypeName), fontSize = 12.sp)
                 }
                 if (details.organizationName.isNotBlank()) {
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text("Organization: ${details.organizationName}", fontSize = 12.sp)
+                    Text(stringResource(R.string.account_organization_label, details.organizationName), fontSize = 12.sp)
                 }
                 if (details.cardValidFrom > 0 || details.cardValidTo > 0) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "Card Valid: ${formatDate(details.cardValidFrom)} - ${formatDate(details.cardValidTo)}",
+                        stringResource(
+                            R.string.account_card_valid_label,
+                            formatDate(details.cardValidFrom, dateUnknown),
+                            formatDate(details.cardValidTo, dateUnknown)
+                        ),
                         fontSize = 12.sp
                     )
                 }
                 if (details.ticketValidFrom > 0 || details.ticketValidTo > 0) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "Ticket Valid: ${formatDate(details.ticketValidFrom)} - ${formatDate(details.ticketValidTo)}",
+                        stringResource(
+                            R.string.account_ticket_valid_label,
+                            formatDate(details.ticketValidFrom, dateUnknown),
+                            formatDate(details.ticketValidTo, dateUnknown)
+                        ),
                         fontSize = 12.sp
                     )
                 }
                 if (details.discountValidFrom > 0 || details.discountValidTo > 0) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "Discount Valid: ${formatDate(details.discountValidFrom)} - ${formatDate(details.discountValidTo)}",
+                        stringResource(
+                            R.string.account_discount_valid_label,
+                            formatDate(details.discountValidFrom, dateUnknown),
+                            formatDate(details.discountValidTo, dateUnknown)
+                        ),
                         fontSize = 12.sp
                     )
                 }
@@ -1538,7 +1533,7 @@ fun AccountDialog(qrState: QRState, appState: AppState, onDismiss: () -> Unit) {
                     Spacer(modifier = Modifier.height(6.dp))
                     val currency = details.currencySymbol.ifBlank { "" }
                     Text(
-                        "Credit: ${details.creditLastBalance}$currency",
+                        stringResource(R.string.account_credit_label, details.creditLastBalance, currency),
                         fontSize = 12.sp
                     )
                 }
@@ -1546,7 +1541,7 @@ fun AccountDialog(qrState: QRState, appState: AppState, onDismiss: () -> Unit) {
         },
         confirmButton = {
             Button(onClick = onDismiss) {
-                Text("Close")
+                Text(stringResource(R.string.close))
             }
         }
     )
@@ -1574,7 +1569,7 @@ fun ControlButtonsRow(
             )
         ) {
             Text(
-                if (qrState.isPolling) "Stop" else "Get QR",
+                if (qrState.isPolling) stringResource(R.string.stop_button) else stringResource(R.string.get_qr_button),
                 color = if (qrState.isPolling)
                     MaterialTheme.colorScheme.onErrorContainer
                 else
@@ -1588,23 +1583,23 @@ fun ControlButtonsRow(
 fun TokenInfoDialog(qrState: QRState, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Token Information") },
+        title = { Text(stringResource(R.string.token_info_title)) },
         text = {
             if (qrState.tokenHex.isEmpty()) {
                 Text(
-                    "Waiting for token…",
+                    stringResource(R.string.token_waiting),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             } else {
                 Column {
                     SelectableText(
-                        "HEX: ${qrState.tokenHex}",
+                        stringResource(R.string.token_hex_label, qrState.tokenHex),
                         fontSize = 10.sp,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                     SelectableText(
-                        "B64: ${qrState.tokenBase64}",
+                        stringResource(R.string.token_b64_label, qrState.tokenBase64),
                         fontSize = 10.sp
                     )
                 }
@@ -1612,7 +1607,7 @@ fun TokenInfoDialog(qrState: QRState, onDismiss: () -> Unit) {
         },
         confirmButton = {
             Button(onClick = onDismiss) {
-                Text("Close")
+                Text(stringResource(R.string.close))
             }
         }
     )
@@ -1622,32 +1617,32 @@ fun TokenInfoDialog(qrState: QRState, onDismiss: () -> Unit) {
 fun LogoutDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Logout?") },
-        text = { Text("Are you sure you want to logout?") },
+        title = { Text(stringResource(R.string.logout_title)) },
+        text = { Text(stringResource(R.string.logout_message)) },
         confirmButton = {
             Button(onClick = onConfirm) {
-                Text("Yes, Logout")
+                Text(stringResource(R.string.logout_confirm))
             }
         },
         dismissButton = {
             Button(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.cancel))
             }
         }
     )
 }
 
-private fun formatTime(timestampMs: Long): String {
+private fun formatTime(timestampMs: Long, neverLabel: String): String {
     return if (timestampMs == 0L) {
-        "Never"
+        neverLabel
     } else {
         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         sdf.format(Date(timestampMs))
     }
 }
 
-private fun formatDate(timestampSeconds: Long): String {
-    if (timestampSeconds <= 0L) return "-"
+private fun formatDate(timestampSeconds: Long, unknownLabel: String): String {
+    if (timestampSeconds <= 0L) return unknownLabel
     val timestampMs = if (timestampSeconds < 10_000_000_000L) {
         timestampSeconds * 1000L
     } else {

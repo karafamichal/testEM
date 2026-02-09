@@ -4,11 +4,14 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 data class QRState(
     val isPolling: Boolean = false,
@@ -18,7 +21,7 @@ data class QRState(
     val userName: String = "",
     val accountDetails: AccountDetails = AccountDetails(),
     val errorMessage: String = "",
-    val statusMessage: String = "Ready",
+    val statusMessage: String = "",
     val lastUpdateTime: Long = 0
 )
 
@@ -52,6 +55,7 @@ class QRDaemonViewModel : ViewModel() {
     private var qrService: QRDaemonService? = null
     private var credentialsManager: CredentialsManager? = null
     private var lastBackgroundTimeMs: Long = 0
+    private var appContext: Context? = null
 
     private val defaultThemePresets = listOf(
         ThemePreset(
@@ -128,12 +132,21 @@ class QRDaemonViewModel : ViewModel() {
     }
 
     fun loadSavedCredentials(context: Context) {
+        appContext = context.applicationContext
         val manager = CredentialsManager(context)
         credentialsManager = manager
         loadThemeSettings(context)
         loadLayoutSettings(context)
         loadSecuritySettings(context)
         loadLanguageSettings(context)
+        if (_qrState.value.statusMessage.isBlank()) {
+            _qrState.value = _qrState.value.copy(
+                statusMessage = getString(
+                    R.string.status_ready,
+                    "Ready"
+                )
+            )
+        }
         if (!manager.isConfigured()) return
 
         val (email, password, serialNumber) = manager.getCredentials()
@@ -203,7 +216,94 @@ class QRDaemonViewModel : ViewModel() {
         val manager = credentialsManager ?: CredentialsManager(context)
         credentialsManager = manager
         val languageCode = manager.getLanguageCode()
+        AppCompatDelegate.setApplicationLocales(
+            LocaleListCompat.forLanguageTags(languageCode)
+        )
         _appState.value = _appState.value.copy(languageCode = languageCode)
+    }
+
+    private fun getString(resId: Int, fallback: String, vararg args: Any): String {
+        val ctx = appContext ?: return if (args.isNotEmpty()) {
+            String.format(Locale.getDefault(), fallback, *args)
+        } else {
+            fallback
+        }
+        return if (args.isNotEmpty()) {
+            ctx.getString(resId, *args)
+        } else {
+            ctx.getString(resId)
+        }
+    }
+
+    private fun localizeStatus(message: String): String {
+        val ctx = appContext ?: return message
+        val pollingErrorRestartPrefix = "Polling error - restarting in 5s: "
+        val loginSuccessPrefix = "Login successful (cookies: "
+        val getUidHttpPrefix = "getUId HTTP "
+        val getAccountDetailHttpPrefix = "getAccountDetail HTTP "
+        return when {
+            message == "NFC mode enabled" -> ctx.getString(R.string.status_nfc_mode_enabled)
+            message == "NFC mode disabled" -> ctx.getString(R.string.status_nfc_mode_disabled)
+            message.startsWith("[WARNING] Polling already running") -> ctx.getString(R.string.status_polling_already_running_warning)
+            message.startsWith("Starting polling") -> ctx.getString(R.string.status_polling_started)
+            message == "Polling stopped unexpectedly" -> ctx.getString(R.string.status_polling_stopped_unexpectedly)
+            message == "Polling stopped" -> ctx.getString(R.string.status_polling_stopped)
+            message.startsWith(pollingErrorRestartPrefix) -> {
+                val detail = message.removePrefix(pollingErrorRestartPrefix)
+                ctx.getString(R.string.status_polling_error_restart, detail)
+            }
+            message.startsWith("Opening base URL") -> ctx.getString(R.string.status_opening_base_url)
+            message.startsWith("Opening account page") -> ctx.getString(R.string.status_opening_account_page)
+            message.startsWith("Submitting login") -> ctx.getString(R.string.status_submitting_login)
+            message.startsWith(loginSuccessPrefix) -> {
+                val countText = message.removePrefix(loginSuccessPrefix).removeSuffix(")")
+                val count = countText.toIntOrNull()
+                if (count != null) {
+                    ctx.getString(R.string.status_login_successful, count)
+                } else {
+                    message
+                }
+            }
+            message.startsWith("Verifying session (getUId)") -> ctx.getString(R.string.status_verifying_session)
+            message.startsWith(getUidHttpPrefix) -> {
+                val code = message.removePrefix(getUidHttpPrefix).toIntOrNull()
+                if (code != null) {
+                    ctx.getString(R.string.status_getuid_http, code)
+                } else {
+                    message
+                }
+            }
+            message.startsWith("Loading account detail") -> ctx.getString(R.string.status_loading_account_detail)
+            message.startsWith(getAccountDetailHttpPrefix) -> {
+                val code = message.removePrefix(getAccountDetailHttpPrefix).toIntOrNull()
+                if (code != null) {
+                    ctx.getString(R.string.status_getaccountdetail_http, code)
+                } else {
+                    message
+                }
+            }
+            message == "Loaded SNR" -> ctx.getString(R.string.status_loaded_snr)
+            message.startsWith("Warming up session") -> ctx.getString(R.string.status_warming_session)
+            message == "Session ready" -> ctx.getString(R.string.status_session_ready)
+            else -> message
+        }
+    }
+
+    private fun localizeError(message: String): String {
+        val ctx = appContext ?: return message
+        val pollingErrorPrefix = "Polling error: "
+        val loginFailedPrefix = "Login failed: "
+        return when {
+            message.startsWith(pollingErrorPrefix) -> {
+                val detail = message.removePrefix(pollingErrorPrefix)
+                ctx.getString(R.string.status_polling_error, detail)
+            }
+            message.startsWith(loginFailedPrefix) -> {
+                val detail = message.removePrefix(loginFailedPrefix)
+                ctx.getString(R.string.error_login_failed, detail)
+            }
+            else -> message
+        }
     }
 
     fun setPin(context: Context, pin: String) {
@@ -252,6 +352,9 @@ class QRDaemonViewModel : ViewModel() {
         val manager = credentialsManager ?: CredentialsManager(context)
         credentialsManager = manager
         manager.saveLanguageCode(languageCode)
+        AppCompatDelegate.setApplicationLocales(
+            LocaleListCompat.forLanguageTags(languageCode)
+        )
         _appState.value = _appState.value.copy(languageCode = languageCode)
     }
 
@@ -320,7 +423,7 @@ class QRDaemonViewModel : ViewModel() {
 
     fun loginAndRemember(context: Context, email: String, password: String) {
         credentialsManager = CredentialsManager(context)
-        login(email, password)
+        login(context, email, password)
         if (_appState.value.isLoggedIn) {
             val current = _appState.value
             credentialsManager?.saveCredentials(
@@ -332,11 +435,15 @@ class QRDaemonViewModel : ViewModel() {
         }
     }
     
-    fun login(email: String, password: String) {
+    fun login(context: Context, email: String, password: String) {
+        appContext = context.applicationContext
         val emailTrimmed = email.trim()
         if (emailTrimmed.isEmpty() || password.isEmpty()) {
             _appState.value = _appState.value.copy(
-                loginError = "Please fill in all fields"
+                loginError = getString(
+                    R.string.login_error_fill_fields,
+                    "Please fill in all fields"
+                )
             )
             return
         }
@@ -413,17 +520,25 @@ class QRDaemonViewModel : ViewModel() {
                             tokenHex = hex,
                             tokenBase64 = base64,
                             lastUpdateTime = System.currentTimeMillis(),
-                            statusMessage = "NFC UID active"
+                            statusMessage = getString(
+                                R.string.status_nfc_uid_active,
+                                "NFC UID active"
+                            )
                         )
                     } else {
                         val size = QRDaemonConfig.QR_CODE_SIZE
                         val bitmap = QRCodeGenerator.generateQRCode(base64, size, size)
+                        val shortHex = hex.take(16)
                         current.copy(
                             qrBitmap = bitmap,
                             tokenHex = hex,
                             tokenBase64 = base64,
                             lastUpdateTime = System.currentTimeMillis(),
-                            statusMessage = "Token updated: ${hex.take(16)}…"
+                            statusMessage = getString(
+                                R.string.status_token_updated_prefix,
+                                "Token updated: %s...",
+                                shortHex
+                            )
                         )
                     }
                     _qrState.emit(updated)
@@ -432,8 +547,12 @@ class QRDaemonViewModel : ViewModel() {
             onError = { error ->
                 viewModelScope.launch {
                     _qrState.emit(_qrState.value.copy(
-                        errorMessage = error,
-                        statusMessage = "Error: $error"
+                        errorMessage = localizeError(error),
+                        statusMessage = getString(
+                            R.string.status_error_format,
+                            "Error: %s",
+                            localizeError(error)
+                        )
                     ))
                 }
             },
@@ -470,7 +589,7 @@ class QRDaemonViewModel : ViewModel() {
             onStatus = { status ->
                 viewModelScope.launch {
                     _qrState.emit(_qrState.value.copy(
-                        statusMessage = status
+                        statusMessage = localizeStatus(status)
                     ))
                 }
             }
@@ -483,7 +602,10 @@ class QRDaemonViewModel : ViewModel() {
         qrService?.let { service ->
             _qrState.value = _qrState.value.copy(
                 isPolling = true,
-                statusMessage = "Starting polling…"
+                statusMessage = getString(
+                    R.string.status_polling_started,
+                    "Starting polling..."
+                )
             )
             service.startPolling()
         }
@@ -493,7 +615,10 @@ class QRDaemonViewModel : ViewModel() {
         qrService?.stopPolling()
         _qrState.value = _qrState.value.copy(
             isPolling = false,
-            statusMessage = "Polling stopped",
+            statusMessage = getString(
+                R.string.status_polling_stopped,
+                "Polling stopped"
+            ),
             errorMessage = ""
         )
     }
@@ -526,14 +651,20 @@ class QRDaemonViewModel : ViewModel() {
             }
             _qrState.value = _qrState.value.copy(
                 qrBitmap = bitmap,
-                statusMessage = "NFC UID active"
+                statusMessage = getString(
+                    R.string.status_nfc_uid_active,
+                    "NFC UID active"
+                )
             )
         } else if (!enabling && _qrState.value.tokenBase64.isNotBlank()) {
             val size = QRDaemonConfig.QR_CODE_SIZE
             val bitmap = QRCodeGenerator.generateQRCode(_qrState.value.tokenBase64, size, size)
             _qrState.value = _qrState.value.copy(
                 qrBitmap = bitmap,
-                statusMessage = "Token updated"
+                statusMessage = getString(
+                    R.string.status_token_updated,
+                    "Token updated"
+                )
             )
         }
         return if (enabling && current.nfcUid.isBlank() && storedUid.isBlank()) uid else null
