@@ -24,13 +24,21 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.AutofillNode
+import androidx.compose.ui.autofill.AutofillType
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalAutofill
+import androidx.compose.ui.platform.LocalAutofillTree
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
@@ -389,11 +397,33 @@ fun rememberBiometricPrompt(
 }
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: FragmentActivity) {
     var email by remember(appState.email) { mutableStateOf(appState.email) }
     var password by remember(appState.password) { mutableStateOf(appState.password) }
     val focusManager = LocalFocusManager.current
+    val autofill = LocalAutofill.current
+    val autofillTree = LocalAutofillTree.current
+    val emailAutofillNode = remember {
+        AutofillNode(
+            autofillTypes = listOf(AutofillType.EmailAddress, AutofillType.Username),
+            onFill = { email = it }
+        )
+    }
+    val passwordAutofillNode = remember {
+        AutofillNode(
+            autofillTypes = listOf(AutofillType.Password),
+            onFill = { password = it }
+        )
+    }
+    DisposableEffect(autofillTree, emailAutofillNode, passwordAutofillNode) {
+        autofillTree += emailAutofillNode
+        autofillTree += passwordAutofillNode
+        onDispose {
+            autofillTree.children.remove(emailAutofillNode.id)
+            autofillTree.children.remove(passwordAutofillNode.id)
+        }
+    }
     val canSubmit = !appState.isLoading && email.isNotEmpty() && password.isNotEmpty()
     val submit = {
         if (canSubmit) {
@@ -438,7 +468,17 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Fragm
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 12.dp)
-                            .clip(RoundedCornerShape(24.dp)),
+                            .clip(RoundedCornerShape(24.dp))
+                            .onGloballyPositioned { coordinates ->
+                                emailAutofillNode.boundingBox = coordinates.boundsInWindow()
+                            }
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) {
+                                    autofill?.requestAutofillForNode(emailAutofillNode)
+                                } else {
+                                    autofill?.cancelAutofillForNode(emailAutofillNode)
+                                }
+                            },
                         shape = RoundedCornerShape(24.dp),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
@@ -462,7 +502,17 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Fragm
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 8.dp)
-                            .clip(RoundedCornerShape(24.dp)),
+                            .clip(RoundedCornerShape(24.dp))
+                            .onGloballyPositioned { coordinates ->
+                                passwordAutofillNode.boundingBox = coordinates.boundsInWindow()
+                            }
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) {
+                                    autofill?.requestAutofillForNode(passwordAutofillNode)
+                                } else {
+                                    autofill?.cancelAutofillForNode(passwordAutofillNode)
+                                }
+                            },
                         shape = RoundedCornerShape(24.dp),
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
@@ -1220,12 +1270,17 @@ fun ChangePinDialog(
         title = { Text(stringResource(R.string.change_pin_title)) },
         text = {
             Column {
+                Text(
+                    stringResource(R.string.current_pin_label),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
                 OutlinedTextField(
                     value = currentPin,
                     onValueChange = {
                         if (it.length <= 8 && it.all { ch -> ch.isDigit() }) currentPin = it
                     },
-                    label = { Text(stringResource(R.string.current_pin_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
@@ -1237,12 +1292,17 @@ fun ChangePinDialog(
                     )
                 )
                 Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.new_pin_label),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
                 OutlinedTextField(
                     value = newPin,
                     onValueChange = {
                         if (it.length <= 8 && it.all { ch -> ch.isDigit() }) newPin = it
                     },
-                    label = { Text(stringResource(R.string.new_pin_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
@@ -1254,12 +1314,17 @@ fun ChangePinDialog(
                     )
                 )
                 Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.confirm_new_pin_label),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
                 OutlinedTextField(
                     value = confirmPin,
                     onValueChange = {
                         if (it.length <= 8 && it.all { ch -> ch.isDigit() }) confirmPin = it
                     },
-                    label = { Text(stringResource(R.string.confirm_new_pin_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
