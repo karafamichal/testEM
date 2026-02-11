@@ -50,7 +50,7 @@
     <string name="use_biometrics">Použiť biometriu</string>
     <string name="biometric_not_recognized">Biometria nebola rozpoznaná.</string>
     <string name="login_subtitle">Generátor QR tokenov v reálnom čase</string>
-    <string name="email_label">E-mail</string>
+    <string name="email_label">E-mail alebo používateľské meno</string>
     <string name="password_label">Heslo</string>
     <string name="login_button">Prihlásiť sa</string>
     <string name="settings_content_desc">Nastavenia</string>
@@ -109,6 +109,8 @@
     <string name="change_pin_error_incorrect">Aktuálny PIN je nesprávny.</string>
     <string name="update_button">Aktualizovať</string>
     <string name="preset_palette_label">Primárna / Sekundárna / Terciárna</string>
+    <string name="amoled_mode_title">AMOLED režim</string>
+    <string name="amoled_mode_subtitle">Čierne pozadie pre OLED displeje</string>
     <string name="date_unknown">-</string>
     <string name="status_ready">Pripravené</string>
     <string name="status_nfc_uid_active">NFC UID aktívne</string>

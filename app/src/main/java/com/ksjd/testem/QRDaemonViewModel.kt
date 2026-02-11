@@ -36,6 +36,7 @@ data class AppState(
     val nfcEnabled: Boolean = false,
     val themePresets: List<ThemePreset> = emptyList(),
     val selectedThemeId: String = "",
+    val amoledEnabled: Boolean = false,
     val layoutOrder: List<String> = emptyList(),
     val hiddenSections: Set<String> = emptySet(),
     val isPinSet: Boolean = false,
@@ -166,10 +167,20 @@ class QRDaemonViewModel : ViewModel() {
         credentialsManager = manager
         val presets = manager.getThemePresets(defaultThemePresets)
         val selectedId = manager.getSelectedThemeId(presets.first().id)
+        val amoledEnabled = manager.getAmoledEnabled()
         _appState.value = _appState.value.copy(
             themePresets = presets,
-            selectedThemeId = selectedId
+            selectedThemeId = selectedId,
+            amoledEnabled = amoledEnabled
         )
+    }
+
+    fun setAmoledEnabled(context: Context, enabled: Boolean) {
+        if (_appState.value.amoledEnabled == enabled) return
+        _appState.value = _appState.value.copy(amoledEnabled = enabled)
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        manager.saveAmoledEnabled(enabled)
     }
 
     fun loadLayoutSettings(context: Context) {
@@ -481,18 +492,26 @@ class QRDaemonViewModel : ViewModel() {
     fun logout() {
         stopPolling()
         qrService = null
+        credentialsManager?.clearCredentials()
         val current = _appState.value
         _appState.value = AppState(
             isLoggedIn = false,
             isLoading = false,
             loginError = "",
-            email = current.email,
-            password = current.password,
-            serialNumber = current.serialNumber,
-            nfcUid = current.nfcUid,
-            nfcEnabled = current.nfcEnabled,
+            email = "",
+            password = "",
+            serialNumber = "",
+            nfcUid = "",
+            nfcEnabled = false,
             themePresets = current.themePresets,
             selectedThemeId = current.selectedThemeId,
+            amoledEnabled = current.amoledEnabled,
+            layoutOrder = current.layoutOrder,
+            hiddenSections = current.hiddenSections,
+            isPinSet = current.isPinSet,
+            isAppUnlocked = current.isAppUnlocked,
+            biometricEnabled = current.biometricEnabled,
+            lockTimeoutSeconds = current.lockTimeoutSeconds,
             languageCode = current.languageCode
         )
         _qrState.value = QRState()

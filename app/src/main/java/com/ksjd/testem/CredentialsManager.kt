@@ -96,6 +96,14 @@ class CredentialsManager(context: Context) {
         return prefs.getString("selected_theme_id", defaultId) ?: defaultId
     }
 
+    fun saveAmoledEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("theme_amoled", enabled).apply()
+    }
+
+    fun getAmoledEnabled(): Boolean {
+        return prefs.getBoolean("theme_amoled", false)
+    }
+
     fun saveLayoutOrder(order: List<String>) {
         prefs.edit().putString("layout_order", order.joinToString("||")).apply()
     }

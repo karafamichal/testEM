@@ -2,6 +2,7 @@ package com.ksjd.testem
 
 import android.view.WindowManager
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -12,6 +13,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -22,13 +25,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.TextUnit
@@ -55,12 +63,15 @@ class MainActivity : AppCompatActivity() {
                 .firstOrNull { it.id == appState.selectedThemeId }
                 ?: appState.themePresets.firstOrNull()
 
-            TestEMTheme(themePreset = activePreset) {
+            TestEMTheme(
+                themePreset = activePreset,
+                amoledMode = appState.amoledEnabled
+            ) {
                 Surface(
                     modifier = Modifier
                         .fillMaxSize()
                         .systemBarsPadding(),
-                    color = MaterialTheme.colorScheme.background
+                    color = Color.Transparent
                 ) {
                     QRDaemonApp(viewModel, this)
                 }
@@ -104,83 +115,132 @@ fun QRDaemonApp(viewModel: QRDaemonViewModel, context: FragmentActivity) {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
     var pin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     val pinTooShortMessage = stringResource(R.string.pin_error_too_short)
     val pinMismatchMessage = stringResource(R.string.pin_error_mismatch)
+    val focusManager = LocalFocusManager.current
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(stringResource(R.string.pin_setup_title), fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            stringResource(R.string.pin_setup_subtitle),
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-
-        OutlinedTextField(
-            value = pin,
-            onValueChange = {
-                if (it.length <= 8 && it.all { ch -> ch.isDigit() }) pin = it
-            },
-            label = { Text(stringResource(R.string.pin_label_range)) },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            visualTransformation = PasswordVisualTransformation()
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedTextField(
-            value = confirmPin,
-            onValueChange = {
-                if (it.length <= 8 && it.all { ch -> ch.isDigit() }) confirmPin = it
-            },
-            label = { Text(stringResource(R.string.pin_label_confirm)) },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            visualTransformation = PasswordVisualTransformation()
-        )
-
-        if (error.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+    val canSubmit = pin.length >= 4 && confirmPin.length >= 4
+    val submit = {
+        error = when {
+            pin.length < 4 -> pinTooShortMessage
+            pin != confirmPin -> pinMismatchMessage
+            else -> ""
         }
+        if (error.isEmpty()) {
+            viewModel.setPin(context.applicationContext, pin)
+            pin = ""
+            confirmPin = ""
+        }
+    }
 
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(
-            onClick = {
-                error = when {
-                    pin.length < 4 -> pinTooShortMessage
-                    pin != confirmPin -> pinMismatchMessage
-                    else -> ""
-                }
-                if (error.isEmpty()) {
-                    viewModel.setPin(context.applicationContext, pin)
-                    pin = ""
-                    confirmPin = ""
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
+    AppBackground(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Text(stringResource(R.string.pin_save_button))
+            Text(
+                stringResource(R.string.pin_setup_title),
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                stringResource(R.string.pin_setup_subtitle),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+
+            OutlinedTextField(
+                value = pin,
+                onValueChange = {
+                    if (it.length <= 8 && it.all { ch -> ch.isDigit() }) pin = it
+                },
+                label = { Text(stringResource(R.string.pin_label_range)) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.NumberPassword,
+                    imeAction = ImeAction.Next
+                ),
+                visualTransformation = PasswordVisualTransformation(),
+                colors = TextFieldDefaults.outlinedTextFieldColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent
+                ),
+                keyboardActions = KeyboardActions(
+                    onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                )
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = confirmPin,
+                onValueChange = {
+                    if (it.length <= 8 && it.all { ch -> ch.isDigit() }) confirmPin = it
+                },
+                label = { Text(stringResource(R.string.pin_label_confirm)) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.NumberPassword,
+                    imeAction = ImeAction.Done
+                ),
+                visualTransformation = PasswordVisualTransformation(),
+                colors = TextFieldDefaults.outlinedTextFieldColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = {
+                        if (canSubmit) submit()
+                    }
+                )
+            )
+
+            if (error.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = submit,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text(stringResource(R.string.pin_save_button))
+            }
         }
     }
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: FragmentActivity) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var hasPrompted by remember { mutableStateOf(false) }
     val incorrectPinMessage = stringResource(R.string.pin_error_incorrect)
+    val submit = {
+        val ok = viewModel.verifyPin(context.applicationContext, pin)
+        error = if (ok) "" else incorrectPinMessage
+        if (ok) pin = ""
+    }
 
     val biometricManager = remember { BiometricManager.from(context) }
     val canAuthenticate = biometricManager.canAuthenticate(
@@ -216,57 +276,81 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(stringResource(R.string.unlock_title), fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            stringResource(R.string.unlock_subtitle),
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-
-        OutlinedTextField(
-            value = pin,
-            onValueChange = {
-                if (it.length <= 8 && it.all { ch -> ch.isDigit() }) pin = it
-            },
-            label = { Text(stringResource(R.string.pin_label)) },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            visualTransformation = PasswordVisualTransformation()
-        )
-
-        if (error.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(
-            onClick = {
-                val ok = viewModel.verifyPin(context.applicationContext, pin)
-                error = if (ok) "" else incorrectPinMessage
-                if (ok) pin = ""
-            },
-            modifier = Modifier.fillMaxWidth()
+    AppBackground(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Text(stringResource(R.string.unlock_button))
-        }
-
-        if (biometricsAvailable && appState.biometricEnabled) {
+            Text(
+                stringResource(R.string.unlock_title),
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
             Spacer(modifier = Modifier.height(12.dp))
-            OutlinedButton(
-                onClick = { prompt.authenticate(promptInfo) },
-                modifier = Modifier.fillMaxWidth()
+            Text(
+                stringResource(R.string.unlock_subtitle),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+
+            OutlinedTextField(
+                value = pin,
+                onValueChange = {
+                    if (it.length <= 8 && it.all { ch -> ch.isDigit() }) pin = it
+                },
+                label = { Text(stringResource(R.string.pin_label)) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.NumberPassword,
+                    imeAction = ImeAction.Done
+                ),
+                visualTransformation = PasswordVisualTransformation(),
+                colors = TextFieldDefaults.outlinedTextFieldColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = { submit() }
+                )
+            )
+
+            if (error.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = submit,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                shape = RoundedCornerShape(16.dp)
             ) {
-                Text(stringResource(R.string.use_biometrics))
+                Text(stringResource(R.string.unlock_button))
+            }
+
+            if (biometricsAvailable && appState.biometricEnabled) {
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = { prompt.authenticate(promptInfo) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(stringResource(R.string.use_biometrics))
+                }
             }
         }
     }
@@ -305,81 +389,131 @@ fun rememberBiometricPrompt(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: FragmentActivity) {
     var email by remember(appState.email) { mutableStateOf(appState.email) }
     var password by remember(appState.password) { mutableStateOf(appState.password) }
+    val focusManager = LocalFocusManager.current
+    val canSubmit = !appState.isLoading && email.isNotEmpty() && password.isNotEmpty()
+    val submit = {
+        if (canSubmit) {
+            viewModel.loginAndRemember(context.applicationContext, email, password)
+        }
+    }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            stringResource(R.string.app_name),
-            fontSize = 32.sp,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        Text(
-            stringResource(R.string.login_subtitle),
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 32.dp)
-        )
-
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text(stringResource(R.string.email_label)) },
+    AppBackground(modifier = Modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(autoCorrect = false)
-        )
+                .fillMaxSize()
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                stringResource(R.string.app_name),
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
 
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text(stringResource(R.string.password_label)) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation()
-        )
+            Text(
+                stringResource(R.string.login_subtitle),
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 32.dp)
+            )
 
-        if (appState.loginError.isNotEmpty()) {
             Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text(stringResource(R.string.email_label)) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                            .clip(RoundedCornerShape(24.dp)),
+                        shape = RoundedCornerShape(24.dp),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            autoCorrect = false,
+                            imeAction = ImeAction.Next
+                        ),
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                        )
+                    )
+
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text(stringResource(R.string.password_label)) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(24.dp)),
+                        shape = RoundedCornerShape(24.dp),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = { submit() }
+                        )
+                    )
+
+                    if (appState.loginError.isNotEmpty()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text(
+                                appState.loginError,
+                                modifier = Modifier.padding(12.dp),
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = submit,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer
-                )
+                    .height(56.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                enabled = canSubmit
             ) {
-                Text(
-                    appState.loginError,
-                    modifier = Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
-            }
-        }
-
-        Button(
-            onClick = { viewModel.loginAndRemember(context.applicationContext, email, password) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            enabled = !appState.isLoading && email.isNotEmpty() && password.isNotEmpty()
-        ) {
-            if (appState.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-            } else {
-                Text(stringResource(R.string.login_button))
+                if (appState.isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                } else {
+                    Text(stringResource(R.string.login_button))
+                }
             }
         }
     }
@@ -430,55 +564,56 @@ fun QRDaemonScreen(
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        TopAppBar(
-            title = {
-                val name = qrState.userName.ifBlank { stringResource(R.string.app_name) }
-                val topBarStyle = MaterialTheme.typography.titleMedium
-                TextButton(onClick = { showAccountDialog = true }) {
-                    Text(
-                        name,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        style = topBarStyle
-                    )
-                }
-            },
-            actions = {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IconButton(onClick = { showSettings = true }) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = stringResource(R.string.settings_content_desc),
-                            tint = MaterialTheme.colorScheme.onPrimary
+    AppBackground(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+        ) {
+            TopAppBar(
+                title = {
+                    val name = qrState.userName.ifBlank { stringResource(R.string.app_name) }
+                    val topBarStyle = MaterialTheme.typography.titleMedium
+                    TextButton(onClick = { showAccountDialog = true }) {
+                        Text(
+                            name,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            style = topBarStyle
                         )
                     }
+                },
+                actions = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        IconButton(onClick = { showSettings = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Settings,
+                                contentDescription = stringResource(R.string.settings_content_desc),
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+                    }
                 }
-            }
-        )
+            )
 
-        LayoutContent(
-            appState = appState,
-            qrState = qrState,
-            onShowFullscreenQr = { showFullscreenQr = true },
-            onToggleNfc = {
-                val createdUid = viewModel.toggleNfc(context.applicationContext)
-                if (!createdUid.isNullOrBlank()) {
-                    nfcUidToShow = createdUid
-                    showNfcDialog = true
+            LayoutContent(
+                appState = appState,
+                qrState = qrState,
+                onShowFullscreenQr = { showFullscreenQr = true },
+                onToggleNfc = {
+                    val createdUid = viewModel.toggleNfc(context.applicationContext)
+                    if (!createdUid.isNullOrBlank()) {
+                        nfcUidToShow = createdUid
+                        showNfcDialog = true
+                    }
+                },
+                onTogglePolling = { isPolling ->
+                    if (isPolling) {
+                        viewModel.stopPolling()
+                    } else {
+                        viewModel.startPolling()
+                    }
                 }
-            },
-            onTogglePolling = { isPolling ->
-                if (isPolling) {
-                    viewModel.stopPolling()
-                } else {
-                    viewModel.startPolling()
-                }
-            }
-        )
+            )
+        }
     }
 }
 
@@ -539,7 +674,7 @@ fun LayoutContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -562,6 +697,14 @@ fun SettingsScreen(
     var showLogoutDialog by remember { mutableStateOf(false) }
     var page by remember { mutableStateOf(SettingsPage.Root) }
 
+    BackHandler {
+        if (page == SettingsPage.Root) {
+            onBack()
+        } else {
+            page = SettingsPage.Root
+        }
+    }
+
     if (showLogoutDialog) {
         LogoutDialog(
             onConfirm = {
@@ -573,59 +716,60 @@ fun SettingsScreen(
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        TopAppBar(
-            navigation = {
-                IconButton(onClick = {
-                    if (page == SettingsPage.Root) {
-                        onBack()
-                    } else {
-                        page = SettingsPage.Root
+    AppBackground(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+        ) {
+            TopAppBar(
+                navigation = {
+                    IconButton(onClick = {
+                        if (page == SettingsPage.Root) {
+                            onBack()
+                        } else {
+                            page = SettingsPage.Root
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
                     }
-                }) {
-                    Icon(
-                        imageVector = Icons.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.back),
-                        tint = MaterialTheme.colorScheme.onPrimary
+                },
+                title = {
+                    Text(
+                        when (page) {
+                            SettingsPage.Root -> stringResource(R.string.settings_title)
+                            SettingsPage.Layout -> stringResource(R.string.layout_title)
+                            SettingsPage.Security -> stringResource(R.string.security_title)
+                        },
+                        color = MaterialTheme.colorScheme.onBackground,
+                        style = MaterialTheme.typography.titleMedium
                     )
                 }
-            },
-            title = {
-                Text(
-                    when (page) {
-                        SettingsPage.Root -> stringResource(R.string.settings_title)
-                        SettingsPage.Layout -> stringResource(R.string.layout_title)
-                        SettingsPage.Security -> stringResource(R.string.security_title)
-                    },
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    style = MaterialTheme.typography.titleMedium
+            )
+
+            when (page) {
+                SettingsPage.Root -> SettingsRootContent(
+                    appState = appState,
+                    context = context,
+                    viewModel = viewModel,
+                    onLogout = { showLogoutDialog = true },
+                    onOpenLayout = { page = SettingsPage.Layout },
+                    onOpenSecurity = { page = SettingsPage.Security }
+                )
+                SettingsPage.Layout -> LayoutSettingsContent(
+                    appState = appState,
+                    context = context,
+                    viewModel = viewModel
+                )
+                SettingsPage.Security -> SecuritySettingsContent(
+                    appState = appState,
+                    context = context,
+                    viewModel = viewModel
                 )
             }
-        )
-
-        when (page) {
-            SettingsPage.Root -> SettingsRootContent(
-                appState = appState,
-                context = context,
-                viewModel = viewModel,
-                onLogout = { showLogoutDialog = true },
-                onOpenLayout = { page = SettingsPage.Layout },
-                onOpenSecurity = { page = SettingsPage.Security }
-            )
-            SettingsPage.Layout -> LayoutSettingsContent(
-                appState = appState,
-                context = context,
-                viewModel = viewModel
-            )
-            SettingsPage.Security -> SecuritySettingsContent(
-                appState = appState,
-                context = context,
-                viewModel = viewModel
-            )
         }
     }
 }
@@ -668,201 +812,191 @@ fun SettingsRootContent(
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text(
-            stringResource(R.string.theme_presets_title),
-            style = MaterialTheme.typography.titleMedium
-        )
-        Spacer(modifier = Modifier.height(12.dp))
+        SettingsSectionCard(title = stringResource(R.string.theme_presets_title)) {
+            appState.themePresets.forEach { preset ->
+                ThemePresetRow(
+                    preset = preset,
+                    selected = preset.id == appState.selectedThemeId,
+                    onSelect = {
+                        viewModel.selectThemePreset(
+                            context.applicationContext,
+                            preset.id
+                        )
+                    }
+                )
+            }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                appState.themePresets.forEach { preset ->
-                    ThemePresetRow(
-                        preset = preset,
-                        selected = preset.id == appState.selectedThemeId,
-                        onSelect = {
-                            viewModel.selectThemePreset(
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.amoled_mode_title), fontWeight = FontWeight.Medium)
+                    Text(
+                        stringResource(R.string.amoled_mode_subtitle),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = appState.amoledEnabled,
+                    onCheckedChange = {
+                        viewModel.setAmoledEnabled(context.applicationContext, it)
+                    }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        SettingsSectionCard(title = stringResource(R.string.create_preset_title)) {
+            OutlinedTextField(
+                value = presetName,
+                onValueChange = { presetName = it },
+                label = { Text(stringResource(R.string.preset_name_label)) },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = primaryHex,
+                onValueChange = { primaryHex = it },
+                label = { Text(stringResource(R.string.primary_hex_label)) },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = secondaryHex,
+                onValueChange = { secondaryHex = it },
+                label = { Text(stringResource(R.string.secondary_hex_label)) },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = tertiaryHex,
+                onValueChange = { tertiaryHex = it },
+                label = { Text(stringResource(R.string.tertiary_hex_label)) },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ColorPreviewSwatch(label = "P", color = primaryColor)
+                ColorPreviewSwatch(label = "S", color = secondaryColor)
+                ColorPreviewSwatch(label = "T", color = tertiaryColor)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = {
+                    viewModel.addThemePreset(
+                        context.applicationContext,
+                        presetName.trim(),
+                        primaryColor ?: 0xFF000000,
+                        secondaryColor ?: 0xFF000000,
+                        tertiaryColor ?: 0xFF000000
+                    )
+                    presetName = ""
+                    primaryHex = ""
+                    secondaryHex = ""
+                    tertiaryHex = ""
+                },
+                enabled = canSavePreset,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(stringResource(R.string.save_preset))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        SettingsSectionCard(title = stringResource(R.string.language_title)) {
+            languageOptions.forEach { (code, label) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            viewModel.setLanguageCode(
                                 context.applicationContext,
-                                preset.id
+                                code
+                            )
+                        },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = appState.languageCode == code,
+                        onClick = {
+                            viewModel.setLanguageCode(
+                                context.applicationContext,
+                                code
                             )
                         }
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(label)
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    stringResource(R.string.create_preset_title),
-                    style = MaterialTheme.typography.titleMedium
+        SettingsSectionCard(
+            title = stringResource(R.string.layout_title),
+            subtitle = stringResource(R.string.layout_subtitle)
+        ) {
+            Button(
+                onClick = onOpenLayout,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = presetName,
-                    onValueChange = { presetName = it },
-                    label = { Text(stringResource(R.string.preset_name_label)) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = primaryHex,
-                    onValueChange = { primaryHex = it },
-                    label = { Text(stringResource(R.string.primary_hex_label)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = secondaryHex,
-                    onValueChange = { secondaryHex = it },
-                    label = { Text(stringResource(R.string.secondary_hex_label)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = tertiaryHex,
-                    onValueChange = { tertiaryHex = it },
-                    label = { Text(stringResource(R.string.tertiary_hex_label)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ColorPreviewSwatch(label = "P", color = primaryColor)
-                    ColorPreviewSwatch(label = "S", color = secondaryColor)
-                    ColorPreviewSwatch(label = "T", color = tertiaryColor)
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = {
-                        viewModel.addThemePreset(
-                            context.applicationContext,
-                            presetName.trim(),
-                            primaryColor ?: 0xFF000000,
-                            secondaryColor ?: 0xFF000000,
-                            tertiaryColor ?: 0xFF000000
-                        )
-                        presetName = ""
-                        primaryHex = ""
-                        secondaryHex = ""
-                        tertiaryHex = ""
-                    },
-                    enabled = canSavePreset,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(stringResource(R.string.save_preset))
-                }
+            ) {
+                Text(stringResource(R.string.open_layout_settings))
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    stringResource(R.string.language_title),
-                    style = MaterialTheme.typography.titleMedium
+        SettingsSectionCard(
+            title = stringResource(R.string.security_title),
+            subtitle = stringResource(R.string.security_subtitle)
+        ) {
+            Button(
+                onClick = onOpenSecurity,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                languageOptions.forEach { (code, label) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                viewModel.setLanguageCode(
-                                    context.applicationContext,
-                                    code
-                                )
-                            },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = appState.languageCode == code,
-                            onClick = {
-                                viewModel.setLanguageCode(
-                                    context.applicationContext,
-                                    code
-                                )
-                            }
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(label)
-                    }
-                }
+            ) {
+                Text(stringResource(R.string.open_security_settings))
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(stringResource(R.string.layout_title), style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(8.dp))
+        SettingsSectionCard(title = stringResource(R.string.account_title)) {
+            Button(
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error
+                ),
+                shape = RoundedCornerShape(14.dp)
+            ) {
                 Text(
-                    stringResource(R.string.layout_subtitle),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    stringResource(R.string.logout),
+                    color = MaterialTheme.colorScheme.onError
                 )
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = onOpenLayout,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(stringResource(R.string.open_layout_settings))
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(stringResource(R.string.security_title), style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    stringResource(R.string.security_subtitle),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = onOpenSecurity,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(stringResource(R.string.open_security_settings))
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    stringResource(R.string.account_title),
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = onLogout,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Text(
-                        stringResource(R.string.logout),
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
             }
         }
     }
@@ -895,34 +1029,39 @@ fun LayoutSettingsContent(
         val hideable = setOf("status", "nfc", "error")
         val hidden = appState.hiddenSections
         order.forEachIndexed { index, id ->
-            LayoutOrderRow(
-                title = titles[id] ?: id,
-                canMoveUp = index > 0,
-                canMoveDown = index < order.lastIndex,
-                onMoveUp = {
-                    viewModel.moveLayoutItem(
-                        context.applicationContext,
-                        id,
-                        -1
-                    )
-                },
-                onMoveDown = {
-                    viewModel.moveLayoutItem(
-                        context.applicationContext,
-                        id,
-                        1
-                    )
-                },
-                canToggleVisibility = hideable.contains(id),
-                visible = !hidden.contains(id),
-                onToggleVisibility = { visible ->
-                    viewModel.setSectionHidden(
-                        context.applicationContext,
-                        id,
-                        !visible
-                    )
-                }
-            )
+            SettingsItemCard {
+                LayoutOrderRow(
+                    title = titles[id] ?: id,
+                    canMoveUp = index > 0,
+                    canMoveDown = index < order.lastIndex,
+                    onMoveUp = {
+                        viewModel.moveLayoutItem(
+                            context.applicationContext,
+                            id,
+                            -1
+                        )
+                    },
+                    onMoveDown = {
+                        viewModel.moveLayoutItem(
+                            context.applicationContext,
+                            id,
+                            1
+                        )
+                    },
+                    canToggleVisibility = hideable.contains(id),
+                    visible = !hidden.contains(id),
+                    onToggleVisibility = { visible ->
+                        viewModel.setSectionHidden(
+                            context.applicationContext,
+                            id,
+                            !visible
+                        )
+                    }
+                )
+            }
+            if (index < order.lastIndex) {
+                Spacer(modifier = Modifier.height(12.dp))
+            }
         }
     }
 }
@@ -964,95 +1103,105 @@ fun SecuritySettingsContent(
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text(
-            stringResource(R.string.lock_timeout_title),
-            fontWeight = FontWeight.Medium
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        timeoutOptions.forEach { seconds ->
-            val label = when (seconds) {
-                0 -> stringResource(R.string.lock_timeout_immediately)
-                30 -> stringResource(R.string.lock_timeout_30_seconds)
-                60 -> stringResource(R.string.lock_timeout_1_minute)
-                300 -> stringResource(R.string.lock_timeout_5_minutes)
-                else -> stringResource(R.string.lock_timeout_seconds, seconds)
+        SettingsSectionCard(title = stringResource(R.string.lock_timeout_title)) {
+            timeoutOptions.forEach { seconds ->
+                val label = when (seconds) {
+                    0 -> stringResource(R.string.lock_timeout_immediately)
+                    30 -> stringResource(R.string.lock_timeout_30_seconds)
+                    60 -> stringResource(R.string.lock_timeout_1_minute)
+                    300 -> stringResource(R.string.lock_timeout_5_minutes)
+                    else -> stringResource(R.string.lock_timeout_seconds, seconds)
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            viewModel.setLockTimeoutSeconds(
+                                context.applicationContext,
+                                seconds
+                            )
+                        },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = appState.lockTimeoutSeconds == seconds,
+                        onClick = {
+                            viewModel.setLockTimeoutSeconds(
+                                context.applicationContext,
+                                seconds
+                            )
+                        }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(label)
+                }
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = customTimeout,
+                onValueChange = {
+                    if (it.length <= 6 && it.all { ch -> ch.isDigit() }) {
+                        customTimeout = it
+                        val value = it.toIntOrNull()
+                        if (value != null && value >= 0 && value != lastAppliedTimeout) {
+                            viewModel.setLockTimeoutSeconds(
+                                context.applicationContext,
+                                value
+                            )
+                            lastAppliedTimeout = value
+                        }
+                    }
+                },
+                label = { Text(stringResource(R.string.custom_seconds_label)) },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        SettingsSectionCard(title = stringResource(R.string.biometrics_label)) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        viewModel.setLockTimeoutSeconds(
-                            context.applicationContext,
-                            seconds
-                        )
-                    },
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                RadioButton(
-                    selected = appState.lockTimeoutSeconds == seconds,
-                    onClick = {
-                        viewModel.setLockTimeoutSeconds(
+                Text(
+                    stringResource(R.string.biometrics_label),
+                    modifier = Modifier.weight(1f),
+                    fontWeight = FontWeight.Medium
+                )
+                Switch(
+                    checked = appState.biometricEnabled,
+                    onCheckedChange = {
+                        viewModel.setBiometricEnabled(
                             context.applicationContext,
-                            seconds
+                            it
                         )
                     }
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(label)
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = customTimeout,
-            onValueChange = {
-                if (it.length <= 6 && it.all { ch -> ch.isDigit() }) {
-                    customTimeout = it
-                    val value = it.toIntOrNull()
-                    if (value != null && value >= 0 && value != lastAppliedTimeout) {
-                        viewModel.setLockTimeoutSeconds(
-                            context.applicationContext,
-                            value
-                        )
-                        lastAppliedTimeout = value
-                    }
-                }
-            },
-            label = { Text(stringResource(R.string.custom_seconds_label)) },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-        )
 
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                stringResource(R.string.biometrics_label),
-                modifier = Modifier.weight(1f),
-                fontWeight = FontWeight.Medium
-            )
-            Switch(
-                checked = appState.biometricEnabled,
-                onCheckedChange = {
-                    viewModel.setBiometricEnabled(
-                        context.applicationContext,
-                        it
-                    )
-                }
-            )
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        Button(
-            onClick = { showChangePin = true },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(stringResource(R.string.change_pin_button))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        SettingsSectionCard(title = stringResource(R.string.change_pin_button)) {
+            Button(
+                onClick = { showChangePin = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Text(stringResource(R.string.change_pin_button))
+            }
         }
     }
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun ChangePinDialog(
     onDismiss: () -> Unit,
     onConfirm: (String, String) -> Boolean
@@ -1079,7 +1228,13 @@ fun ChangePinDialog(
                     label = { Text(stringResource(R.string.current_pin_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent
+                    )
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
@@ -1090,7 +1245,13 @@ fun ChangePinDialog(
                     label = { Text(stringResource(R.string.new_pin_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent
+                    )
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
@@ -1101,7 +1262,13 @@ fun ChangePinDialog(
                     label = { Text(stringResource(R.string.confirm_new_pin_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent
+                    )
                 )
                 if (error.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1200,11 +1367,9 @@ fun StatusCard(qrState: QRState) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (qrState.isPolling)
-                MaterialTheme.colorScheme.primaryContainer
-            else
-                MaterialTheme.colorScheme.surfaceVariant
-        )
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        shape = RoundedCornerShape(20.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -1213,12 +1378,13 @@ fun StatusCard(qrState: QRState) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(stringResource(R.string.status_label), fontWeight = FontWeight.Bold)
-                Text(
-                    if (qrState.isPolling) stringResource(R.string.polling_active) else stringResource(R.string.polling_paused),
-                    color = if (qrState.isPolling)
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                StatusChip(
+                    text = if (qrState.isPolling) {
+                        stringResource(R.string.polling_active)
+                    } else {
+                        stringResource(R.string.polling_paused)
+                    },
+                    isActive = qrState.isPolling
                 )
             }
 
@@ -1260,7 +1426,11 @@ fun QRCodeDisplay(qrState: QRState, onShowFullscreen: () -> Unit) {
         )
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
         Column(
             modifier = Modifier
                 .padding(16.dp)
@@ -1279,22 +1449,38 @@ fun QRCodeDisplay(qrState: QRState, onShowFullscreen: () -> Unit) {
                     fontWeight = FontWeight.Bold
                 )
                 IconButton(onClick = { showTokenInfo = true }) {
-                    Icon(
-                        imageVector = Icons.Filled.Info,
-                        contentDescription = stringResource(R.string.token_info_content_desc)
-                    )
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Info,
+                            contentDescription = stringResource(R.string.token_info_content_desc),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(6.dp)
+                        )
+                    }
                 }
             }
 
             if (qrState.qrBitmap != null) {
                 val size = QRDaemonConfig.QR_CODE_SIZE.dp
-                Image(
-                    bitmap = qrState.qrBitmap.asImageBitmap(),
-                    contentDescription = stringResource(R.string.qr_code_content_desc),
+                Box(
                     modifier = Modifier
                         .size(size)
-                        .clickable(onClick = onShowFullscreen)
-                )
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant,
+                            RoundedCornerShape(16.dp)
+                        )
+                        .clickable(onClick = onShowFullscreen),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        bitmap = qrState.qrBitmap.asImageBitmap(),
+                        contentDescription = stringResource(R.string.qr_code_content_desc),
+                        modifier = Modifier.size(size - 32.dp)
+                    )
+                }
             } else {
                 PlaceholderQRCode(onShowFullscreen)
             }
@@ -1307,14 +1493,25 @@ fun PlaceholderQRCode(onShowFullscreen: () -> Unit = {}) {
     Box(
         modifier = Modifier
             .size(QRDaemonConfig.QR_CODE_SIZE.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(
+                MaterialTheme.colorScheme.surfaceVariant,
+                RoundedCornerShape(16.dp)
+            )
             .clickable(onClick = onShowFullscreen),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            stringResource(R.string.no_token),
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                stringResource(R.string.no_token),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                stringResource(R.string.token_waiting),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp
+            )
+        }
     }
 }
 
@@ -1428,12 +1625,17 @@ private fun defaultLayoutOrderIds(): List<String> {
 
 @Composable
 fun AccountActionsCard(nfcEnabled: Boolean, isQrReady: Boolean, onToggleNfc: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Button(
+            OutlinedButton(
                 onClick = onToggleNfc,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = isQrReady
+                enabled = isQrReady,
+                shape = RoundedCornerShape(14.dp)
             ) {
                 Text(if (nfcEnabled) stringResource(R.string.switch_to_qr) else stringResource(R.string.switch_to_nfc))
             }
@@ -1568,20 +1770,21 @@ fun ControlButtonsRow(
             onClick = { onTogglePolling(qrState.isPolling) },
             modifier = Modifier
                 .weight(1f)
-                .height(48.dp),
+                .height(56.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (qrState.isPolling)
-                    MaterialTheme.colorScheme.errorContainer
+                    MaterialTheme.colorScheme.error
                 else
-                    MaterialTheme.colorScheme.primaryContainer
+                    MaterialTheme.colorScheme.primary
             )
         ) {
             Text(
                 if (qrState.isPolling) stringResource(R.string.stop_button) else stringResource(R.string.get_qr_button),
                 color = if (qrState.isPolling)
-                    MaterialTheme.colorScheme.onErrorContainer
+                    MaterialTheme.colorScheme.onError
                 else
-                    MaterialTheme.colorScheme.onPrimaryContainer
+                    MaterialTheme.colorScheme.onPrimary
             )
         }
     }
@@ -1679,8 +1882,8 @@ fun TopAppBar(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp),
-        color = MaterialTheme.colorScheme.primary
+            .height(60.dp),
+        color = Color.Transparent
     ) {
         Box(
             modifier = Modifier
@@ -1702,5 +1905,98 @@ fun TopAppBar(
                 actions()
             }
         }
+    }
+}
+
+@Composable
+fun SettingsSectionCard(
+    title: String,
+    subtitle: String? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            if (!subtitle.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    subtitle,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+fun SettingsItemCard(content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            content()
+        }
+    }
+}
+
+@Composable
+fun StatusChip(text: String, isActive: Boolean) {
+    val container = if (isActive) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val content = if (isActive) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = container
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(content, CircleShape)
+            )
+            Text(text, fontSize = 12.sp, color = content)
+        }
+    }
+}
+
+@Composable
+fun AppBackground(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val gradient = Brush.verticalGradient(
+        listOf(
+            scheme.background,
+            scheme.surface,
+            scheme.background
+        )
+    )
+    val backgroundBrush = if (scheme.background == Color(0xFF000000)) {
+        Brush.verticalGradient(listOf(Color(0xFF000000), Color(0xFF000000)))
+    } else {
+        gradient
+    }
+    Box(
+        modifier = modifier.background(backgroundBrush)
+    ) {
+        content()
     }
 }

@@ -50,7 +50,7 @@
     <string name="use_biometrics">Use biometrics</string>
     <string name="biometric_not_recognized">Biometric not recognized.</string>
     <string name="login_subtitle">Real-time QR Token Generator</string>
-    <string name="email_label">Email</string>
+    <string name="email_label">Email or Username</string>
     <string name="password_label">Password</string>
     <string name="login_button">Login</string>
     <string name="settings_content_desc">Settings</string>
@@ -109,6 +109,8 @@
     <string name="change_pin_error_incorrect">Current PIN is incorrect.</string>
     <string name="update_button">Update</string>
     <string name="preset_palette_label">Primary / Secondary / Tertiary</string>
+    <string name="amoled_mode_title">AMOLED mode</string>
+    <string name="amoled_mode_subtitle">Pure black background for OLED screens</string>
     <string name="date_unknown">-</string>
     <string name="status_ready">Ready</string>
     <string name="status_nfc_uid_active">NFC UID active</string>
