@@ -45,9 +45,6 @@ cd testEM
 ./gradlew assembleDebug
 ```
 
-## Build APK (Release)
-Create a `keystore.properties` file in the project root with your signing config, then:
-
 ```
 cd testEM
 ./gradlew assembleRelease
