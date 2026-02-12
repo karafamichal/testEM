@@ -335,10 +335,14 @@ class QRDaemonViewModel : ViewModel() {
         return true
     }
 
-    fun verifyPin(context: Context, pin: String): Boolean {
+    fun verifyPin(context: Context, pin: String, allowBlank: Boolean = false): Boolean {
         val manager = credentialsManager ?: CredentialsManager(context)
         credentialsManager = manager
-        val ok = pin.isBlank() || manager.verifyPin(pin)
+        val ok = if (pin.isBlank()) {
+            allowBlank
+        } else {
+            manager.verifyPin(pin)
+        }
         if (ok) {
             _appState.value = _appState.value.copy(isAppUnlocked = true)
         }

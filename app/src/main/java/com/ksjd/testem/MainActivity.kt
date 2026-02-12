@@ -259,7 +259,7 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
     val prompt = rememberBiometricPrompt(
         activity = context,
         onSuccess = {
-            viewModel.verifyPin(context.applicationContext, "")
+            viewModel.verifyPin(context.applicationContext, "", allowBlank = true)
         },
         onError = { message ->
             error = message
