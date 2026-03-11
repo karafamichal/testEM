@@ -1869,6 +1869,7 @@ fun ControlButtonsRow(
         }
         OutlinedButton(
             onClick = onShowHistory,
+            enabled = qrState.qrBitmap != null,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
