@@ -7,6 +7,7 @@ import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 data class QrTokenResponse(
     val success: Boolean,
@@ -15,7 +16,11 @@ data class QrTokenResponse(
 
 class QrTokenService(
     private val baseUrl: String = "https://sadzv.qrbus.me",
-    private val httpClient: OkHttpClient = OkHttpClient.Builder().build()
+    private val httpClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .build()
 ) {
     private val gson = Gson()
     private val tag = "QrTokenService"

@@ -15,6 +15,7 @@ import okhttp3.Request
 import kotlin.coroutines.coroutineContext
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.TimeUnit
 
 data class TokenResponse(
     val success: Boolean,
@@ -115,6 +116,9 @@ class QRDaemonService(
 
     private val client = OkHttpClient.Builder()
         .cookieJar(cookieJar)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
         .addNetworkInterceptor { chain ->
             val request = chain.request()
             Log.d(TAG, ">>> REQUEST: ${request.method} ${request.url}")
@@ -247,9 +251,7 @@ class QRDaemonService(
                 sessionBaseUrl = "${effectiveUrl.scheme}://${effectiveUrl.host}"
                 Log.d(TAG, "Base URL set to: $sessionBaseUrl")
             }
-            
-            delay(1000)
-            
+
             // Step 2: Navigate to account page
             onStatus("Opening account page…")
             val accountRequest = Request.Builder()
@@ -264,9 +266,7 @@ class QRDaemonService(
                     throw Exception("Failed to reach account: ${response.code}")
                 }
             }
-            
-            delay(1000)
-            
+
             // Step 3: Post login credentials
             onStatus("Submitting login…")
             val loginBody = FormBody.Builder()
@@ -380,7 +380,9 @@ class QRDaemonService(
                 }
             }
 
-            // Step 3b: Verify session with getUId (browser does this periodically)
+            // Run post-login requests in parallel
+            coroutineScope {
+            launch {
             try {
                 onStatus("Verifying session (getUId)…")
                 val uidRequest = Request.Builder()
@@ -410,8 +412,8 @@ class QRDaemonService(
             } catch (e: Exception) {
                 Log.w(TAG, "getUId failed: ${e.message}")
             }
-
-            // Step 3c: Load account detail (browser does this after login)
+            }
+            launch {
             try {
                 onStatus("Loading account detail…")
                 val detailRequest = Request.Builder()
@@ -618,26 +620,10 @@ class QRDaemonService(
             } catch (e: Exception) {
                 Log.w(TAG, "getAccountDetail failed: ${e.message}")
             }
-            
-            // Warm up session by visiting /account page
-            delay(1000)
-            onStatus("Warming up session…")
-            val warmupRequest = Request.Builder()
-                .url("$sessionBaseUrl/account")
-                .get()
-                .addHeader("User-Agent", userAgent)
-                .addHeader("Referer", sessionBaseUrl)
-                .build()
-            
-            client.newCall(warmupRequest).execute().use { response ->
-                Log.d(TAG, "Account page warmup: ${response.code}")
-                if (response.code == 200) {
-                    onStatus("Session ready")
-                }
             }
-            
-            delay(1000)
-            
+            }
+            onStatus("Session ready")
+
         } catch (e: Exception) {
             Log.e(TAG, "Login failed: ${e.message}", e)
             onError("Login failed: ${e.message}")
