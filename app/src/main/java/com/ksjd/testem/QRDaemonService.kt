@@ -15,7 +15,9 @@ import okhttp3.Request
 import kotlin.coroutines.coroutineContext
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import kotlin.math.abs
 import java.util.concurrent.TimeUnit
+import java.util.Locale
 
 data class TokenResponse(
     val success: Boolean,
@@ -828,7 +830,6 @@ class QRDaemonService(
                     return null
                 } catch (e: Exception) {
                     Log.e(TAG, "Token parse error: ${e.message}", e)
-                    val snippet = responseBody.take(120).replace("\n", " ").replace("\r", " ")
                     onStatus("Token parse error: ${e.message}")
                     return null
                 }
@@ -845,6 +846,135 @@ class QRDaemonService(
                 return null
             }
         }
+    }
+
+    suspend fun fetchCardHistory(limit: Int = 20): Result<List<CardHistoryItem>> {
+        return try {
+            val snr = serialNumber.trim()
+            if (snr.isBlank()) {
+                return Result.failure(Exception("Card serial number is not available"))
+            }
+
+            val historyUrl = "$sessionBaseUrl/cardapi/getCardHistory/$snr/0/$limit"
+            onStatus("Loading ticket and payment history...")
+
+            val request = Request.Builder()
+                .url(historyUrl)
+                .get()
+                .addHeader("Accept", "*/*")
+                .addHeader("Referer", "$sessionBaseUrl/account")
+                .addHeader("User-Agent", userAgent)
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val finalUrl = response.request.url.toString()
+                Log.d(TAG, "History response: code=${response.code}, finalUrl=$finalUrl")
+                if (response.code == 401) {
+                    isAuthenticated = false
+                    return Result.failure(Exception("Session expired (401)"))
+                }
+                if (!response.isSuccessful) {
+                    return Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                }
+                if (finalUrl.contains("/account/login")) {
+                    isAuthenticated = false
+                    return Result.failure(Exception("Session expired - redirected to login"))
+                }
+
+                val body = response.body?.string().orEmpty()
+                if (body.isBlank()) {
+                    return Result.success(emptyList())
+                }
+                if (body.trimStart().startsWith("<")) {
+                    Log.w(TAG, "History endpoint returned HTML instead of JSON")
+                    return Result.failure(Exception("History endpoint returned HTML (not authenticated)"))
+                }
+
+                val root = gson.fromJson(body, JsonObject::class.java)
+                val tickets = root.getAsJsonArray("tickets")
+                val transactions = root.getAsJsonArray("transactions")
+                val currency = tickets?.firstOrNull()?.asJsonObject?.get("currencySymbol")?.asString.orEmpty()
+                val result = mutableListOf<CardHistoryItem>()
+
+                tickets?.forEachIndexed { index, element ->
+                    val obj = element.asJsonObject
+                    val ticketId = obj.get("ticketSNR")?.asString?.trim().orEmpty().ifBlank {
+                        "ticket-${obj.get("saleTime")?.asLong ?: 0L}-$index"
+                    }
+                    val saleTime = (obj.get("saleTime")?.asLong ?: 0L) * 1000L
+                    val tariffName = obj.get("tariffName")?.asString?.trim().orEmpty()
+                    val ticketTypeName = obj.get("ticketTypeName")?.asString?.trim().orEmpty()
+                    val ticketTypeId = obj.get("ticketTypeId")?.asInt ?: 0
+                    val priceCents = obj.get("price")?.asLong ?: 0L
+                    val oldBalance = obj.get("oldBalance")?.asLong
+                    val newBalance = obj.get("newBalance")?.asLong
+                    val title = if (ticketTypeName.isNotBlank()) ticketTypeName else "Ticket"
+                    val detailLabel = if (tariffName.isNotBlank()) tariffName else "Card event"
+                    val balancePart = if (oldBalance != null && newBalance != null) {
+                        " | ${formatAmount(oldBalance, currency)} -> ${formatAmount(newBalance, currency)}"
+                    } else {
+                        ""
+                    }
+                    val amount = when {
+                        ticketTypeId == 3 -> "+${formatAmount(abs(priceCents), currency)}"
+                        priceCents < 0 -> "+${formatAmount(abs(priceCents), currency)}"
+                        else -> "-${formatAmount(abs(priceCents), currency)}"
+                    }
+                    result += CardHistoryItem(
+                        id = ticketId,
+                        sourceType = HistorySourceType.TICKET,
+                        timestampMs = saleTime,
+                        title = title,
+                        subtitle = detailLabel + balancePart,
+                        amountText = amount
+                    )
+                }
+
+                transactions?.forEachIndexed { index, element ->
+                    val obj = element.asJsonObject
+                    val createdAt = (obj.get("createdAt")?.asLong ?: 0L) * 1000L
+                    val type = obj.get("transactionType")?.asInt ?: 0
+                    val changes = obj.getAsJsonArray("changes")
+                    val subtitle = if (changes != null && changes.size() > 0) {
+                        buildString {
+                            changes.forEach { change ->
+                                val changeObj = change.asJsonObject
+                                val value = changeObj.get("value")?.asString
+                                    ?: changeObj.get("valueAfter")?.asString
+                                    ?: changeObj.get("valueBefore")?.asString
+                                    ?: ""
+                                if (value.isNotBlank()) {
+                                    if (isNotEmpty()) append(" | ")
+                                    append(value)
+                                }
+                            }
+                        }.ifBlank { "Transaction details" }
+                    } else {
+                        "Transaction details"
+                    }
+
+                    result += CardHistoryItem(
+                        id = "transaction-${createdAt}-$index",
+                        sourceType = HistorySourceType.TRANSACTION,
+                        timestampMs = createdAt,
+                        title = "Transaction #$type",
+                        subtitle = subtitle,
+                        amountText = ""
+                    )
+                }
+
+                Result.success(result.sortedByDescending { it.timestampMs })
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "History fetch failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    private fun formatAmount(cents: Long, currency: String): String {
+        val symbol = if (currency.isBlank()) "" else " $currency"
+        return String.format(Locale.US, "%.2f%s", cents / 100.0, symbol)
     }
 
     private fun bytesToHex(bytes: ByteArray): String {

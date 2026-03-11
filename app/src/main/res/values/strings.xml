@@ -82,6 +82,10 @@
     <string name="account_credit_label">Credit: %1$s%2$s</string>
     <string name="stop_button">Stop</string>
     <string name="get_qr_button">Get QR</string>
+    <string name="history_button">Ticket &amp; Payment History</string>
+    <string name="history_title">Tickets &amp; Payments History</string>
+    <string name="history_empty">No history found.</string>
+    <string name="refresh_button">Refresh</string>
     <string name="token_info_title">Token Information</string>
     <string name="token_waiting">Waiting for token...</string>
     <string name="token_hex_label">HEX: %1$s</string>

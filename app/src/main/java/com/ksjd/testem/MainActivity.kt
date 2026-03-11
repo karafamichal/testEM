@@ -580,6 +580,7 @@ fun QRDaemonScreen(
     var showNfcDialog by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showFullscreenQr by remember { mutableStateOf(false) }
+    var showHistoryScreen by remember { mutableStateOf(false) }
     var nfcUidToShow by remember { mutableStateOf("") }
 
     if (showAccountDialog) {
@@ -594,6 +595,14 @@ fun QRDaemonScreen(
             uid = nfcUidToShow,
             onDismiss = { showNfcDialog = false }
         )
+    }
+    if (showHistoryScreen) {
+        HistoryScreen(
+            historyState = qrState.historyState,
+            onBack = { showHistoryScreen = false },
+            onRefresh = { viewModel.loadCardHistory() }
+        )
+        return
     }
 
     if (showSettings) {
@@ -661,6 +670,10 @@ fun QRDaemonScreen(
                     } else {
                         viewModel.startPolling()
                     }
+                },
+                onShowHistory = {
+                    showHistoryScreen = true
+                    viewModel.loadCardHistory()
                 }
             )
         }
@@ -673,7 +686,8 @@ fun LayoutContent(
     qrState: QRState,
     onShowFullscreenQr: () -> Unit,
     onToggleNfc: () -> Unit,
-    onTogglePolling: (Boolean) -> Unit
+    onTogglePolling: (Boolean) -> Unit,
+    onShowHistory: () -> Unit
 ) {
     val order = if (appState.layoutOrder.isNotEmpty()) {
         appState.layoutOrder
@@ -693,7 +707,7 @@ fun LayoutContent(
                 )
             }
             "controls" -> LayoutSectionContent {
-                ControlButtonsRow(qrState, onTogglePolling)
+                ControlButtonsRow(qrState, onTogglePolling, onShowHistory)
             }
             "error" -> {
                 if (hidden.contains(id)) {
@@ -1825,16 +1839,17 @@ fun AccountDialog(qrState: QRState, appState: AppState, onDismiss: () -> Unit) {
 @Composable
 fun ControlButtonsRow(
     qrState: QRState,
-    onTogglePolling: (Boolean) -> Unit
+    onTogglePolling: (Boolean) -> Unit,
+    onShowHistory: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Button(
             onClick = { onTogglePolling(qrState.isPolling) },
             modifier = Modifier
-                .weight(1f)
+                .fillMaxWidth()
                 .height(56.dp),
             shape = RoundedCornerShape(18.dp),
             colors = ButtonDefaults.buttonColors(
@@ -1851,6 +1866,151 @@ fun ControlButtonsRow(
                 else
                     MaterialTheme.colorScheme.onPrimary
             )
+        }
+        OutlinedButton(
+            onClick = onShowHistory,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            if (qrState.historyState.isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Text(stringResource(R.string.history_button))
+            }
+        }
+    }
+}
+
+@Composable
+fun HistoryScreen(
+    historyState: CardHistoryState,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    BackHandler(onBack = onBack)
+
+    AppBackground(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            TopAppBar(
+                navigation = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                },
+                title = {
+                    Text(
+                        stringResource(R.string.history_title),
+                        color = MaterialTheme.colorScheme.onBackground,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                },
+                actions = {
+                    if (historyState.isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .padding(end = 8.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                    TextButton(onClick = onRefresh, enabled = !historyState.isLoading) {
+                        Text(stringResource(R.string.refresh_button))
+                    }
+                }
+            )
+
+            Card(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                when {
+                    historyState.isLoading && historyState.items.isEmpty() -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                    historyState.errorMessage.isNotBlank() && historyState.items.isEmpty() -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                historyState.errorMessage,
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                    historyState.items.isEmpty() -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                stringResource(R.string.history_empty),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                    else -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            historyState.items.forEachIndexed { index, item ->
+                                Column {
+                                    Text(
+                                        formatDateTime(item.timestampMs, stringResource(R.string.date_unknown)),
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(item.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                                    if (item.subtitle.isNotBlank()) {
+                                        Text(
+                                            item.subtitle,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (item.amountText.isNotBlank()) {
+                                        Text(
+                                            item.amountText,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                if (index < historyState.items.lastIndex) {
+                                    Divider()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1925,6 +2085,12 @@ private fun formatDate(timestampSeconds: Long, unknownLabel: String): String {
         timestampSeconds
     }
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    return sdf.format(Date(timestampMs))
+}
+
+private fun formatDateTime(timestampMs: Long, unknownLabel: String): String {
+    if (timestampMs <= 0L) return unknownLabel
+    val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
     return sdf.format(Date(timestampMs))
 }
 

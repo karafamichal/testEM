@@ -8,9 +8,11 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 data class QRState(
@@ -20,6 +22,7 @@ data class QRState(
     val tokenBase64: String = "",
     val userName: String = "",
     val accountDetails: AccountDetails = AccountDetails(),
+    val historyState: CardHistoryState = CardHistoryState(),
     val errorMessage: String = "",
     val statusMessage: String = "",
     val lastUpdateTime: Long = 0
@@ -644,6 +647,48 @@ class QRDaemonViewModel : ViewModel() {
             ),
             errorMessage = ""
         )
+    }
+
+    fun loadCardHistory(limit: Int = 20) {
+        val service = qrService ?: return
+        viewModelScope.launch {
+            _qrState.emit(
+                _qrState.value.copy(
+                    historyState = _qrState.value.historyState.copy(
+                        isLoading = true,
+                        errorMessage = ""
+                    )
+                )
+            )
+
+            val result = withContext(Dispatchers.IO) {
+                service.fetchCardHistory(limit)
+            }
+            result.fold(
+                onSuccess = { items ->
+                    _qrState.emit(
+                        _qrState.value.copy(
+                            historyState = CardHistoryState(
+                                isLoading = false,
+                                items = items,
+                                errorMessage = "",
+                                lastUpdatedMs = System.currentTimeMillis()
+                            )
+                        )
+                    )
+                },
+                onFailure = { error ->
+                    _qrState.emit(
+                        _qrState.value.copy(
+                            historyState = _qrState.value.historyState.copy(
+                                isLoading = false,
+                                errorMessage = error.message ?: "Failed to load history"
+                            )
+                        )
+                    )
+                }
+            )
+        }
     }
 
     fun toggleNfc(context: Context): String? {
