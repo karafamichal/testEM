@@ -1978,33 +1978,65 @@ fun HistoryScreen(
                                 .verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            historyState.items.forEachIndexed { index, item ->
-                                Column {
-                                    Text(
-                                        formatDateTime(item.timestampMs, stringResource(R.string.date_unknown)),
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                            historyState.items.forEach { item ->
+                                val isPositive = item.amountText.trim().startsWith("+")
+                                val isNegative = item.amountText.trim().startsWith("-")
+                                val cardContainerColor = when {
+                                    item.sourceType == HistorySourceType.TRANSACTION -> MaterialTheme.colorScheme.secondaryContainer
+                                    isPositive -> MaterialTheme.colorScheme.tertiaryContainer
+                                    isNegative -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+                                    else -> MaterialTheme.colorScheme.surfaceVariant
+                                }
+                                val amountColor = when {
+                                    isPositive -> Color(0xFF1B7F3B)
+                                    isNegative -> MaterialTheme.colorScheme.error
+                                    else -> MaterialTheme.colorScheme.primary
+                                }
+                                val titleColor = when {
+                                    item.sourceType == HistorySourceType.TRANSACTION -> MaterialTheme.colorScheme.onSecondaryContainer
+                                    isPositive -> MaterialTheme.colorScheme.onTertiaryContainer
+                                    isNegative -> MaterialTheme.colorScheme.onErrorContainer
+                                    else -> MaterialTheme.colorScheme.onSurface
+                                }
+
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = cardContainerColor
                                     )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(item.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                                    if (item.subtitle.isNotBlank()) {
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
                                         Text(
-                                            item.subtitle,
-                                            fontSize = 13.sp,
+                                            formatDateTime(item.timestampMs, stringResource(R.string.date_unknown)),
+                                            fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                    }
-                                    if (item.amountText.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            item.amountText,
-                                            fontSize = 13.sp,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.SemiBold
+                                            item.title,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 15.sp,
+                                            color = titleColor
                                         )
+                                        if (item.subtitle.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                item.subtitle,
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        if (item.amountText.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                item.amountText,
+                                                fontSize = 13.sp,
+                                                color = amountColor,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
                                     }
-                                }
-                                if (index < historyState.items.lastIndex) {
-                                    Divider()
                                 }
                             }
                         }

@@ -82,6 +82,10 @@
     <string name="account_credit_label">Kredit: %1$s%2$s</string>
     <string name="stop_button">Zastaviť</string>
     <string name="get_qr_button">Získať QR</string>
+    <string name="history_button">História lístkov a platieb</string>
+    <string name="history_title">História lístkov a platieb</string>
+    <string name="history_empty">Nenašla sa žiadna história.</string>
+    <string name="refresh_button">Obnoviť</string>
     <string name="token_info_title">Informácie o tokene</string>
     <string name="token_waiting">Čaká sa na token...</string>
     <string name="token_hex_label">HEX: %1$s</string>
