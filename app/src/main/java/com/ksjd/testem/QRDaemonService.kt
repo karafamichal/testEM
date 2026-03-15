@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets
 import kotlin.math.abs
 import java.util.concurrent.TimeUnit
 import java.util.Locale
+import java.util.TimeZone
 
 data class TokenResponse(
     val success: Boolean,
@@ -902,7 +903,7 @@ class QRDaemonService(
                     val ticketId = obj.get("ticketSNR")?.asString?.trim().orEmpty().ifBlank {
                         "ticket-${obj.get("saleTime")?.asLong ?: 0L}-$index"
                     }
-                    val saleTime = (obj.get("saleTime")?.asLong ?: 0L) * 1000L
+                    val saleTime = normalizeHistoryTimestamp((obj.get("saleTime")?.asLong ?: 0L) * 1000L)
                     val tariffName = obj.get("tariffName")?.asString?.trim().orEmpty()
                     val ticketTypeName = obj.get("ticketTypeName")?.asString?.trim().orEmpty()
                     val ticketTypeId = obj.get("ticketTypeId")?.asInt ?: 0
@@ -933,7 +934,7 @@ class QRDaemonService(
 
                 transactions?.forEachIndexed { index, element ->
                     val obj = element.asJsonObject
-                    val createdAt = (obj.get("createdAt")?.asLong ?: 0L) * 1000L
+                    val createdAt = normalizeHistoryTimestamp((obj.get("createdAt")?.asLong ?: 0L) * 1000L)
                     val type = obj.get("transactionType")?.asInt ?: 0
                     val changes = obj.getAsJsonArray("changes")
                     val subtitle = if (changes != null && changes.size() > 0) {
@@ -975,6 +976,12 @@ class QRDaemonService(
     private fun formatAmount(cents: Long, currency: String): String {
         val symbol = if (currency.isBlank()) "" else " $currency"
         return String.format(Locale.US, "%.2f%s", cents / 100.0, symbol)
+    }
+
+    private fun normalizeHistoryTimestamp(rawTimestampMs: Long): Long {
+        if (rawTimestampMs <= 0L) return rawTimestampMs
+        // History API uses local wall-clock values; remove local offset to avoid +1h/+2h shift.
+        return rawTimestampMs - TimeZone.getDefault().getOffset(rawTimestampMs)
     }
 
     private fun bytesToHex(bytes: ByteArray): String {
