@@ -475,7 +475,7 @@ final class QRDaemonService {
         }
 
         let snrFromCard = readString(cardObj, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
-        let snrFromRequests = extractSnrFromUserRequests(userObj) ?? extractSnrFromUserRequests(data)
+        let snrFromRequests = extractSnrFromUserRequests(userObj) ?? extractSnrFromUserRequests(data) ?? ""
         let snr = !snrFromCard.isEmpty
             ? snrFromCard
             : (!snrFromRequests.isEmpty
