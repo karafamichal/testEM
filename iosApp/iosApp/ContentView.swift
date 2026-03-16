@@ -53,7 +53,9 @@ struct CardHistoryState {
 struct ThemePreset: Identifiable, Equatable {
     let id: String
     let name: String
-    let accent: Color
+    let primary: Color
+    let secondary: Color
+    let tertiary: Color
 }
 
 enum SettingsPage {
@@ -115,9 +117,27 @@ final class TestEMViewModel: ObservableObject {
     @Published var amoledEnabled = false
     @Published var languageCode = "sk"
     @Published var themePresets: [ThemePreset] = [
-        ThemePreset(id: "classic", name: "Classic", accent: Color(red: 0.40, green: 0.31, blue: 0.64)),
-        ThemePreset(id: "ocean", name: "Ocean", accent: Color(red: 0.07, green: 0.44, blue: 0.39)),
-        ThemePreset(id: "sunset", name: "Sunset", accent: Color(red: 0.91, green: 0.37, blue: 0.02))
+        ThemePreset(
+            id: "classic",
+            name: "Classic",
+            primary: Color(red: 0.40, green: 0.31, blue: 0.64),
+            secondary: Color(red: 0.29, green: 0.55, blue: 0.69),
+            tertiary: Color(red: 0.56, green: 0.43, blue: 0.76)
+        ),
+        ThemePreset(
+            id: "ocean",
+            name: "Ocean",
+            primary: Color(red: 0.07, green: 0.44, blue: 0.39),
+            secondary: Color(red: 0.08, green: 0.57, blue: 0.71),
+            tertiary: Color(red: 0.27, green: 0.66, blue: 0.58)
+        ),
+        ThemePreset(
+            id: "sunset",
+            name: "Sunset",
+            primary: Color(red: 0.91, green: 0.37, blue: 0.02),
+            secondary: Color(red: 0.81, green: 0.28, blue: 0.18),
+            tertiary: Color(red: 0.97, green: 0.62, blue: 0.22)
+        )
     ]
     @Published var selectedThemeId = "classic"
     @Published var layoutOrder: [SectionId] = [.status, .qr, .nfc, .controls, .error]
@@ -155,7 +175,7 @@ final class TestEMViewModel: ObservableObject {
         self.languageCode = UserDefaults.standard.string(forKey: prefLanguageCode) ?? "sk"
         self.selectedThemeId = UserDefaults.standard.string(forKey: prefSelectedThemeId) ?? "classic"
         let savedTimeout = UserDefaults.standard.object(forKey: prefLockTimeout) as? Int ?? 30
-        self.lockTimeoutSeconds = max(30, savedTimeout)
+        self.lockTimeoutSeconds = max(0, savedTimeout)
         UserDefaults.standard.set(self.lockTimeoutSeconds, forKey: prefLockTimeout)
         if let rawOrder = UserDefaults.standard.array(forKey: prefLayoutOrder) as? [String] {
             let mapped = rawOrder.compactMap { SectionId(rawValue: $0) }
@@ -397,8 +417,18 @@ final class TestEMViewModel: ObservableObject {
         return setPin(newPin)
     }
 
+    func addThemePreset(name: String, primary: Color, secondary: Color, tertiary: Color) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let id = "custom-\(Int(Date().timeIntervalSince1970))"
+        let preset = ThemePreset(id: id, name: trimmed, primary: primary, secondary: secondary, tertiary: tertiary)
+        themePresets.append(preset)
+        selectedThemeId = id
+        UserDefaults.standard.set(id, forKey: prefSelectedThemeId)
+    }
+
     var currentAccentColor: Color {
-        themePresets.first(where: { $0.id == selectedThemeId })?.accent ?? .green
+        themePresets.first(where: { $0.id == selectedThemeId })?.primary ?? .green
     }
 
     func handleScenePhase(_ phase: ScenePhase) {
@@ -1002,6 +1032,10 @@ struct ContentView: View {
     @State private var changePinConfirm = ""
     @State private var changePinError = ""
     @State private var customTimeout = ""
+    @State private var presetName = ""
+    @State private var primaryHex = ""
+    @State private var secondaryHex = ""
+    @State private var tertiaryHex = ""
 
     var body: some View {
         NavigationStack {
@@ -1362,7 +1396,11 @@ struct ContentView: View {
                             Image(systemName: viewModel.selectedThemeId == preset.id ? "largecircle.fill.circle" : "circle")
                             Text(preset.name)
                             Spacer()
-                            Circle().fill(preset.accent).frame(width: 16, height: 16)
+                            HStack(spacing: 6) {
+                                Circle().fill(preset.primary).frame(width: 12, height: 12)
+                                Circle().fill(preset.secondary).frame(width: 12, height: 12)
+                                Circle().fill(preset.tertiary).frame(width: 12, height: 12)
+                            }
                         }
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -1374,6 +1412,64 @@ struct ContentView: View {
                         get: { viewModel.amoledEnabled },
                         set: { viewModel.setAmoledEnabled($0) }
                     ))
+                }
+            }
+
+            cardContainer("Create Preset") {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField("Preset name", text: $presetName)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+
+                    TextField("Primary hex (RRGGBB or AARRGGBB)", text: $primaryHex)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+
+                    TextField("Secondary hex (RRGGBB or AARRGGBB)", text: $secondaryHex)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+
+                    TextField("Tertiary hex (RRGGBB or AARRGGBB)", text: $tertiaryHex)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+
+                    Button("Save preset") {
+                        guard
+                            let primary = parseHexColor(primaryHex),
+                            let secondary = parseHexColor(secondaryHex),
+                            let tertiary = parseHexColor(tertiaryHex)
+                        else {
+                            return
+                        }
+                        viewModel.addThemePreset(
+                            name: presetName,
+                            primary: primary,
+                            secondary: secondary,
+                            tertiary: tertiary
+                        )
+                        presetName = ""
+                        primaryHex = ""
+                        secondaryHex = ""
+                        tertiaryHex = ""
+                    }
+                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        parseHexColor(primaryHex) == nil ||
+                        parseHexColor(secondaryHex) == nil ||
+                        parseHexColor(tertiaryHex) == nil
+                    )
                 }
             }
 
@@ -1417,13 +1513,25 @@ struct ContentView: View {
             ForEach(Array(viewModel.layoutOrder.enumerated()), id: \.element.rawValue) { index, id in
                 cardContainer(sectionTitle(id)) {
                     HStack(spacing: 8) {
-                        if hideableSections.contains(id) {
-                            Toggle("Visible", isOn: Binding(
-                                get: { !viewModel.hiddenSections.contains(id) },
-                                set: { viewModel.setSectionHidden(id, hidden: !$0) }
-                            ))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(sectionTitle(id))
+                                .fontWeight(.medium)
+                            if hideableSections.contains(id) {
+                                Text(viewModel.hiddenSections.contains(id) ? "Hidden" : "Visible")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Always visible")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         Spacer()
+                        if hideableSections.contains(id) {
+                            Button(viewModel.hiddenSections.contains(id) ? "Show" : "Hide") {
+                                viewModel.setSectionHidden(id, hidden: !viewModel.hiddenSections.contains(id))
+                            }
+                        }
                         Button("Up") {
                             viewModel.moveLayoutItem(id, direction: -1)
                         }
@@ -1587,10 +1695,6 @@ struct ContentView: View {
                 VStack(spacing: 12) {
                     cardContainer("Tickets & Payments History") {
                         VStack(alignment: .leading, spacing: 10) {
-                            Button("Refresh") {
-                                Task { await viewModel.loadCardHistory() }
-                            }
-
                             if viewModel.historyState.isLoading {
                                 ProgressView()
                             }
@@ -1633,6 +1737,12 @@ struct ContentView: View {
                     Button("Back") {
                         showHistoryScreen = false
                     }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Refresh") {
+                        Task { await viewModel.loadCardHistory() }
+                    }
+                    .disabled(viewModel.historyState.isLoading)
                 }
             }
         }
@@ -1725,6 +1835,25 @@ struct ContentView: View {
             Spacer()
             Text(value.isEmpty ? "-" : value)
         }
+    }
+
+    private func parseHexColor(_ raw: String) -> Color? {
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+        let normalized: String
+        if cleaned.count == 6 {
+            normalized = "FF" + cleaned
+        } else if cleaned.count == 8 {
+            normalized = cleaned
+        } else {
+            return nil
+        }
+
+        guard let value = UInt64(normalized, radix: 16) else { return nil }
+        let a = Double((value & 0xFF000000) >> 24) / 255.0
+        let r = Double((value & 0x00FF0000) >> 16) / 255.0
+        let g = Double((value & 0x0000FF00) >> 8) / 255.0
+        let b = Double(value & 0x000000FF) / 255.0
+        return Color(red: r, green: g, blue: b, opacity: a)
     }
 
     private func dateText(fromMs value: Int64) -> String {
