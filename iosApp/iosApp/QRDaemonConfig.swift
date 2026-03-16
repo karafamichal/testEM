@@ -1,7 +1,7 @@
 import Foundation
 
 enum QRDaemonConfig {
-    static let baseURL = URL(string: "https://sadzv.qrbus.me")!
+    static let baseURL = URL(string: "https://m.mhdbb.qrbus.me")!
     static let accountURL = baseURL.appendingPathComponent("account")
     static let loginURL = baseURL.appendingPathComponent("account/login")
     static let tokenAPI = baseURL.appendingPathComponent("cardapi/getQrToken")

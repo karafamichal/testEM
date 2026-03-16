@@ -213,6 +213,7 @@ final class QRDaemonService {
     private func performLogin() async throws {
         let session = makeSession()
         do {
+            onStatus("Base URL: \(sessionBaseURL.absoluteString)")
             onStatus("Opening base URL...")
             let (_, baseResponse) = try await session.data(for: URLRequest(url: sessionBaseURL))
             if let http = baseResponse as? HTTPURLResponse, let effectiveURL = http.url {
