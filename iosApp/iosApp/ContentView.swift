@@ -15,7 +15,7 @@ private struct QrTokenResponse: Decodable {
     let data: String?
 }
 
-private struct AccountDetails {
+fileprivate struct AccountDetails {
     var cardTypeName: String = ""
     var organizationName: String = ""
     var cardValidFrom: Int64 = 0
@@ -43,7 +43,7 @@ private struct CardHistoryItem: Identifiable {
     let amountText: String
 }
 
-private struct CardHistoryState {
+fileprivate struct CardHistoryState {
     var isLoading = false
     var items: [CardHistoryItem] = []
     var errorMessage = ""
