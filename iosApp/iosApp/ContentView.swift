@@ -1017,15 +1017,33 @@ private struct PinSetupView: View {
     @State private var error = ""
 
     var body: some View {
-        Form {
-            Section("Set App PIN") {
+        VStack(spacing: 16) {
+            Text("Set App PIN")
+                .font(.system(size: 24, weight: .bold))
+            Text("Protect your app with a PIN")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 12) {
                 SecureField("PIN (4-8 digits)", text: $pin)
                     .keyboardType(.numberPad)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
                 SecureField("Confirm PIN", text: $confirmPin)
                     .keyboardType(.numberPad)
-            }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 
-            Section {
+                if !error.isEmpty {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 Button("Save PIN") {
                     guard pin == confirmPin else {
                         error = "PINs do not match."
@@ -1039,16 +1057,15 @@ private struct PinSetupView: View {
                         error = "PIN must be 4-8 digits."
                     }
                 }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 16))
             }
-
-            if !error.isEmpty {
-                Section("Error") {
-                    Text(error).foregroundStyle(.red)
-                }
-            }
+            .padding(16)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 3)
         }
-        .scrollContentBackground(.hidden)
-        .background(Color.clear)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 
@@ -1058,10 +1075,26 @@ private struct PinUnlockView: View {
     @State private var error = ""
 
     var body: some View {
-        Form {
-            Section("Unlock") {
+        VStack(spacing: 16) {
+            Text("Unlock")
+                .font(.system(size: 24, weight: .bold))
+            Text("Enter PIN or use biometrics")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 12) {
                 SecureField("PIN", text: $pin)
                     .keyboardType(.numberPad)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                if !error.isEmpty {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 Button("Unlock with PIN") {
                     if viewModel.verifyPin(pin) {
@@ -1071,6 +1104,9 @@ private struct PinUnlockView: View {
                         error = "Incorrect PIN"
                     }
                 }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 16))
 
                 if viewModel.biometricEnabled {
                     Button("Use Face ID / Touch ID") {
@@ -1083,17 +1119,16 @@ private struct PinUnlockView: View {
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.roundedRectangle(radius: 16))
                 }
             }
-
-            if !error.isEmpty {
-                Section("Error") {
-                    Text(error).foregroundStyle(.red)
-                }
-            }
+            .padding(16)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 3)
         }
-        .scrollContentBackground(.hidden)
-        .background(Color.clear)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 
@@ -1160,57 +1195,69 @@ struct ContentView: View {
                 ZStack {
                     appBackground
                         .ignoresSafeArea()
-                    daemonView
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
+
+                    if showSettings {
+                        settingsSheet
+                    } else if showHistoryScreen {
+                        historyScreenSheet
+                    } else {
+                        daemonView
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                    }
                 }
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            settingsPage = .root
-                            showSettings = true
-                        } label: {
-                            Image(systemName: "gearshape.fill")
+                    if !showSettings && !showHistoryScreen {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                showAccountDialog = true
+                            } label: {
+                                Text(viewModel.email.isEmpty ? "testEM" : viewModel.email)
+                                    .font(.headline)
+                            }
+                        }
+
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                settingsPage = .root
+                                showSettings = true
+                            } label: {
+                                Image(systemName: "gearshape.fill")
+                            }
                         }
                     }
                 }
             }
             .interactiveDismissDisabled(true)
-        }
-        .sheet(isPresented: $showSettings) {
-            settingsSheet
-        }
-        .sheet(isPresented: $showChangePinSheet) {
-            changePinSheet
-        }
-        .sheet(isPresented: $showAccountDialog) {
-            accountDialogSheet
-        }
-        .sheet(isPresented: $showHistoryScreen) {
-            historyScreenSheet
-        }
-        .sheet(isPresented: $showTokenInfoDialog) {
-            tokenInfoSheet
-        }
-        .fullScreenCover(isPresented: $showFullscreenQr) {
-            fullscreenQrView
-        }
-        .alert("NFC UID", isPresented: $showNfcUidDialog) {
-            Button("Copy") {
-                UIPasteboard.general.string = nfcUidToShow
+            .sheet(isPresented: $showChangePinSheet) {
+                changePinSheet
             }
-            Button("Close", role: .cancel) { }
-        } message: {
-            Text("Copy this UID to set it on the website:\n\n\(nfcUidToShow)")
-        }
-        .alert("Logout?", isPresented: $showLogoutConfirm) {
-            Button("Cancel", role: .cancel) { }
-            Button("Yes, Logout", role: .destructive) {
-                viewModel.logout()
-                showSettings = false
+            .sheet(isPresented: $showAccountDialog) {
+                accountDialogSheet
             }
-        } message: {
-            Text("Are you sure you want to logout?")
+            .sheet(isPresented: $showTokenInfoDialog) {
+                tokenInfoSheet
+            }
+            .fullScreenCover(isPresented: $showFullscreenQr) {
+                fullscreenQrView
+            }
+            .alert("NFC UID", isPresented: $showNfcUidDialog) {
+                Button("Copy") {
+                    UIPasteboard.general.string = nfcUidToShow
+                }
+                Button("Close", role: .cancel) { }
+            } message: {
+                Text("Copy this UID to set it on the website:\n\n\(nfcUidToShow)")
+            }
+            .alert("Logout?", isPresented: $showLogoutConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Yes, Logout", role: .destructive) {
+                    viewModel.logout()
+                    showSettings = false
+                }
+            } message: {
+                Text("Are you sure you want to logout?")
+            }
         }
     }
 
@@ -1233,14 +1280,14 @@ struct ContentView: View {
     private var loginView: some View {
         ScrollView {
             VStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(spacing: 4) {
                     Text("testEM")
                         .font(.largeTitle.weight(.bold))
                     Text("Real-time QR Token Generator")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
 
                 cardContainer("Credentials") {
                     VStack(spacing: 12) {
@@ -1296,26 +1343,6 @@ struct ContentView: View {
     private var daemonView: some View {
         ScrollView {
             VStack(spacing: 16) {
-                HStack {
-                    Button {
-                        showAccountDialog = true
-                    } label: {
-                        Text(viewModel.email.isEmpty ? "testEM" : viewModel.email)
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer()
-
-                    Button {
-                        settingsPage = .root
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.title3)
-                    }
-                    .buttonStyle(.plain)
-                }
-
                 ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
                     if !viewModel.hiddenSections.contains(id) || !hideableSections.contains(id) {
                         sectionView(for: id)
