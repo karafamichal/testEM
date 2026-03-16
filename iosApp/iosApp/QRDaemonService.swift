@@ -3,6 +3,7 @@ import Foundation
 final class QRDaemonService {
     private let baseURL: URL
     private let cookieStorage = HTTPCookieStorage()
+    private let userAgent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
 
     init(baseURL: URL = QRDaemonConfig.baseURL) {
         self.baseURL = baseURL
@@ -11,22 +12,62 @@ final class QRDaemonService {
     func warmSessionAndLogin(email: String, password: String) async throws {
         let session = makeSession()
         _ = try await performRequest(session: session, path: "/", method: "GET")
-        _ = try await performRequest(session: session, path: "/account", method: "GET")
+
+        _ = try await performRequest(
+            session: session,
+            path: "/account",
+            method: "GET",
+            additionalHeaders: [
+                "Referer": baseURL.absoluteString
+            ]
+        )
+
+        ensureConsentCookies()
 
         let loginBody = "post[login]=\(urlEncode(email))&post[password]=\(urlEncode(password))"
-        let loginData = try await performRequest(
-            session: session,
-            path: "/accountapi/login",
-            method: "POST",
-            body: loginBody,
-            contentType: "application/x-www-form-urlencoded; charset=UTF-8",
-            additionalHeaders: ["X-Requested-With": "XMLHttpRequest"]
-        )
+        let loginURL = baseURL.appendingPathComponent("accountapi/login")
+        var loginRequest = URLRequest(url: loginURL)
+        loginRequest.httpMethod = "POST"
+        loginRequest.httpBody = loginBody.data(using: .utf8)
+        loginRequest.setValue("*/*", forHTTPHeaderField: "Accept")
+        loginRequest.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+        loginRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        loginRequest.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        loginRequest.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+        loginRequest.setValue(baseURL.absoluteString, forHTTPHeaderField: "Origin")
+        loginRequest.setValue("no-cache", forHTTPHeaderField: "Pragma")
+        loginRequest.setValue(baseURL.appendingPathComponent("account/login").absoluteString, forHTTPHeaderField: "Referer")
+        loginRequest.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+
+        if let csrf = csrfToken(for: loginURL) {
+            loginRequest.setValue(csrf, forHTTPHeaderField: "X-XSRF-TOKEN")
+            loginRequest.setValue(csrf, forHTTPHeaderField: "X-CSRF-TOKEN")
+        }
+
+        let (loginData, loginResponseRaw) = try await session.data(for: loginRequest)
+        guard let loginResponse = loginResponseRaw as? HTTPURLResponse else {
+            throw NSError(domain: "testEM", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid login response"])
+        }
+        guard (200...299).contains(loginResponse.statusCode) else {
+            throw NSError(domain: "testEM", code: loginResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Login HTTP \(loginResponse.statusCode)"])
+        }
+
+        maybePersistWpisCookie(from: loginResponse)
 
         let decoded = try JSONDecoder().decode(LoginResponse.self, from: loginData)
         if !decoded.success {
             throw NSError(domain: "testEM", code: 401, userInfo: [NSLocalizedDescriptionKey: "Server returned success=false"])
         }
+
+        _ = try? await performRequest(
+            session: session,
+            path: "/accountapi/getUId",
+            method: "GET",
+            additionalHeaders: [
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": baseURL.absoluteString
+            ]
+        )
     }
 
     func getQrToken(serialNumber: String) async throws -> String {
@@ -38,7 +79,7 @@ final class QRDaemonService {
             method: "POST",
             body: tokenBody,
             contentType: "application/x-www-form-urlencoded; charset=UTF-8",
-            additionalHeaders: ["X-Requested-With": "XMLHttpRequest"]
+            additionalHeaders: tokenHeaders(path: "/account")
         )
 
         let tokenResponse = try JSONDecoder().decode(QrTokenResponse.self, from: raw)
@@ -54,7 +95,7 @@ final class QRDaemonService {
             session: session,
             path: "/userapi/getAccountDetail",
             method: "GET",
-            additionalHeaders: ["X-Requested-With": "XMLHttpRequest"]
+            additionalHeaders: tokenHeaders(path: "/account/login")
         )
     }
 
@@ -65,7 +106,7 @@ final class QRDaemonService {
             session: session,
             path: path,
             method: "GET",
-            additionalHeaders: ["X-Requested-With": "XMLHttpRequest"]
+            additionalHeaders: tokenHeaders(path: "/account")
         )
     }
 
@@ -95,7 +136,7 @@ final class QRDaemonService {
         let url = baseURL.appendingPathComponent(cleanPath)
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("*/*", forHTTPHeaderField: "Accept")
         request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
 
@@ -121,6 +162,81 @@ final class QRDaemonService {
             )
         }
         return data
+    }
+
+    private func tokenHeaders(path: String) -> [String: String] {
+        var headers: [String: String] = [
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": baseURL.absoluteString,
+            "Referer": baseURL.appendingPathComponent(path.hasPrefix("/") ? String(path.dropFirst()) : path).absoluteString,
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache"
+        ]
+        if let csrf = csrfToken(for: baseURL) {
+            headers["X-XSRF-TOKEN"] = csrf
+            headers["X-CSRF-TOKEN"] = csrf
+        }
+        return headers
+    }
+
+    private func csrfToken(for url: URL) -> String? {
+        guard let cookies = cookieStorage.cookies(for: url) else {
+            return nil
+        }
+        let raw = cookies.first(where: { ["XSRF-TOKEN", "CSRF-TOKEN", "csrftoken"].contains($0.name) })?.value
+        guard let raw else { return nil }
+        return raw.removingPercentEncoding ?? raw
+    }
+
+    private func ensureConsentCookies() {
+        guard let host = baseURL.host else { return }
+        let oneYear = Date().addingTimeInterval(365 * 24 * 60 * 60)
+        let consentCookies: [HTTPCookie] = [
+            .init(properties: [
+                .domain: host,
+                .path: "/",
+                .name: "pisnotshowhint",
+                .value: "true",
+                .secure: "TRUE",
+                .expires: oneYear
+            ]),
+            .init(properties: [
+                .domain: host,
+                .path: "/",
+                .name: "piscookiewindow",
+                .value: "{%22requiredCookies%22:true%2C%22analyticsCookies%22:true}",
+                .secure: "TRUE",
+                .expires: oneYear
+            ])
+        ].compactMap { $0 }
+
+        for cookie in consentCookies where cookieStorage.cookies?.contains(where: { $0.name == cookie.name }) != true {
+            cookieStorage.setCookie(cookie)
+        }
+    }
+
+    private func maybePersistWpisCookie(from response: HTTPURLResponse) {
+        guard let host = baseURL.host else { return }
+        guard let fields = response.allHeaderFields as? [String: String] else { return }
+        let setCookieHeaders = fields.filter { $0.key.caseInsensitiveCompare("Set-Cookie") == .orderedSame }.map { $0.value }
+        for header in setCookieHeaders {
+            if let range = header.range(of: "WPIS=") {
+                let suffix = header[range.upperBound...]
+                let value = suffix.split(separator: ";", maxSplits: 1).first.map(String.init) ?? ""
+                guard !value.isEmpty else { continue }
+                let expires = Date().addingTimeInterval(30 * 24 * 60 * 60)
+                if let cookie = HTTPCookie(properties: [
+                    .domain: host,
+                    .path: "/",
+                    .name: "WPIS",
+                    .value: value,
+                    .secure: "TRUE",
+                    .expires: expires
+                ]) {
+                    cookieStorage.setCookie(cookie)
+                }
+            }
+        }
     }
 
     private func urlEncode(_ input: String) -> String {

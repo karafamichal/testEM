@@ -81,14 +81,12 @@ extension ContentView {
             cardContainer("Polling status") {
                 VStack(alignment: .leading, spacing: dp(6)) {
                     HStack {
-                        Text("Status:")
-                            .fontWeight(.bold)
-                        Spacer()
                         Text(viewModel.isPolling ? "Polling Active" : "Polling Paused")
                             .font(.caption2.weight(.bold))
                             .padding(.horizontal, dp(7))
                             .padding(.vertical, dp(3))
                             .background(viewModel.isPolling ? Color.green.opacity(0.2) : Color.gray.opacity(0.2), in: Capsule())
+                        Spacer()
                     }
                     Text("Last Update: \(viewModel.lastUpdated?.formatted(date: .omitted, time: .standard) ?? "Never")")
                         .font(.system(size: 12 * uiScale))

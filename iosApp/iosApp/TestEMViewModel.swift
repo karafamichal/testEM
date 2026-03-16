@@ -162,6 +162,7 @@ final class TestEMViewModel: ObservableObject {
                 await loadCardHistory()
                 startPolling()
             } catch {
+                isLoggedIn = false
                 isSessionReady = false
                 errorMessage = "Login failed: \(error.localizedDescription)"
                 statusMessage = "Login failed"
