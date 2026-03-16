@@ -913,7 +913,18 @@ final class QRDaemonService {
                 .expires: Date().addingTimeInterval(30 * 24 * 60 * 60)
             ]) {
                 cookieStorage.setCookie(cookie)
-                  customCookieJar[cookie.name] = cookie
+                customCookieJar[cookie.name] = cookie
+            }
+        }
+    }
+
+    private func deriveDisplayName(user: [String: Any], card: [String: Any], fallback: [String: Any]) -> String {
+        let cardFullName = readString(card, keys: ["fullName", "fullname", "ownerFullName", "name"])
+        let cardFirstName = readString(card, keys: ["ownerFirstName", "firstName", "firstname", "first_name"])
+        let cardLastName = readString(card, keys: ["ownerLastName", "lastName", "lastname", "last_name"])
+        
+        let dataFullName = readString(user, keys: ["fullName", "fullname", "name"])
+        let dataFirstName = readString(user, keys: ["firstName", "firstname", "first_name"])
         let dataLastName = readString(user, keys: ["lastName", "lastname", "last_name"])
 
         if !cardFullName.isEmpty { return cardFullName }
