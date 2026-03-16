@@ -80,6 +80,8 @@ final class TestEMViewModel: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private let pollIntervalNs: UInt64 = 25_000_000_000
     private var backgroundAt: Date?
+    private var isBiometricPromptInProgress = false
+    private var didAttemptAutoBiometricThisForeground = false
 
     private let prefEmail = "testem.email"
     private let prefPassword = "testem.password"
@@ -104,8 +106,8 @@ final class TestEMViewModel: ObservableObject {
             errorMessage = "Unlock app first."
             return
         }
-        guard !email.isEmpty, !password.isEmpty, !serialNumber.isEmpty else {
-            errorMessage = "Fill in email, password, and serial number."
+        guard !email.isEmpty, !password.isEmpty else {
+            errorMessage = "Fill in email and password."
             return
         }
 
@@ -123,7 +125,11 @@ final class TestEMViewModel: ObservableObject {
                 statusMessage = "Login successful"
                 try? await loadAccountDetails()
                 await loadCardHistory()
-                startPolling()
+                if serialNumber.isEmpty {
+                    statusMessage = "Login successful (serial number not found yet)"
+                } else {
+                    startPolling()
+                }
             } catch {
                 isLoggedIn = false
                 errorMessage = "Login failed: \(error.localizedDescription)"
@@ -148,6 +154,23 @@ final class TestEMViewModel: ObservableObject {
 
     func startPolling() {
         guard isLoggedIn else { return }
+        guard !serialNumber.isEmpty else {
+            statusMessage = "Loading account details to obtain serial number..."
+            Task {
+                do {
+                    try await loadAccountDetails()
+                    if serialNumber.isEmpty {
+                        statusMessage = "Unable to find serial number from account details."
+                        return
+                    }
+                    startPolling()
+                } catch {
+                    statusMessage = "Failed to load serial number"
+                    errorMessage = "Failed to load serial number: \(error.localizedDescription)"
+                }
+            }
+            return
+        }
         if isPolling { return }
         isPolling = true
         statusMessage = "Polling started"
@@ -174,6 +197,20 @@ final class TestEMViewModel: ObservableObject {
 
     func loadCardHistory(limit: Int = 20) async {
         guard isLoggedIn else { return }
+        if serialNumber.isEmpty {
+            do {
+                try await loadAccountDetails()
+            } catch {
+                historyState.isLoading = false
+                historyState.errorMessage = "Failed to load serial number: \(error.localizedDescription)"
+                return
+            }
+            if serialNumber.isEmpty {
+                historyState.isLoading = false
+                historyState.errorMessage = "Serial number not found in account details."
+                return
+            }
+        }
         historyState.isLoading = true
         historyState.errorMessage = ""
         do {
@@ -231,6 +268,7 @@ final class TestEMViewModel: ObservableObject {
     func handleScenePhase(_ phase: ScenePhase) {
         switch phase {
         case .background:
+            didAttemptAutoBiometricThisForeground = false
             if isPinSet {
                 backgroundAt = Date()
             }
@@ -244,9 +282,10 @@ final class TestEMViewModel: ObservableObject {
                     isAppUnlocked = false
                 }
             }
-            if biometricEnabled && !isAppUnlocked {
+            if biometricEnabled && !isAppUnlocked && !didAttemptAutoBiometricThisForeground {
+                didAttemptAutoBiometricThisForeground = true
                 Task {
-                    _ = await unlockWithBiometrics()
+                    _ = await unlockWithBiometrics(triggeredAutomatically: true)
                 }
             }
         default:
@@ -254,12 +293,16 @@ final class TestEMViewModel: ObservableObject {
         }
     }
 
-    func unlockWithBiometrics() async -> Bool {
+    func unlockWithBiometrics(triggeredAutomatically: Bool = false) async -> Bool {
         guard biometricEnabled else { return false }
+        guard !isBiometricPromptInProgress else { return false }
+        isBiometricPromptInProgress = true
+        defer { isBiometricPromptInProgress = false }
+
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
-            if let error {
+            if let error, !triggeredAutomatically {
                 self.errorMessage = "Biometric unavailable: \(error.localizedDescription)"
             }
             return false
@@ -272,9 +315,15 @@ final class TestEMViewModel: ObservableObject {
             )
             if ok {
                 isAppUnlocked = true
+                errorMessage = ""
                 return true
             }
         } catch {
+            if triggeredAutomatically,
+               let laError = error as? LAError,
+               laError.code == .userCancel || laError.code == .systemCancel || laError.code == .appCancel {
+                return false
+            }
             errorMessage = "Biometric failed: \(error.localizedDescription)"
         }
         return false
@@ -802,7 +851,8 @@ struct ContentView: View {
                     loginView
                 }
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
             .navigationTitle("testEM")
         }
         .onChange(of: scenePhase) { _, newValue in
@@ -811,42 +861,46 @@ struct ContentView: View {
     }
 
     private var loginView: some View {
-        Form {
-            Section("Credentials") {
-                TextField("Email", text: $viewModel.email)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+        ScrollView {
+            VStack(spacing: 16) {
+                GroupBox("Credentials") {
+                    VStack(spacing: 12) {
+                        TextField("Email", text: $viewModel.email)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .textFieldStyle(.roundedBorder)
 
-                SecureField("Password", text: $viewModel.password)
+                        SecureField("Password", text: $viewModel.password)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
 
-                TextField("Serial Number", text: $viewModel.serialNumber)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-
-            Section {
                 Button {
                     viewModel.login()
                 } label: {
-                    if viewModel.isLoggingIn {
-                        ProgressView()
-                    } else {
-                        Text("Login")
+                    HStack {
+                        if viewModel.isLoggingIn {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                        Text(viewModel.isLoggingIn ? "Signing in..." : "Login")
+                            .fontWeight(.semibold)
                     }
+                    .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
                 .disabled(viewModel.isLoggingIn)
-            }
 
-            if !viewModel.statusMessage.isEmpty {
-                Section("Status") {
-                    Text(viewModel.statusMessage)
-                }
-            }
-
-            if !viewModel.errorMessage.isEmpty {
-                Section("Error") {
-                    Text(viewModel.errorMessage)
-                        .foregroundStyle(.red)
+                GroupBox("Status") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(viewModel.statusMessage)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if !viewModel.errorMessage.isEmpty {
+                            Text(viewModel.errorMessage)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
                 }
             }
         }
@@ -878,6 +932,7 @@ struct ContentView: View {
 
                 GroupBox("Account Details") {
                     VStack(alignment: .leading, spacing: 6) {
+                        labeled("SNR", viewModel.serialNumber)
                         labeled("Card Type", viewModel.accountDetails.cardTypeName)
                         labeled("Organization", viewModel.accountDetails.organizationName)
                         labeled("Card Valid To", dateText(fromMs: viewModel.accountDetails.cardValidTo))
