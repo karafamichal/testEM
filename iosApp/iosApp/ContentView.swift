@@ -1122,27 +1122,49 @@ struct ContentView: View {
     @State private var tertiaryHex = ""
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                appBackground
-                    .ignoresSafeArea()
-
-                Group {
-                    if !viewModel.isPinSet {
-                        PinSetupView(viewModel: viewModel)
-                    } else if !viewModel.isAppUnlocked {
-                        PinUnlockView(viewModel: viewModel)
-                    } else if viewModel.isLoggedIn {
-                        daemonView
-                    } else {
+        Group {
+            if !viewModel.isPinSet {
+                ZStack {
+                    appBackground
+                        .ignoresSafeArea()
+                    PinSetupView(viewModel: viewModel)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                }
+            } else if !viewModel.isAppUnlocked {
+                ZStack {
+                    appBackground
+                        .ignoresSafeArea()
+                    PinUnlockView(viewModel: viewModel)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                }
+            } else {
+                NavigationStack {
+                    ZStack {
+                        appBackground
+                            .ignoresSafeArea()
                         loginView
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
             }
-            .toolbar {
-                if viewModel.isLoggedIn && viewModel.isAppUnlocked {
+        }
+        .onChange(of: scenePhase) { _, newValue in
+            viewModel.handleScenePhase(newValue)
+        }
+        .tint(viewModel.currentAccentColor)
+        .fullScreenCover(isPresented: $viewModel.isLoggedIn) {
+            NavigationStack {
+                ZStack {
+                    appBackground
+                        .ignoresSafeArea()
+                    daemonView
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                }
+                .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             settingsPage = .root
@@ -1153,11 +1175,8 @@ struct ContentView: View {
                     }
                 }
             }
+            .interactiveDismissDisabled(true)
         }
-        .onChange(of: scenePhase) { _, newValue in
-            viewModel.handleScenePhase(newValue)
-        }
-        .tint(viewModel.currentAccentColor)
         .sheet(isPresented: $showSettings) {
             settingsSheet
         }
