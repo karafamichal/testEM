@@ -353,6 +353,8 @@ final class QRDaemonService {
         let bodyText = String(data: data, encoding: .utf8) ?? ""
         lastAccountDetailRaw = bodyText
 
+        _ = trySetRecoveredSnr(from: bodyText)
+
         if response.statusCode >= 200, response.statusCode < 300, !bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             parseAndEmitAccountDetailsKotlinStyle(from: bodyText)
         }
@@ -373,11 +375,7 @@ final class QRDaemonService {
             }
 
             if let raw = lastAccountDetailRaw,
-               let recovered = extractSnrFromRawJson(raw),
-               !recovered.isEmpty {
-                serialNumber = recovered
-                onSerialNumber(recovered)
-                onStatus("Loaded SNR")
+               trySetRecoveredSnr(from: raw) {
                 return
             }
 
@@ -566,12 +564,8 @@ final class QRDaemonService {
             }
             if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                let raw = lastAccountDetailRaw,
-               let recovered = extractSnrFromRawJson(raw),
-               !recovered.isEmpty {
-                serialNumber = recovered
-                onSerialNumber(recovered)
-                identifier = recovered
-                onStatus("Loaded SNR")
+               trySetRecoveredSnr(from: raw) {
+                identifier = serialNumber
             }
         }
         if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -588,12 +582,8 @@ final class QRDaemonService {
                 identifier = (nfcEnabled && !nfcUid.isEmpty) ? nfcUid : serialNumber
                 if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                    let raw = lastAccountDetailRaw,
-                   let recovered = extractSnrFromRawJson(raw),
-                   !recovered.isEmpty {
-                    serialNumber = recovered
-                    onSerialNumber(recovered)
-                    identifier = recovered
-                    onStatus("Loaded SNR")
+                   trySetRecoveredSnr(from: raw) {
+                    identifier = serialNumber
                 }
             }
             if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1086,8 +1076,9 @@ final class QRDaemonService {
         let patterns = [
             #""(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)"\s*:\s*"([^"]+)""#,
             #""(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)"\s*:\s*([0-9]+)"#,
-            #"(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)\s*[:=]\s*\"?([A-Za-z0-9_-]{4,})\"?"#,
-            #"\\"(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)\\"\s*:\s*\\"([^\\"]+)\\""#
+            #"(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)\s*[:=]\s*\"?([A-Za-z0-9_\-:.]{4,64})\"?"#,
+            #"\\"(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)\\"\s*:\s*\\"([^\\"]+)\\""#,
+            #"(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)\s*[- ]?>\s*\"?([A-Za-z0-9_\-:.]{4,64})\"?"#
         ]
 
         for pattern in patterns {
@@ -1107,10 +1098,25 @@ final class QRDaemonService {
 
     @discardableResult
     private func trySetRecoveredSnr(from text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let recovered = extractSnrFromRawJson(trimmed),
-              !recovered.isEmpty else {
+        let base = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if base.isEmpty { return false }
+
+        let candidates = [
+            base,
+            base.removingPercentEncoding ?? base,
+            base.replacingOccurrences(of: "\\\\", with: "\\").replacingOccurrences(of: "\\\"", with: "\""),
+            (base.removingPercentEncoding ?? base).replacingOccurrences(of: "\\\\", with: "\\").replacingOccurrences(of: "\\\"", with: "\"")
+        ]
+
+        var recovered: String?
+        for candidate in candidates {
+            if let snr = extractSnrFromRawJson(candidate), !snr.isEmpty {
+                recovered = snr
+                break
+            }
+        }
+
+        guard let recovered, !recovered.isEmpty else {
             return false
         }
 
