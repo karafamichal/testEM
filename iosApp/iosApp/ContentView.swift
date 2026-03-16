@@ -58,6 +58,14 @@ struct ThemePreset: Identifiable, Equatable {
     let tertiary: Color
 }
 
+private struct StoredThemePreset: Codable {
+    let id: String
+    let name: String
+    let primaryHex: String
+    let secondaryHex: String
+    let tertiaryHex: String
+}
+
 enum SettingsPage {
     case root
     case layout
@@ -160,6 +168,7 @@ final class TestEMViewModel: ObservableObject {
     private let prefAmoledEnabled = "testem.amoledEnabled"
     private let prefLanguageCode = "testem.languageCode"
     private let prefSelectedThemeId = "testem.selectedThemeId"
+    private let prefThemePresets = "testem.themePresets"
     private let prefLayoutOrder = "testem.layoutOrder"
     private let prefHiddenSections = "testem.hiddenSections"
     private let prefPinSalt = "testem.pinSalt"
@@ -174,6 +183,9 @@ final class TestEMViewModel: ObservableObject {
         self.amoledEnabled = UserDefaults.standard.object(forKey: prefAmoledEnabled) as? Bool ?? false
         self.languageCode = UserDefaults.standard.string(forKey: prefLanguageCode) ?? "sk"
         self.selectedThemeId = UserDefaults.standard.string(forKey: prefSelectedThemeId) ?? "classic"
+        if let storedPresets = loadStoredThemePresets(), !storedPresets.isEmpty {
+            self.themePresets = storedPresets
+        }
         let savedTimeout = UserDefaults.standard.object(forKey: prefLockTimeout) as? Int ?? 30
         self.lockTimeoutSeconds = max(0, savedTimeout)
         UserDefaults.standard.set(self.lockTimeoutSeconds, forKey: prefLockTimeout)
@@ -425,6 +437,7 @@ final class TestEMViewModel: ObservableObject {
         themePresets.append(preset)
         selectedThemeId = id
         UserDefaults.standard.set(id, forKey: prefSelectedThemeId)
+        saveThemePresets()
     }
 
     var currentAccentColor: Color {
@@ -524,6 +537,72 @@ final class TestEMViewModel: ObservableObject {
 
     private func clearSessionCookies() {
         cookieStorage.cookies?.forEach { cookieStorage.deleteCookie($0) }
+    }
+
+    private func loadStoredThemePresets() -> [ThemePreset]? {
+        guard let data = UserDefaults.standard.data(forKey: prefThemePresets) else {
+            return nil
+        }
+        guard let decoded = try? JSONDecoder().decode([StoredThemePreset].self, from: data) else {
+            return nil
+        }
+        return decoded.compactMap { stored in
+            guard
+                let primary = color(fromHex: stored.primaryHex),
+                let secondary = color(fromHex: stored.secondaryHex),
+                let tertiary = color(fromHex: stored.tertiaryHex)
+            else {
+                return nil
+            }
+            return ThemePreset(
+                id: stored.id,
+                name: stored.name,
+                primary: primary,
+                secondary: secondary,
+                tertiary: tertiary
+            )
+        }
+    }
+
+    private func saveThemePresets() {
+        let stored = themePresets.map {
+            StoredThemePreset(
+                id: $0.id,
+                name: $0.name,
+                primaryHex: hexString(from: $0.primary),
+                secondaryHex: hexString(from: $0.secondary),
+                tertiaryHex: hexString(from: $0.tertiary)
+            )
+        }
+        if let data = try? JSONEncoder().encode(stored) {
+            UserDefaults.standard.set(data, forKey: prefThemePresets)
+        }
+    }
+
+    private func color(fromHex hex: String) -> Color? {
+        let cleaned = hex.replacingOccurrences(of: "#", with: "")
+        guard cleaned.count == 8, let value = UInt64(cleaned, radix: 16) else { return nil }
+        let a = Double((value & 0xFF000000) >> 24) / 255.0
+        let r = Double((value & 0x00FF0000) >> 16) / 255.0
+        let g = Double((value & 0x0000FF00) >> 8) / 255.0
+        let b = Double(value & 0x000000FF) / 255.0
+        return Color(red: r, green: g, blue: b, opacity: a)
+    }
+
+    private func hexString(from color: Color) -> String {
+        let uiColor = UIColor(color)
+        var r: CGFloat = 0
+        var g: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
+        guard uiColor.getRed(&r, green: &g, blue: &b, alpha: &a) else {
+            return "FF000000"
+        }
+        let alpha = Int(round(a * 255))
+        let red = Int(round(r * 255))
+        let green = Int(round(g * 255))
+        let blue = Int(round(b * 255))
+        return String(format: "%02X%02X%02X%02X", alpha, red, green, blue)
     }
 
     private func makeSession() -> URLSession {
@@ -1666,10 +1745,21 @@ struct ContentView: View {
                             if !viewModel.nfcUid.isEmpty {
                                 labeled("NFC UID", viewModel.nfcUid)
                             }
-                            labeled("Card Type", viewModel.accountDetails.cardTypeName)
-                            labeled("Organization", viewModel.accountDetails.organizationName)
-                            labeled("Card Valid", "\(dateText(fromMs: viewModel.accountDetails.cardValidFrom)) - \(dateText(fromMs: viewModel.accountDetails.cardValidTo))")
-                            labeled("Ticket Valid", "\(dateText(fromMs: viewModel.accountDetails.ticketValidFrom)) - \(dateText(fromMs: viewModel.accountDetails.ticketValidTo))")
+                            if !viewModel.accountDetails.cardTypeName.isEmpty {
+                                labeled("Card Type", viewModel.accountDetails.cardTypeName)
+                            }
+                            if !viewModel.accountDetails.organizationName.isEmpty {
+                                labeled("Organization", viewModel.accountDetails.organizationName)
+                            }
+                            if viewModel.accountDetails.cardValidFrom > 0 || viewModel.accountDetails.cardValidTo > 0 {
+                                labeled("Card Valid", "\(dateText(fromMs: viewModel.accountDetails.cardValidFrom)) - \(dateText(fromMs: viewModel.accountDetails.cardValidTo))")
+                            }
+                            if viewModel.accountDetails.ticketValidFrom > 0 || viewModel.accountDetails.ticketValidTo > 0 {
+                                labeled("Ticket Valid", "\(dateText(fromMs: viewModel.accountDetails.ticketValidFrom)) - \(dateText(fromMs: viewModel.accountDetails.ticketValidTo))")
+                            }
+                            if viewModel.accountDetails.discountValidFrom > 0 || viewModel.accountDetails.discountValidTo > 0 {
+                                labeled("Discount Valid", "\(dateText(fromMs: viewModel.accountDetails.discountValidFrom)) - \(dateText(fromMs: viewModel.accountDetails.discountValidTo))")
+                            }
                             if let credit = viewModel.accountDetails.creditLastBalance {
                                 labeled("Credit", String(format: "%.2f %@", credit, viewModel.accountDetails.currencySymbol))
                             }
@@ -1710,21 +1800,55 @@ struct ContentView: View {
                             }
 
                             ForEach(viewModel.historyState.items) { item in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack {
-                                        Text(item.title).font(.headline)
-                                        Spacer()
-                                        Text(item.amountText)
-                                            .foregroundStyle(item.amountText.hasPrefix("+") ? .green : .primary)
+                                let isPositive = item.amountText.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("+")
+                                let isNegative = item.amountText.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("-")
+                                let cardColor: Color = {
+                                    if item.sourceType == .transaction {
+                                        return viewModel.currentAccentColor.opacity(0.18)
                                     }
-                                    Text(item.subtitle)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
+                                    if isPositive {
+                                        return Color.green.opacity(0.18)
+                                    }
+                                    if isNegative {
+                                        return Color.red.opacity(0.14)
+                                    }
+                                    return Color.secondary.opacity(0.12)
+                                }()
+                                let amountColor: Color = {
+                                    if isPositive {
+                                        return Color(red: 0.11, green: 0.50, blue: 0.23)
+                                    }
+                                    if isNegative {
+                                        return .red
+                                    }
+                                    return .primary
+                                }()
+
+                                VStack(alignment: .leading, spacing: 4) {
                                     Text(dateText(fromMs: item.timestampMs))
-                                        .font(.caption)
+                                        .font(.caption2)
                                         .foregroundStyle(.secondary)
+
+                                    HStack {
+                                        Text(item.title)
+                                            .font(.subheadline.weight(.semibold))
+                                        Spacer()
+                                        if !item.amountText.isEmpty {
+                                            Text(item.amountText)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(amountColor)
+                                        }
+                                    }
+
+                                    if !item.subtitle.isEmpty {
+                                        Text(item.subtitle)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
-                                Divider()
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(cardColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             }
                         }
                     }
