@@ -1141,7 +1141,6 @@ struct ContentView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .navigationTitle("testEM")
             .toolbar {
                 if viewModel.isLoggedIn && viewModel.isAppUnlocked {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -1254,8 +1253,9 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 18))
                 .disabled(viewModel.isLoggingIn)
-                .controlSize(.large)
+                .frame(height: 56)
 
                 cardContainer("Status") {
                     VStack(alignment: .leading, spacing: 6) {
@@ -1268,7 +1268,9 @@ struct ContentView: View {
                         }
                     }
                 }
+
             }
+            .padding(.horizontal, 8)
         }
     }
 
@@ -1340,8 +1342,6 @@ struct ContentView: View {
             cardContainer("Current QR Code") {
                 VStack(spacing: 12) {
                     HStack {
-                        Text("Current QR Code")
-                            .fontWeight(.bold)
                         Spacer()
                         Button {
                             showTokenInfoDialog = true
@@ -1506,11 +1506,9 @@ struct ContentView: View {
                         set: { viewModel.setAmoledEnabled($0) }
                     ))
                 }
-                    .buttonBorderShape(.roundedRectangle(radius: 18))
             }
-                    .frame(height: 56)
+
             cardContainer("Create Preset") {
-                .padding(.horizontal, 8)
                 VStack(alignment: .leading, spacing: 10) {
                     TextField("Preset name", text: $presetName)
                         .padding(.horizontal, 12)
