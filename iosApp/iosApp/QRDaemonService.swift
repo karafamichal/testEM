@@ -231,7 +231,10 @@ final class QRDaemonService {
             ensureConsentCookies()
 
             onStatus("Submitting login...")
-            let loginBody = "post[login]=\(urlEncode(username))&post[password]=\(urlEncode(password))"
+            let loginBody = makeFormBody([
+                "post[login]": username,
+                "post[password]": password
+            ])
             let loginURL = sessionBaseURL.appendingPathComponent("accountapi/login")
             var loginRequest = URLRequest(url: loginURL)
             loginRequest.httpMethod = "POST"
@@ -387,7 +390,9 @@ final class QRDaemonService {
 
         do {
             let session = makeSession()
-            let tokenBody = "post[serialnumber]=\(urlEncode(identifier))"
+            let tokenBody = makeFormBody([
+                "post[serialnumber]": identifier
+            ])
             let (data, response) = try await performRequestWithResponse(
                 session: session,
                 url: sessionBaseURL.appendingPathComponent("cardapi/getQrToken"),
@@ -436,8 +441,12 @@ final class QRDaemonService {
             let rawToken = base64Field.isEmpty ? dataField : base64Field
             let normalized = rawToken.replacingOccurrences(of: " ", with: "+")
             let stripped = normalized.replacingOccurrences(of: "[^A-Za-z0-9+/=_-]", with: "", options: .regularExpression)
-            let padded = stripped + String(repeating: "=", count: (4 - (stripped.count % 4)) % 4)
+            let base64Standard = stripped
+                .replacingOccurrences(of: "-", with: "+")
+                .replacingOccurrences(of: "_", with: "/")
+            let padded = base64Standard + String(repeating: "=", count: (4 - (base64Standard.count % 4)) % 4)
             guard let decoded = Data(base64Encoded: padded, options: [.ignoreUnknownCharacters]) else {
+                onStatus("Token decode failed")
                 return nil
             }
             authFailures = 0
@@ -759,5 +768,12 @@ final class QRDaemonService {
         allowed.insert(charactersIn: "-._*")
         let encoded = input.addingPercentEncoding(withAllowedCharacters: allowed) ?? input
         return encoded.replacingOccurrences(of: "%20", with: "+")
+    }
+
+    private func makeFormBody(_ fields: [String: String]) -> String {
+        fields.map { key, value in
+            "\(urlEncode(key))=\(urlEncode(value))"
+        }
+        .joined(separator: "&")
     }
 }
