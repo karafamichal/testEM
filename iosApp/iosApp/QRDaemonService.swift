@@ -384,6 +384,13 @@ final class QRDaemonService {
     private func fetchQRToken() async throws -> QrTokenPayload? {
         var identifier = (nfcEnabled && !nfcUid.isEmpty) ? nfcUid : serialNumber
         if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let storedSerial = CredentialsManager.shared.loadSerial().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !storedSerial.isEmpty {
+                serialNumber = storedSerial
+                identifier = storedSerial
+            }
+        }
+        if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let now = Date()
             let shouldRefresh = lastSnrRefreshAttempt == nil || now.timeIntervalSince(lastSnrRefreshAttempt!) >= 5
             if shouldRefresh {
@@ -488,7 +495,26 @@ final class QRDaemonService {
     }
 
     private func parseAndEmitAccountDetails(from raw: Data) throws {
-        guard let root = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
+        let jsonObject = try JSONSerialization.jsonObject(with: raw)
+
+        if let rootString = jsonObject as? String {
+            if let recovered = extractSnrFromRawJson(rootString), !recovered.isEmpty, recovered != serialNumber {
+                serialNumber = recovered
+                onSerialNumber(recovered)
+                onStatus("Loaded SNR")
+            }
+            return
+        }
+
+        guard let root = jsonObject as? [String: Any] else {
+            if let recovered = String(data: raw, encoding: .utf8).flatMap(extractSnrFromRawJson),
+               !recovered.isEmpty,
+               recovered != serialNumber {
+                serialNumber = recovered
+                onSerialNumber(recovered)
+                onStatus("Loaded SNR")
+                return
+            }
             throw NSError(domain: "testEM", code: 500, userInfo: [NSLocalizedDescriptionKey: "Account detail parse failed"])
         }
 
