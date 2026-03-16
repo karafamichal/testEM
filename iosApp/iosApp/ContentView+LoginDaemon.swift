@@ -47,18 +47,6 @@ extension ContentView {
                 .disabled(viewModel.isLoggingIn)
                 .frame(height: 56)
 
-                cardContainer("Status") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(viewModel.statusMessage)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if !viewModel.errorMessage.isEmpty {
-                            Text(viewModel.errorMessage)
-                                .foregroundStyle(.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                }
-
             }
             .padding(.horizontal, 8)
         }
@@ -67,6 +55,27 @@ extension ContentView {
     var daemonView: some View {
         ScrollView {
             VStack(spacing: 16) {
+                HStack {
+                    Button {
+                        showAccountDialog = true
+                    } label: {
+                        Text(viewModel.email.isEmpty ? "testEM" : viewModel.email)
+                            .font(.headline)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Button {
+                        settingsPage = .root
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.title3)
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
                     if !viewModel.hiddenSections.contains(id) || !hideableSections.contains(id) {
                         sectionView(for: id)
