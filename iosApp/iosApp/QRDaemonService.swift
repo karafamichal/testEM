@@ -332,7 +332,13 @@ final class QRDaemonService {
             additionalHeaders: standardHeaders(referer: sessionBaseURL.appendingPathComponent("account/login"), includeCSRF: false)
         )
         onStatus("getAccountDetail HTTP \(response.statusCode)")
-        lastAccountDetailRaw = String(data: data, encoding: .utf8)
+        let bodyText = String(data: data, encoding: .utf8) ?? ""
+        lastAccountDetailRaw = bodyText
+
+        if response.statusCode >= 200, response.statusCode < 300, !bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parseAndEmitAccountDetailsKotlinStyle(from: bodyText)
+        }
+
         do {
             try parseAndEmitAccountDetails(from: data)
         } catch {
@@ -363,6 +369,126 @@ final class QRDaemonService {
                 .prefix(140)
             onStatus("No SNR in account detail: \(preview)")
         }
+    }
+
+    private func parseAndEmitAccountDetailsKotlinStyle(from bodyText: String) {
+        guard let bodyData = bodyText.data(using: .utf8),
+              let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] else {
+            return
+        }
+
+        let data = (json["data"] as? [String: Any]) ?? json
+
+        func readString(_ obj: [String: Any]?, _ keys: [String]) -> String {
+            guard let obj else { return "" }
+            for key in keys {
+                if let value = obj[key] {
+                    let text: String
+                    if let str = value as? String {
+                        text = str
+                    } else if let num = value as? NSNumber {
+                        text = num.stringValue
+                    } else {
+                        text = String(describing: value)
+                    }
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty, trimmed != "<null>" {
+                        return trimmed
+                    }
+                }
+            }
+            return ""
+        }
+
+        func firstCard(_ obj: [String: Any]?) -> [String: Any]? {
+            guard let obj else { return nil }
+            if let card = obj["card"] as? [String: Any] { return card }
+            if let cards = obj["cards"] as? [[String: Any]], let first = cards.first { return first }
+            if let cardsAny = obj["cards"] as? [Any] {
+                for item in cardsAny {
+                    if let card = item as? [String: Any] { return card }
+                }
+            }
+            if let user = obj["wertyzUser"] as? [String: Any] { return firstCard(user) }
+            if let user = obj["user"] as? [String: Any] { return firstCard(user) }
+            return nil
+        }
+
+        func firstTicket(_ card: [String: Any]?) -> [String: Any]? {
+            guard let card else { return nil }
+            if let tickets = card["tickets"] as? [[String: Any]] {
+                return tickets.first(where: { ($0["active"] as? Bool) == true }) ?? tickets.first
+            }
+            if let ticketsAny = card["tickets"] as? [Any] {
+                var first: [String: Any]?
+                for item in ticketsAny {
+                    guard let ticket = item as? [String: Any] else { continue }
+                    if first == nil { first = ticket }
+                    if (ticket["active"] as? Bool) == true { return ticket }
+                }
+                return first
+            }
+            return nil
+        }
+
+        let userObj = (data["wertyzUser"] as? [String: Any])
+            ?? (data["user"] as? [String: Any])
+            ?? data
+        let cardObj = firstCard(userObj) ?? firstCard(data)
+        let ticketObj = firstTicket(cardObj)
+
+        let cardFullName = readString(cardObj, ["fullName", "fullname", "ownerFullName", "name"])
+        let cardFirstName = readString(cardObj, ["ownerFirstName", "firstName", "firstname", "first_name"])
+        let cardLastName = readString(cardObj, ["ownerLastName", "lastName", "lastname", "last_name"])
+        let dataFullName = readString(userObj, ["fullName", "fullname", "name"])
+        let dataFirstName = readString(userObj, ["firstName", "firstname", "first_name"])
+        let dataLastName = readString(userObj, ["lastName", "lastname", "last_name"])
+
+        let derivedName: String
+        if !cardFullName.isEmpty {
+            derivedName = cardFullName
+        } else if !dataFullName.isEmpty {
+            derivedName = dataFullName
+        } else {
+            let cardJoined = [cardFirstName, cardLastName].filter { !$0.isEmpty }.joined(separator: " ")
+            let dataJoined = [dataFirstName, dataLastName].filter { !$0.isEmpty }.joined(separator: " ")
+            derivedName = !cardJoined.isEmpty ? cardJoined : dataJoined
+        }
+        if !derivedName.isEmpty {
+            onUserName(derivedName)
+        }
+
+        let snrFromCard = readString(cardObj, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
+        let snr = !snrFromCard.isEmpty
+            ? snrFromCard
+            : readString(data, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
+
+        if !snr.isEmpty, snr != serialNumber {
+            serialNumber = snr
+            onSerialNumber(snr)
+            onStatus("Loaded SNR")
+        }
+
+        let templateRaw = readString(cardObj, ["template"])
+        let templateBase64 = readString(cardObj, ["base64", "cardBase64"]).isEmpty
+            ? extractTemplateBase64(templateRaw)
+            : readString(cardObj, ["base64", "cardBase64"])
+
+        let details = AccountDetails(
+            accountName: derivedName,
+            cardTypeName: readString(cardObj, ["cardTypeName", "typeName", "cardType"]),
+            organizationName: readString(cardObj, ["organizationName", "organization", "companyName"]),
+            cardValidFrom: readInt64(cardObj ?? [:], keys: ["validFrom", "cardValidFrom"]),
+            cardValidTo: readInt64(cardObj ?? [:], keys: ["validTo", "cardValidTo"]),
+            ticketValidFrom: readInt64(ticketObj ?? [:], keys: ["timeValidityFrom", "validFrom"]),
+            ticketValidTo: readInt64(ticketObj ?? [:], keys: ["timeValidityTo", "validTo"]),
+            discountValidFrom: readInt64(cardObj ?? [:], keys: ["discountValidFrom"]),
+            discountValidTo: readInt64(cardObj ?? [:], keys: ["discountValidTo"]),
+            creditLastBalance: readMoney(cardObj ?? [:], keys: ["creditLastBalance", "credit"]),
+            currencySymbol: readString(cardObj, ["currencySymbol", "currency"]),
+            cardTemplateBase64: templateBase64
+        )
+        onAccountInfo(details)
     }
 
     private func pollTokens() async throws {

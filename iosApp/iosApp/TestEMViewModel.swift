@@ -399,9 +399,13 @@ final class TestEMViewModel: ObservableObject {
     }
 
     private func persistCredentials() {
+        let currentSerial = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedSerial = credentialsManager.loadSerial().trimmingCharacters(in: .whitespacesAndNewlines)
+        let serialToSave = currentSerial.isEmpty ? storedSerial : currentSerial
+
         credentialsManager.setEmail(email)
         credentialsManager.setPassword(password)
-        credentialsManager.setSerial(serialNumber)
+        credentialsManager.setSerial(serialToSave)
     }
 
     private func initializeDaemonService() {
