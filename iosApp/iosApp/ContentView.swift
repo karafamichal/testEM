@@ -1231,12 +1231,12 @@ struct ContentView: View {
                             .autocorrectionDisabled()
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
 
                         SecureField("Password", text: $viewModel.password)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                     }
                 }
 
@@ -1279,9 +1279,9 @@ struct ContentView: View {
                     Button {
                         showAccountDialog = true
                     } label: {
-                        Label(viewModel.email.isEmpty ? "testEM" : viewModel.email, systemImage: "person.circle")
+                        Text(viewModel.email.isEmpty ? "testEM" : viewModel.email)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.plain)
 
                     Spacer()
 
@@ -1290,8 +1290,9 @@ struct ContentView: View {
                         showSettings = true
                     } label: {
                         Image(systemName: "gearshape.fill")
+                            .font(.title3)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.plain)
                 }
 
                 ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
@@ -1339,13 +1340,18 @@ struct ContentView: View {
             cardContainer("Current QR Code") {
                 VStack(spacing: 12) {
                     HStack {
+                        Text("Current QR Code")
+                            .fontWeight(.bold)
                         Spacer()
                         Button {
                             showTokenInfoDialog = true
                         } label: {
-                            Image(systemName: "info.circle")
+                            Image(systemName: "info.circle.fill")
+                                .font(.caption)
+                                .padding(8)
+                                .background(Color(.secondarySystemBackground), in: Circle())
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.plain)
                     }
 
                     QRCodeView(payload: viewModel.qrPayload)
@@ -1374,6 +1380,7 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .buttonStyle(.bordered)
+                    .buttonBorderShape(.roundedRectangle(radius: 14))
                     .disabled(viewModel.qrPayload.isEmpty)
 
                     if viewModel.nfcEnabled && !viewModel.nfcUid.isEmpty {
@@ -1395,28 +1402,20 @@ struct ContentView: View {
                         }
                     }
                     .frame(maxWidth: .infinity)
+                    .frame(height: 56)
                     .tint(viewModel.isPolling ? .red : viewModel.currentAccentColor)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: 18))
 
                     Button("Ticket & Payment History") {
                         showHistoryScreen = true
                     }
                     .frame(maxWidth: .infinity)
+                    .frame(height: 56)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.roundedRectangle(radius: 18))
                     .disabled(viewModel.qrPayload.isEmpty)
-
-                    Button("Refresh") {
-                        Task {
-                            do {
-                                try await viewModel.loadAccountDetails()
-                                await viewModel.loadCardHistory()
-                            } catch {
-                                viewModel.errorMessage = "Refresh failed: \(error.localizedDescription)"
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
             }
         case .error:
             if !viewModel.errorMessage.isEmpty {
@@ -1435,10 +1434,10 @@ struct ContentView: View {
                 .font(.headline)
             content()
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity)
         .background(viewModel.amoledEnabled ? Color(.secondarySystemBackground) : Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: Color.black.opacity(viewModel.amoledEnabled ? 0.0 : 0.08), radius: 10, x: 0, y: 3)
     }
 
@@ -1507,9 +1506,11 @@ struct ContentView: View {
                         set: { viewModel.setAmoledEnabled($0) }
                     ))
                 }
+                    .buttonBorderShape(.roundedRectangle(radius: 18))
             }
-
+                    .frame(height: 56)
             cardContainer("Create Preset") {
+                .padding(.horizontal, 8)
                 VStack(alignment: .leading, spacing: 10) {
                     TextField("Preset name", text: $presetName)
                         .padding(.horizontal, 12)
