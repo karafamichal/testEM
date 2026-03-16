@@ -65,21 +65,38 @@ enum SettingsPage {
 enum SectionId: String, CaseIterable {
     case status
     case qr
-    case account
-    case history
+    case nfc
     case controls
     case error
 }
 
 @MainActor
 final class TestEMViewModel: ObservableObject {
-    @Published var email: String
-    @Published var password: String
-    @Published var serialNumber: String
+    @Published var email: String {
+        didSet {
+            UserDefaults.standard.set(email, forKey: prefEmail)
+        }
+    }
+    @Published var password: String {
+        didSet {
+            UserDefaults.standard.set(password, forKey: prefPassword)
+        }
+    }
+    @Published var serialNumber: String {
+        didSet {
+            UserDefaults.standard.set(serialNumber, forKey: prefSerial)
+        }
+    }
 
     @Published var isLoggingIn = false
     @Published var isLoggedIn = false
     @Published var isPolling = false
+    @Published var nfcEnabled = false
+    @Published var nfcUid = "" {
+        didSet {
+            UserDefaults.standard.set(nfcUid, forKey: prefNfcUid)
+        }
+    }
     @Published var statusMessage = "Ready"
     @Published var errorMessage = ""
 
@@ -103,8 +120,8 @@ final class TestEMViewModel: ObservableObject {
         ThemePreset(id: "sunset", name: "Sunset", accent: Color(red: 0.91, green: 0.37, blue: 0.02))
     ]
     @Published var selectedThemeId = "classic"
-    @Published var layoutOrder: [SectionId] = [.status, .qr, .account, .history, .controls, .error]
-    @Published var hiddenSections: Set<SectionId> = [.error]
+    @Published var layoutOrder: [SectionId] = [.status, .qr, .nfc, .controls, .error]
+    @Published var hiddenSections: Set<SectionId> = [.error, .nfc]
 
     private let baseURL = URL(string: "https://sadzv.qrbus.me")!
     private let cookieStorage = HTTPCookieStorage()
@@ -117,6 +134,7 @@ final class TestEMViewModel: ObservableObject {
     private let prefEmail = "testem.email"
     private let prefPassword = "testem.password"
     private let prefSerial = "testem.serial"
+    private let prefNfcUid = "testem.nfcUid"
     private let prefBiometricEnabled = "testem.biometricEnabled"
     private let prefLockTimeout = "testem.lockTimeoutSeconds"
     private let prefAmoledEnabled = "testem.amoledEnabled"
@@ -131,6 +149,7 @@ final class TestEMViewModel: ObservableObject {
         self.email = UserDefaults.standard.string(forKey: prefEmail) ?? ""
         self.password = UserDefaults.standard.string(forKey: prefPassword) ?? ""
         self.serialNumber = UserDefaults.standard.string(forKey: prefSerial) ?? ""
+        self.nfcUid = UserDefaults.standard.string(forKey: prefNfcUid) ?? ""
         self.biometricEnabled = UserDefaults.standard.object(forKey: prefBiometricEnabled) as? Bool ?? true
         self.amoledEnabled = UserDefaults.standard.object(forKey: prefAmoledEnabled) as? Bool ?? false
         self.languageCode = UserDefaults.standard.string(forKey: prefLanguageCode) ?? "sk"
@@ -198,6 +217,8 @@ final class TestEMViewModel: ObservableObject {
         stopPolling()
         clearSessionCookies()
         isLoggedIn = false
+        nfcEnabled = false
+        nfcUid = ""
         tokenBase64 = ""
         tokenHex = ""
         qrPayload = ""
@@ -317,8 +338,23 @@ final class TestEMViewModel: ObservableObject {
     }
 
     func setLockTimeoutSeconds(_ seconds: Int) {
-        lockTimeoutSeconds = max(30, seconds)
+        lockTimeoutSeconds = max(0, seconds)
         UserDefaults.standard.set(lockTimeoutSeconds, forKey: prefLockTimeout)
+    }
+
+    func toggleNfc() -> String? {
+        nfcEnabled.toggle()
+        if nfcEnabled {
+            if nfcUid.isEmpty {
+                nfcUid = generateUid()
+                statusMessage = "NFC mode enabled"
+                return nfcUid
+            }
+            statusMessage = "NFC mode enabled"
+        } else {
+            statusMessage = "NFC mode disabled"
+        }
+        return nil
     }
 
     func setAmoledEnabled(_ enabled: Bool) {
@@ -374,8 +410,10 @@ final class TestEMViewModel: ObservableObject {
             }
         case .active:
             guard isPinSet else { return }
-            let timeout = max(30, lockTimeoutSeconds)
-            if let bg = backgroundAt {
+            let timeout = max(0, lockTimeoutSeconds)
+            if timeout == 0 {
+                isAppUnlocked = false
+            } else if let bg = backgroundAt {
                 if Date().timeIntervalSince(bg) >= Double(timeout) {
                     isAppUnlocked = false
                 }
@@ -448,6 +486,7 @@ final class TestEMViewModel: ObservableObject {
     }
 
     private func persistCredentials() {
+        // Values are persisted by property observers; keep this for explicit save points.
         UserDefaults.standard.set(email, forKey: prefEmail)
         UserDefaults.standard.set(password, forKey: prefPassword)
         UserDefaults.standard.set(serialNumber, forKey: prefSerial)
@@ -819,6 +858,12 @@ final class TestEMViewModel: ObservableObject {
         }
         return data.map { String(format: "%02x", $0) }.joined()
     }
+
+    private func generateUid() -> String {
+        var bytes = [UInt8](repeating: 0, count: 4)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 private struct QRCodeView: View {
@@ -835,7 +880,14 @@ private struct QRCodeView: View {
         } else {
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color.secondary.opacity(0.15))
-                .overlay(Text("No QR yet"))
+                .overlay(
+                    VStack(spacing: 4) {
+                        Text("No Token")
+                        Text("Waiting for token...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                )
         }
     }
 
@@ -937,28 +989,40 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSettings = false
     @State private var settingsPage: SettingsPage = .root
+    @State private var showAccountDialog = false
+    @State private var showHistoryScreen = false
+    @State private var showTokenInfoDialog = false
+    @State private var showFullscreenQr = false
+    @State private var showNfcUidDialog = false
+    @State private var nfcUidToShow = ""
+    @State private var showLogoutConfirm = false
     @State private var showChangePinSheet = false
     @State private var changePinCurrent = ""
     @State private var changePinNew = ""
     @State private var changePinConfirm = ""
     @State private var changePinError = ""
+    @State private var customTimeout = ""
 
     var body: some View {
         NavigationStack {
-            Group {
-                if !viewModel.isPinSet {
-                    PinSetupView(viewModel: viewModel)
-                } else if !viewModel.isAppUnlocked {
-                    PinUnlockView(viewModel: viewModel)
-                } else if viewModel.isLoggedIn {
-                    daemonView
-                } else {
-                    loginView
+            ZStack {
+                appBackground
+                    .ignoresSafeArea()
+
+                Group {
+                    if !viewModel.isPinSet {
+                        PinSetupView(viewModel: viewModel)
+                    } else if !viewModel.isAppUnlocked {
+                        PinUnlockView(viewModel: viewModel)
+                    } else if viewModel.isLoggedIn {
+                        daemonView
+                    } else {
+                        loginView
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(viewModel.amoledEnabled ? Color.black : Color(.systemGroupedBackground))
             .navigationTitle("testEM")
             .toolbar {
                 if viewModel.isLoggedIn && viewModel.isAppUnlocked {
@@ -983,20 +1047,68 @@ struct ContentView: View {
         .sheet(isPresented: $showChangePinSheet) {
             changePinSheet
         }
+        .sheet(isPresented: $showAccountDialog) {
+            accountDialogSheet
+        }
+        .sheet(isPresented: $showHistoryScreen) {
+            historyScreenSheet
+        }
+        .sheet(isPresented: $showTokenInfoDialog) {
+            tokenInfoSheet
+        }
+        .fullScreenCover(isPresented: $showFullscreenQr) {
+            fullscreenQrView
+        }
+        .alert("NFC UID", isPresented: $showNfcUidDialog) {
+            Button("Copy") {
+                UIPasteboard.general.string = nfcUidToShow
+            }
+            Button("Close", role: .cancel) { }
+        } message: {
+            Text("Copy this UID to set it on the website:\n\n\(nfcUidToShow)")
+        }
+        .alert("Logout?", isPresented: $showLogoutConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Yes, Logout", role: .destructive) {
+                viewModel.logout()
+                showSettings = false
+            }
+        } message: {
+            Text("Are you sure you want to logout?")
+        }
+    }
+
+    private var appBackground: some View {
+        let top = viewModel.amoledEnabled ? Color.black : Color(red: 0.92, green: 0.97, blue: 0.95)
+        let bottom = viewModel.amoledEnabled ? Color(red: 0.06, green: 0.06, blue: 0.06) : Color(red: 0.84, green: 0.92, blue: 0.89)
+        return LinearGradient(colors: [top, bottom], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     private var loginView: some View {
         ScrollView {
             VStack(spacing: 16) {
-                GroupBox("Credentials") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("testEM")
+                        .font(.largeTitle.weight(.bold))
+                    Text("Real-time QR Token Generator")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                cardContainer("Credentials") {
                     VStack(spacing: 12) {
-                        TextField("Email", text: $viewModel.email)
+                        TextField("Email or Username", text: $viewModel.email)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                            .textFieldStyle(.roundedBorder)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
 
                         SecureField("Password", text: $viewModel.password)
-                            .textFieldStyle(.roundedBorder)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
                     }
                 }
 
@@ -1008,15 +1120,16 @@ struct ContentView: View {
                             ProgressView()
                                 .tint(.white)
                         }
-                        Text(viewModel.isLoggingIn ? "Signing in..." : "Login")
+                        Text(viewModel.isLoggingIn ? "Logging in..." : "Login")
                             .fontWeight(.semibold)
                     }
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(viewModel.isLoggingIn)
+                .controlSize(.large)
 
-                GroupBox("Status") {
+                cardContainer("Status") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(viewModel.statusMessage)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1036,18 +1149,21 @@ struct ContentView: View {
             VStack(spacing: 16) {
                 HStack {
                     Button {
-                        settingsPage = .root
-                        showSettings = true
+                        showAccountDialog = true
                     } label: {
-                        Label("Settings", systemImage: "gearshape.fill")
+                        Label(viewModel.email.isEmpty ? "testEM" : viewModel.email, systemImage: "person.circle")
                     }
                     .buttonStyle(.bordered)
 
                     Spacer()
 
-                    Text("testEM")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
+                    Button {
+                        settingsPage = .root
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                    }
+                    .buttonStyle(.bordered)
                 }
 
                 ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
@@ -1061,18 +1177,30 @@ struct ContentView: View {
     }
 
     private var hideableSections: Set<SectionId> {
-        [.status, .error]
+        [.status, .nfc, .error]
     }
 
     @ViewBuilder
     private func sectionView(for id: SectionId) -> some View {
         switch id {
         case .status:
-            cardContainer("Status") {
+            cardContainer("Polling status") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(viewModel.statusMessage)
-                    if let updated = viewModel.lastUpdated {
-                        Text("Last update: \(updated.formatted(date: .omitted, time: .standard))")
+                    HStack {
+                        Text("Status:")
+                            .fontWeight(.bold)
+                        Spacer()
+                        Text(viewModel.isPolling ? "Polling Active" : "Polling Paused")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(viewModel.isPolling ? Color.green.opacity(0.2) : Color.gray.opacity(0.2), in: Capsule())
+                    }
+                    Text("Last Update: \(viewModel.lastUpdated?.formatted(date: .omitted, time: .standard) ?? "Never")")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if !viewModel.statusMessage.isEmpty {
+                        Text(viewModel.statusMessage)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -1080,10 +1208,23 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .qr:
-            cardContainer("QR") {
+            cardContainer("Current QR Code") {
                 VStack(spacing: 12) {
+                    HStack {
+                        Spacer()
+                        Button {
+                            showTokenInfoDialog = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
                     QRCodeView(payload: viewModel.qrPayload)
                         .frame(width: 260, height: 260)
+                        .onTapGesture {
+                            showFullscreenQr = true
+                        }
                     if !viewModel.tokenHex.isEmpty {
                         Text(viewModel.tokenHex)
                             .font(.system(size: 12, design: .monospaced))
@@ -1093,67 +1234,32 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-        case .account:
-            cardContainer("Account") {
-                VStack(alignment: .leading, spacing: 6) {
-                    labeled("SNR", viewModel.serialNumber)
-                    labeled("Card Type", viewModel.accountDetails.cardTypeName)
-                    labeled("Organization", viewModel.accountDetails.organizationName)
-                    labeled("Card Valid To", dateText(fromMs: viewModel.accountDetails.cardValidTo))
-                    labeled("Ticket Valid To", dateText(fromMs: viewModel.accountDetails.ticketValidTo))
-                    if let credit = viewModel.accountDetails.creditLastBalance {
-                        let currency = viewModel.accountDetails.currencySymbol
-                        labeled("Credit", String(format: "%.2f %@", credit, currency))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        case .history:
-            cardContainer("History") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Button("Refresh History") {
-                        Task { await viewModel.loadCardHistory() }
-                    }
-
-                    if viewModel.historyState.isLoading {
-                        ProgressView()
-                    }
-
-                    if !viewModel.historyState.errorMessage.isEmpty {
-                        Text(viewModel.historyState.errorMessage)
-                            .foregroundStyle(.red)
-                    }
-
-                    ForEach(viewModel.historyState.items.prefix(20)) { item in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack {
-                                Text(item.title).font(.headline)
-                                Spacer()
-                                Text(item.amountText)
-                                    .foregroundStyle(item.amountText.hasPrefix("+") ? .green : .primary)
-                            }
-                            Text(item.subtitle)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Text(dateText(fromMs: item.timestampMs))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+        case .nfc:
+            cardContainer("NFC") {
+                VStack(spacing: 10) {
+                    Button(viewModel.nfcEnabled ? "Switch to QR" : "Switch to NFC") {
+                        let uid = viewModel.toggleNfc()
+                        if let uid {
+                            nfcUidToShow = uid
+                            showNfcUidDialog = true
                         }
-                        Divider()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.qrPayload.isEmpty)
+
+                    if viewModel.nfcEnabled && !viewModel.nfcUid.isEmpty {
+                        Text("UID: \(viewModel.nfcUid)")
+                            .font(.caption)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .controls:
             cardContainer("Controls") {
                 VStack(spacing: 10) {
-                    Button("Open Settings") {
-                        settingsPage = .root
-                        showSettings = true
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    Button(viewModel.isPolling ? "Stop Polling" : "Start Polling") {
+                    Button(viewModel.isPolling ? "Stop" : "Get QR") {
                         if viewModel.isPolling {
                             viewModel.stopPolling()
                         } else {
@@ -1161,8 +1267,15 @@ struct ContentView: View {
                         }
                     }
                     .frame(maxWidth: .infinity)
+                    .tint(viewModel.isPolling ? .red : viewModel.currentAccentColor)
 
-                    Button("Refresh Account") {
+                    Button("Ticket & Payment History") {
+                        showHistoryScreen = true
+                    }
+                    .frame(maxWidth: .infinity)
+                    .disabled(viewModel.qrPayload.isEmpty)
+
+                    Button("Refresh") {
                         Task {
                             do {
                                 try await viewModel.loadAccountDetails()
@@ -1175,6 +1288,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
         case .error:
             if !viewModel.errorMessage.isEmpty {
@@ -1197,6 +1311,7 @@ struct ContentView: View {
         .frame(maxWidth: .infinity)
         .background(viewModel.amoledEnabled ? Color(.secondarySystemBackground) : Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: Color.black.opacity(viewModel.amoledEnabled ? 0.0 : 0.08), radius: 10, x: 0, y: 3)
     }
 
     private var settingsSheet: some View {
@@ -1217,15 +1332,12 @@ struct ContentView: View {
             .navigationTitle(settingsPageTitle)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    if settingsPage != .root {
-                        Button("Back") {
+                    Button("Back") {
+                        if settingsPage == .root {
+                            showSettings = false
+                        } else {
                             settingsPage = .root
                         }
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        showSettings = false
                     }
                 }
             }
@@ -1289,12 +1401,13 @@ struct ContentView: View {
             }
 
             cardContainer("Account") {
-                Button("Logout", role: .destructive) {
-                    viewModel.logout()
-                    showSettings = false
+                VStack(spacing: 10) {
+                    Button("Logout", role: .destructive) {
+                        showLogoutConfirm = true
+                    }
+                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.borderedProminent)
                 }
-                .frame(maxWidth: .infinity)
-                .buttonStyle(.borderedProminent)
             }
         }
     }
@@ -1328,7 +1441,7 @@ struct ContentView: View {
     private var securitySettingsView: some View {
         VStack(spacing: 14) {
             cardContainer("Biometrics") {
-                Toggle("Enable Face ID / Touch ID", isOn: Binding(
+                Toggle("Biometrics", isOn: Binding(
                     get: { viewModel.biometricEnabled },
                     set: { viewModel.setBiometricEnabled($0) }
                 ))
@@ -1336,9 +1449,25 @@ struct ContentView: View {
 
             cardContainer("Lock Timeout") {
                 VStack(alignment: .leading, spacing: 6) {
-                    lockTimeoutRow(seconds: 30, label: "30 seconds")
-                    lockTimeoutRow(seconds: 60, label: "1 minute")
-                    lockTimeoutRow(seconds: 300, label: "5 minutes")
+                    lockTimeoutRow(seconds: 0, label: "Immediately")
+                    lockTimeoutRow(seconds: 30, label: "After 30 seconds")
+                    lockTimeoutRow(seconds: 60, label: "After 1 minute")
+                    lockTimeoutRow(seconds: 300, label: "After 5 minutes")
+
+                    TextField("Custom seconds", text: $customTimeout)
+                        .keyboardType(.numberPad)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                        .onChange(of: customTimeout) { _, value in
+                            let digits = value.filter { $0.isNumber }
+                            if digits != value {
+                                customTimeout = digits
+                            }
+                            if let seconds = Int(digits) {
+                                viewModel.setLockTimeoutSeconds(seconds)
+                            }
+                        }
                 }
             }
 
@@ -1375,7 +1504,7 @@ struct ContentView: View {
                     }
                 }
                 Section {
-                    Button("Update PIN") {
+                    Button("Update") {
                         if changePinCurrent.count < 4 {
                             changePinError = "Enter current PIN."
                             return
@@ -1409,12 +1538,159 @@ struct ContentView: View {
 
     private func sectionTitle(_ id: SectionId) -> String {
         switch id {
-        case .status: return "Polling Status"
-        case .qr: return "QR Code"
-        case .account: return "Account"
-        case .history: return "History"
+        case .status: return "Polling status"
+        case .qr: return "QR code"
+        case .nfc: return "NFC button"
         case .controls: return "Controls"
         case .error: return "Errors"
+        }
+    }
+
+    private var accountDialogSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 12) {
+                    cardContainer("Account") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            labeled("Name", viewModel.email.isEmpty ? "testEM" : viewModel.email)
+                            labeled("Email", viewModel.email)
+                            labeled("SNR", viewModel.serialNumber)
+                            if !viewModel.nfcUid.isEmpty {
+                                labeled("NFC UID", viewModel.nfcUid)
+                            }
+                            labeled("Card Type", viewModel.accountDetails.cardTypeName)
+                            labeled("Organization", viewModel.accountDetails.organizationName)
+                            labeled("Card Valid", "\(dateText(fromMs: viewModel.accountDetails.cardValidFrom)) - \(dateText(fromMs: viewModel.accountDetails.cardValidTo))")
+                            labeled("Ticket Valid", "\(dateText(fromMs: viewModel.accountDetails.ticketValidFrom)) - \(dateText(fromMs: viewModel.accountDetails.ticketValidTo))")
+                            if let credit = viewModel.accountDetails.creditLastBalance {
+                                labeled("Credit", String(format: "%.2f %@", credit, viewModel.accountDetails.currencySymbol))
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle("Account")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") {
+                        showAccountDialog = false
+                    }
+                }
+            }
+        }
+    }
+
+    private var historyScreenSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 12) {
+                    cardContainer("Tickets & Payments History") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Button("Refresh") {
+                                Task { await viewModel.loadCardHistory() }
+                            }
+
+                            if viewModel.historyState.isLoading {
+                                ProgressView()
+                            }
+
+                            if !viewModel.historyState.errorMessage.isEmpty {
+                                Text(viewModel.historyState.errorMessage)
+                                    .foregroundStyle(.red)
+                            }
+
+                            if !viewModel.historyState.isLoading && viewModel.historyState.items.isEmpty {
+                                Text("No history found.")
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            ForEach(viewModel.historyState.items) { item in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack {
+                                        Text(item.title).font(.headline)
+                                        Spacer()
+                                        Text(item.amountText)
+                                            .foregroundStyle(item.amountText.hasPrefix("+") ? .green : .primary)
+                                    }
+                                    Text(item.subtitle)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    Text(dateText(fromMs: item.timestampMs))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Divider()
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle("Tickets & Payments History")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Back") {
+                        showHistoryScreen = false
+                    }
+                }
+            }
+        }
+    }
+
+    private var tokenInfoSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 12) {
+                    if viewModel.tokenHex.isEmpty {
+                        cardContainer("Token Information") {
+                            Text("Waiting for token...")
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } else {
+                        cardContainer("Token Information") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("HEX: \(viewModel.tokenHex)")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text("B64: \(viewModel.tokenBase64)")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle("Token Information")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") {
+                        showTokenInfoDialog = false
+                    }
+                }
+            }
+        }
+    }
+
+    private var fullscreenQrView: some View {
+        ZStack {
+            Color.white.ignoresSafeArea()
+            VStack {
+                Spacer()
+                QRCodeView(payload: viewModel.qrPayload)
+                    .frame(width: 300, height: 300)
+                Spacer()
+                Button("Close") {
+                    showFullscreenQr = false
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.bottom, 30)
+            }
+            .padding()
         }
     }
 
