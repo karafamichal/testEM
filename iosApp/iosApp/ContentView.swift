@@ -173,17 +173,17 @@ final class TestEMViewModel: ObservableObject {
                 isLoggedIn = true
                 errorMessage = ""
                 statusMessage = "Login successful"
+                persistCredentials()
 
-                try await loadAccountDetails()
-                guard !serialNumber.isEmpty else {
-                    throw NSError(
-                        domain: "testEM",
-                        code: 400,
-                        userInfo: [NSLocalizedDescriptionKey: "SNR was not found in account details"]
-                    )
+                do {
+                    try await loadAccountDetails()
+                    if serialNumber.isEmpty {
+                        statusMessage = "Login successful, waiting for SNR"
+                    }
+                } catch {
+                    statusMessage = "Login successful, account details pending"
                 }
 
-                persistCredentials()
                 await loadCardHistory()
                 startPolling()
             } catch {
@@ -1034,6 +1034,22 @@ struct ContentView: View {
     private var daemonView: some View {
         ScrollView {
             VStack(spacing: 16) {
+                HStack {
+                    Button {
+                        settingsPage = .root
+                        showSettings = true
+                    } label: {
+                        Label("Settings", systemImage: "gearshape.fill")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Spacer()
+
+                    Text("testEM")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+
                 ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
                     if !viewModel.hiddenSections.contains(id) || !hideableSections.contains(id) {
                         sectionView(for: id)
@@ -1131,6 +1147,12 @@ struct ContentView: View {
         case .controls:
             cardContainer("Controls") {
                 VStack(spacing: 10) {
+                    Button("Open Settings") {
+                        settingsPage = .root
+                        showSettings = true
+                    }
+                    .frame(maxWidth: .infinity)
+
                     Button(viewModel.isPolling ? "Stop Polling" : "Start Polling") {
                         if viewModel.isPolling {
                             viewModel.stopPolling()
