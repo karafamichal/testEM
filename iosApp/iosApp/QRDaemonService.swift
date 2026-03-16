@@ -343,14 +343,27 @@ final class QRDaemonService {
     private func loadAccountDetailAfterLogin(session: URLSession) async throws {
         onStatus("Loading account detail...")
         let url = sessionBaseURL.appendingPathComponent("userapi/getAccountDetail")
-        let (data, response) = try await performRequestWithResponse(
+        var (data, response) = try await performRequestWithResponse(
             session: session,
             url: url,
             method: "GET",
             additionalHeaders: standardHeaders(referer: sessionBaseURL.appendingPathComponent("account/login"), includeCSRF: false)
         )
         onStatus("getAccountDetail HTTP \(response.statusCode)")
-        let bodyText = String(data: data, encoding: .utf8) ?? ""
+        var bodyText = String(data: data, encoding: .utf8) ?? ""
+
+        let trimmedInitial = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if response.statusCode >= 200,
+           response.statusCode < 300,
+           (trimmedInitial == "{}" || trimmedInitial == "[]") {
+            if let fallback = try await loadAccountDetailViaApiAuth(session: session) {
+                data = fallback.data
+                response = fallback.response
+                bodyText = String(data: data, encoding: .utf8) ?? ""
+                onStatus("getAccountDetail fallback /api/auth/getAccountDetail HTTP \(response.statusCode)")
+            }
+        }
+
         lastAccountDetailRaw = bodyText
 
         _ = trySetRecoveredSnr(from: bodyText)
@@ -382,6 +395,41 @@ final class QRDaemonService {
             let probe = snrProbeSummary(from: lastAccountDetailRaw ?? "")
             onStatus("No SNR in account detail (\(probe))")
         }
+    }
+
+    private func loadAccountDetailViaApiAuth(session: URLSession) async throws -> (data: Data, response: HTTPURLResponse)? {
+        let knownOrgIds: [Int] = {
+            let serial = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+            if serial.count >= 8,
+               let prefix = Int(String(serial.prefix(8))) {
+                return [prefix, 11872333]
+            }
+            return [11872333]
+        }()
+
+        for organizationSystemEntityId in Array(Set(knownOrgIds)) {
+            let jsonBody = "{\"organizationSystemEntityId\":\(organizationSystemEntityId),\"subUserId\":null}"
+            do {
+                let result = try await performRequestWithResponse(
+                    session: session,
+                    url: sessionBaseURL.appendingPathComponent("api/auth/getAccountDetail"),
+                    method: "POST",
+                    body: jsonBody,
+                    contentType: "application/json",
+                    additionalHeaders: standardHeaders(referer: sessionBaseURL.appendingPathComponent("account"), includeCSRF: false)
+                )
+
+                if result.response.statusCode >= 200, result.response.statusCode < 300 {
+                    let body = String(data: result.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if !body.isEmpty, body != "{}", body != "[]" {
+                        return result
+                    }
+                }
+            } catch {
+                continue
+            }
+        }
+        return nil
     }
 
     private func parseAndEmitAccountDetailsKotlinStyle(from bodyText: String) {
