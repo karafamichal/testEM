@@ -30,6 +30,7 @@ final class QRDaemonService {
     private var isPolling = false
     private var lastSnrRefreshAttempt: Date?
     private var lastAccountDetailRaw: String?
+    private var knownOrganizationIds: Set<Int> = [11872333]
 
     init(
         baseURL: URL = QRDaemonConfig.baseURL,
@@ -332,12 +333,19 @@ final class QRDaemonService {
     private func verifySession(session: URLSession) async throws {
         onStatus("Verifying session (getUId)...")
         let url = sessionBaseURL.appendingPathComponent("accountapi/getUId")
-        let (_, response) = try await performRequestWithResponse(
+        let (data, response) = try await performRequestWithResponse(
             session: session,
             url: url,
             method: "GET",
             additionalHeaders: standardHeaders(referer: sessionBaseURL, includeCSRF: false)
         )
+        if let bodyText = String(data: data, encoding: .utf8), !bodyText.isEmpty {
+            _ = trySetRecoveredSnr(from: bodyText)
+            let extractedIds = extractOrganizationIds(from: bodyText)
+            if !extractedIds.isEmpty {
+                knownOrganizationIds.formUnion(extractedIds)
+            }
+        }
         onStatus("getUId HTTP \(response.statusCode)")
     }
 
@@ -448,16 +456,18 @@ final class QRDaemonService {
     }
 
     private func loadAccountDetailViaApiAuth(session: URLSession) async throws -> (data: Data, response: HTTPURLResponse)? {
-        let knownOrgIds: [Int] = {
+        let candidateOrgIds: [Int] = {
+            var ids = knownOrganizationIds
             let serial = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
             if serial.count >= 8,
                let prefix = Int(String(serial.prefix(8))) {
-                return [prefix, 11872333]
+                ids.insert(prefix)
             }
-            return [11872333]
+            ids.insert(11872333)
+            return Array(ids)
         }()
 
-        for organizationSystemEntityId in Array(Set(knownOrgIds)) {
+        for organizationSystemEntityId in candidateOrgIds {
             let jsonBody = "{\"organizationSystemEntityId\":\(organizationSystemEntityId),\"subUserId\":null}"
             do {
                 let result = try await performRequestWithResponse(
@@ -480,6 +490,62 @@ final class QRDaemonService {
             }
         }
         return nil
+    }
+
+    private func extractOrganizationIds(from text: String) -> Set<Int> {
+        let keys = Set(["organizationsystementityid", "organizationid", "orgid"])
+        var ids = Set<Int>()
+
+        func collect(from value: Any) {
+            if let dict = value as? [String: Any] {
+                for (key, rawValue) in dict {
+                    let lowered = key.lowercased()
+                    if keys.contains(lowered) {
+                        if let intValue = rawValue as? Int {
+                            ids.insert(intValue)
+                        } else if let int64Value = rawValue as? Int64 {
+                            ids.insert(Int(int64Value))
+                        } else if let numberValue = rawValue as? NSNumber {
+                            ids.insert(numberValue.intValue)
+                        } else if let stringValue = rawValue as? String,
+                                  let parsed = Int(stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                            ids.insert(parsed)
+                        }
+                    }
+                    collect(from: rawValue)
+                }
+                return
+            }
+
+            if let array = value as? [Any] {
+                for child in array {
+                    collect(from: child)
+                }
+            }
+        }
+
+        if let bytes = text.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: bytes) {
+            collect(from: json)
+        }
+
+        let regexPatterns = [
+            #"\"organizationSystemEntityId\"\s*:\s*(\d+)"#,
+            #"\"organizationId\"\s*:\s*(\d+)"#,
+            #"\"orgId\"\s*:\s*(\d+)"#
+        ]
+        for pattern in regexPatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let range = NSRange(location: 0, length: text.utf16.count)
+            for match in regex.matches(in: text, options: [], range: range) {
+                guard match.numberOfRanges > 1,
+                      let valueRange = Range(match.range(at: 1), in: text),
+                      let parsed = Int(String(text[valueRange])) else { continue }
+                ids.insert(parsed)
+            }
+        }
+
+        return ids
     }
 
     private func parseAndEmitAccountDetailsKotlinStyle(from bodyText: String) {
