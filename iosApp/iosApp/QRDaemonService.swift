@@ -379,11 +379,8 @@ final class QRDaemonService {
                 return
             }
 
-            let preview = (lastAccountDetailRaw ?? "")
-                .replacingOccurrences(of: "\n", with: " ")
-                .replacingOccurrences(of: "\r", with: " ")
-                .prefix(140)
-            onStatus("No SNR in account detail: \(preview)")
+            let probe = snrProbeSummary(from: lastAccountDetailRaw ?? "")
+            onStatus("No SNR in account detail (\(probe))")
         }
     }
 
@@ -590,7 +587,8 @@ final class QRDaemonService {
                 }
             }
             if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                onStatus("No SNR yet - waiting")
+                let probe = snrProbeSummary(from: lastAccountDetailRaw ?? "")
+                onStatus("No SNR yet - waiting (\(probe))")
                 return nil
             }
         }
@@ -1046,6 +1044,11 @@ final class QRDaemonService {
         if let stringValue = value as? String {
             let trimmed = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { return nil }
+            if let bytes = trimmed.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: bytes),
+               let found = findFirstString(in: parsed, keys: keys) {
+                return found
+            }
             if let parsed = parseJSONObjectString(trimmed),
                let found = findFirstString(in: parsed, keys: keys) {
                 return found
@@ -1094,13 +1097,13 @@ final class QRDaemonService {
         let keys: Set<String> = ["snr", "cardsnr", "card_snr", "cardnumber", "cardserial", "serialnumber", "serial_number", "serial"]
 
         func extract(from requestObject: [String: Any]) -> String? {
-            if let metadataDict = requestObject["Metadata"] as? [String: Any],
+            if let metadataDict = valueForKeyCaseInsensitive(requestObject, key: "Metadata") as? [String: Any],
                let found = findFirstString(in: metadataDict, keys: keys),
                !found.isEmpty {
                 return found
             }
 
-            if let metadataString = requestObject["Metadata"] as? String {
+            if let metadataString = valueForKeyCaseInsensitive(requestObject, key: "Metadata") as? String {
                 if let parsed = parseJSONObjectString(metadataString),
                    let found = findFirstString(in: parsed, keys: keys),
                    !found.isEmpty {
@@ -1198,6 +1201,47 @@ final class QRDaemonService {
         }
         onStatus("Loaded SNR")
         return true
+    }
+
+    private func snrProbeSummary(from bodyText: String) -> String {
+        let trimmed = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return "body=empty"
+        }
+
+        let keys: Set<String> = ["snr", "cardsnr", "card_snr", "cardnumber", "cardserial", "serialnumber", "serial_number", "serial"]
+        var card = ""
+        var requests = ""
+        var root = ""
+
+        if let bytes = trimmed.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] {
+            let data = (json["data"] as? [String: Any]) ?? json
+            let user = (data["wertyzUser"] as? [String: Any]) ?? (data["user"] as? [String: Any]) ?? data
+            let cardObj = firstCard(from: user) ?? firstCard(from: data) ?? [:]
+            card = readString(cardObj, keys: ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
+            requests = extractSnrFromUserRequests(user) ?? extractSnrFromUserRequests(data) ?? ""
+            root = findFirstString(in: json, keys: keys) ?? ""
+        }
+
+        let raw = extractSnrFromRawJson(trimmed) ?? ""
+        let parts = [
+            "bodyLen=\(trimmed.count)",
+            "card=\(maskSnr(card))",
+            "requests=\(maskSnr(requests))",
+            "root=\(maskSnr(root))",
+            "raw=\(maskSnr(raw))"
+        ]
+        return parts.joined(separator: " ")
+    }
+
+    private func maskSnr(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "none" }
+        if trimmed.count <= 6 { return trimmed }
+        let prefix = trimmed.prefix(3)
+        let suffix = trimmed.suffix(3)
+        return "\(prefix)...\(suffix)"
     }
 
     private func parseJSONObjectString(_ raw: String) -> [String: Any]? {
