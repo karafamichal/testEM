@@ -5,11 +5,9 @@ import UIKit
 
 struct QRCodeView: View {
     let payload: String
-    private let context = CIContext()
-    private let filter = CIFilter.qrCodeGenerator()
 
     var body: some View {
-        if let image = generateImage(payload) {
+        if let image = QRCodeGenerator.makeImage(from: payload) {
             Image(uiImage: image)
                 .interpolation(.none)
                 .resizable()
@@ -28,14 +26,6 @@ struct QRCodeView: View {
         }
     }
 
-    private func generateImage(_ string: String) -> UIImage? {
-        filter.message = Data(string.utf8)
-        filter.correctionLevel = "M"
-        guard let outputImage = filter.outputImage else { return nil }
-        let transformed = outputImage.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
-        guard let cgImage = context.createCGImage(transformed, from: transformed.extent) else { return nil }
-        return UIImage(cgImage: cgImage)
-    }
 }
 
 struct PinSetupView: View {

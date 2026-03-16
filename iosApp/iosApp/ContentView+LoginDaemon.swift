@@ -2,53 +2,58 @@ import SwiftUI
 
 extension ContentView {
     var loginView: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                VStack(spacing: 4) {
-                    Text("testEM")
-                        .font(.largeTitle.weight(.bold))
-                    Text("Real-time QR Token Generator")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-
-                cardContainer("Credentials") {
-                    VStack(spacing: 12) {
-                        TextField("Email or Username", text: $viewModel.email)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-
-                        SecureField("Password", text: $viewModel.password)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 16) {
+                    VStack(spacing: 4) {
+                        Text("testEM")
+                            .font(.largeTitle.weight(.bold))
+                        Text("Real-time QR Token Generator")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                }
+                    .frame(maxWidth: .infinity, alignment: .center)
 
-                Button {
-                    viewModel.login()
-                } label: {
-                    HStack {
-                        if viewModel.isLoggingIn {
-                            ProgressView()
-                                .tint(.white)
+                    cardContainer("Credentials") {
+                        VStack(spacing: 12) {
+                            TextField("Email or Username", text: $viewModel.email)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                            SecureField("Password", text: $viewModel.password)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                         }
-                        Text(viewModel.isLoggingIn ? "Logging in..." : "Login")
-                            .fontWeight(.semibold)
                     }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.roundedRectangle(radius: 18))
-                .disabled(viewModel.isLoggingIn)
-                .frame(height: 56)
 
+                    Button {
+                        viewModel.login()
+                    } label: {
+                        HStack {
+                            if viewModel.isLoggingIn {
+                                ProgressView()
+                                    .tint(.white)
+                            }
+                            Text(viewModel.isLoggingIn ? "Logging in..." : "Login")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: 18))
+                    .disabled(viewModel.isLoggingIn)
+                    .frame(height: 56)
+                }
+                .padding(.horizontal, 8)
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: geometry.size.height)
+                .frame(maxHeight: .infinity, alignment: .center)
             }
-            .padding(.horizontal, 8)
         }
     }
 
@@ -74,6 +79,33 @@ extension ContentView {
                             .font(.title3)
                     }
                     .buttonStyle(.plain)
+                }
+
+                if !viewModel.isSessionReady {
+                    cardContainer("Session") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 10) {
+                                if viewModel.isLoggingIn {
+                                    ProgressView()
+                                }
+                                Text(viewModel.statusMessage.isEmpty ? "Connecting..." : viewModel.statusMessage)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            if !viewModel.errorMessage.isEmpty {
+                                Text(viewModel.errorMessage)
+                                    .foregroundStyle(.red)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            Button("Retry Login") {
+                                viewModel.login()
+                            }
+                            .frame(maxWidth: .infinity)
+                            .buttonStyle(.borderedProminent)
+                            .disabled(viewModel.isLoggingIn)
+                        }
+                    }
                 }
 
                 ForEach(viewModel.layoutOrder, id: \.rawValue) { id in

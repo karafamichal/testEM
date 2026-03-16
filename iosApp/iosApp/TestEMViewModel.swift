@@ -9,27 +9,28 @@ import UIKit
 final class TestEMViewModel: ObservableObject {
     @Published var email: String {
         didSet {
-            UserDefaults.standard.set(email, forKey: prefEmail)
+            credentialsManager.setEmail(email)
         }
     }
     @Published var password: String {
         didSet {
-            UserDefaults.standard.set(password, forKey: prefPassword)
+            credentialsManager.setPassword(password)
         }
     }
     @Published var serialNumber: String {
         didSet {
-            UserDefaults.standard.set(serialNumber, forKey: prefSerial)
+            credentialsManager.setSerial(serialNumber)
         }
     }
 
     @Published var isLoggingIn = false
     @Published var isLoggedIn = false
+    @Published var isSessionReady = false
     @Published var isPolling = false
     @Published var nfcEnabled = false
     @Published var nfcUid = "" {
         didSet {
-            UserDefaults.standard.set(nfcUid, forKey: prefNfcUid)
+            credentialsManager.setNfcUid(nfcUid)
         }
     }
     @Published var statusMessage = "Ready"
@@ -76,18 +77,14 @@ final class TestEMViewModel: ObservableObject {
     @Published var layoutOrder: [SectionId] = [.status, .qr, .nfc, .controls, .error]
     @Published var hiddenSections: Set<SectionId> = [.error, .nfc]
 
-    private let baseURL = URL(string: "https://sadzv.qrbus.me")!
-    private let cookieStorage = HTTPCookieStorage()
+    private let credentialsManager = CredentialsManager.shared
+    private let daemonService = QRDaemonService()
     private var pollTask: Task<Void, Never>?
-    private let pollIntervalNs: UInt64 = 25_000_000_000
+    private let pollIntervalNs: UInt64 = QRDaemonConfig.pollIntervalNs
     private var backgroundAt: Date?
     private var isBiometricPromptInProgress = false
     private var didAttemptAutoBiometricThisForeground = false
 
-    private let prefEmail = "testem.email"
-    private let prefPassword = "testem.password"
-    private let prefSerial = "testem.serial"
-    private let prefNfcUid = "testem.nfcUid"
     private let prefBiometricEnabled = "testem.biometricEnabled"
     private let prefLockTimeout = "testem.lockTimeoutSeconds"
     private let prefAmoledEnabled = "testem.amoledEnabled"
@@ -100,10 +97,10 @@ final class TestEMViewModel: ObservableObject {
     private let prefPinHash = "testem.pinHash"
 
     init() {
-        self.email = UserDefaults.standard.string(forKey: prefEmail) ?? ""
-        self.password = UserDefaults.standard.string(forKey: prefPassword) ?? ""
-        self.serialNumber = UserDefaults.standard.string(forKey: prefSerial) ?? ""
-        self.nfcUid = UserDefaults.standard.string(forKey: prefNfcUid) ?? ""
+        self.email = credentialsManager.loadEmail()
+        self.password = credentialsManager.loadPassword()
+        self.serialNumber = credentialsManager.loadSerial()
+        self.nfcUid = credentialsManager.loadNfcUid()
         self.biometricEnabled = UserDefaults.standard.object(forKey: prefBiometricEnabled) as? Bool ?? true
         self.amoledEnabled = UserDefaults.standard.object(forKey: prefAmoledEnabled) as? Bool ?? false
         self.languageCode = UserDefaults.standard.string(forKey: prefLanguageCode) ?? "sk"
@@ -138,15 +135,17 @@ final class TestEMViewModel: ObservableObject {
         }
 
         isLoggingIn = true
+    isLoggedIn = true
+    isSessionReady = false
         errorMessage = ""
-        statusMessage = "Opening base URL..."
+    statusMessage = "Connecting..."
 
         Task {
             defer { isLoggingIn = false }
             do {
                 serialNumber = ""
-                try await warmSessionAndLogin()
-                isLoggedIn = true
+            try await daemonService.warmSessionAndLogin(email: email, password: password)
+            isSessionReady = true
                 errorMessage = ""
                 statusMessage = "Login successful"
                 persistCredentials()
@@ -163,7 +162,7 @@ final class TestEMViewModel: ObservableObject {
                 await loadCardHistory()
                 startPolling()
             } catch {
-                isLoggedIn = false
+                isSessionReady = false
                 errorMessage = "Login failed: \(error.localizedDescription)"
                 statusMessage = "Login failed"
             }
@@ -172,8 +171,9 @@ final class TestEMViewModel: ObservableObject {
 
     func logout() {
         stopPolling()
-        clearSessionCookies()
+        daemonService.clearSessionCookies()
         isLoggedIn = false
+        isSessionReady = false
         nfcEnabled = false
         nfcUid = ""
         tokenBase64 = ""
@@ -187,7 +187,7 @@ final class TestEMViewModel: ObservableObject {
     }
 
     func startPolling() {
-        guard isLoggedIn else { return }
+        guard isLoggedIn && isSessionReady else { return }
         guard !serialNumber.isEmpty else {
             statusMessage = "Loading account details to obtain serial number..."
             Task {
@@ -230,7 +230,7 @@ final class TestEMViewModel: ObservableObject {
     }
 
     func loadCardHistory(limit: Int = 20) async {
-        guard isLoggedIn else { return }
+        guard isLoggedIn && isSessionReady else { return }
         if serialNumber.isEmpty {
             do {
                 try await loadAccountDetails()
@@ -454,13 +454,9 @@ final class TestEMViewModel: ObservableObject {
     }
 
     private func persistCredentials() {
-        UserDefaults.standard.set(email, forKey: prefEmail)
-        UserDefaults.standard.set(password, forKey: prefPassword)
-        UserDefaults.standard.set(serialNumber, forKey: prefSerial)
-    }
-
-    private func clearSessionCookies() {
-        cookieStorage.cookies?.forEach { cookieStorage.deleteCookie($0) }
+        credentialsManager.setEmail(email)
+        credentialsManager.setPassword(password)
+        credentialsManager.setSerial(serialNumber)
     }
 
     private func loadStoredThemePresets() -> [ThemePreset]? {
@@ -529,59 +525,8 @@ final class TestEMViewModel: ObservableObject {
         return String(format: "%02X%02X%02X%02X", alpha, red, green, blue)
     }
 
-    private func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.default
-        configuration.httpCookieStorage = cookieStorage
-        configuration.httpShouldSetCookies = true
-        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        configuration.timeoutIntervalForRequest = 20
-        configuration.timeoutIntervalForResource = 30
-        return URLSession(configuration: configuration)
-    }
-
-    private func warmSessionAndLogin() async throws {
-        let session = makeSession()
-
-        statusMessage = "Opening base URL..."
-        _ = try await performRequest(session: session, path: "/", method: "GET")
-
-        statusMessage = "Opening account page..."
-        _ = try await performRequest(session: session, path: "/account", method: "GET")
-
-        statusMessage = "Submitting login..."
-        let loginBody = "post[login]=\(urlEncode(email))&post[password]=\(urlEncode(password))"
-        let loginData = try await performRequest(
-            session: session,
-            path: "/accountapi/login",
-            method: "POST",
-            body: loginBody,
-            contentType: "application/x-www-form-urlencoded; charset=UTF-8",
-            additionalHeaders: ["X-Requested-With": "XMLHttpRequest"]
-        )
-
-        let decoded = try JSONDecoder().decode(LoginResponse.self, from: loginData)
-        if !decoded.success {
-            throw NSError(domain: "testEM", code: 401, userInfo: [NSLocalizedDescriptionKey: "Server returned success=false"])
-        }
-        statusMessage = "Session ready"
-    }
-
     private func pollOnce() async throws {
-        let session = makeSession()
-        let tokenBody = "post[serialnumber]=\(urlEncode(serialNumber))"
-        let raw = try await performRequest(
-            session: session,
-            path: "/cardapi/getQrToken",
-            method: "POST",
-            body: tokenBody,
-            contentType: "application/x-www-form-urlencoded; charset=UTF-8",
-            additionalHeaders: ["X-Requested-With": "XMLHttpRequest"]
-        )
-
-        let tokenResponse = try JSONDecoder().decode(QrTokenResponse.self, from: raw)
-        guard tokenResponse.success, let encoded = tokenResponse.data, !encoded.isEmpty else {
-            throw NSError(domain: "testEM", code: 500, userInfo: [NSLocalizedDescriptionKey: "Token unavailable"])
-        }
+        let encoded = try await daemonService.getQrToken(serialNumber: serialNumber)
 
         tokenBase64 = encoded
         tokenHex = base64ToHex(encoded) ?? ""
@@ -592,13 +537,7 @@ final class TestEMViewModel: ObservableObject {
     }
 
     func loadAccountDetails() async throws {
-        let session = makeSession()
-        let raw = try await performRequest(
-            session: session,
-            path: "/userapi/getAccountDetail",
-            method: "GET",
-            additionalHeaders: ["X-Requested-With": "XMLHttpRequest"]
-        )
+        let raw = try await daemonService.getAccountDetailRaw()
 
         guard let root = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
             throw NSError(domain: "testEM", code: 500, userInfo: [NSLocalizedDescriptionKey: "Account detail parse failed"])
@@ -612,7 +551,7 @@ final class TestEMViewModel: ObservableObject {
         let snr = readString(card, keys: ["snr", "cardSnr", "cardSNR", "cardNumber", "serialNumber"])
         if !snr.isEmpty {
             serialNumber = snr
-            UserDefaults.standard.set(snr, forKey: prefSerial)
+            credentialsManager.setSerial(snr)
         }
 
         let templateRaw = readString(card, keys: ["template"])
@@ -636,14 +575,7 @@ final class TestEMViewModel: ObservableObject {
     }
 
     private func fetchCardHistory(limit: Int) async throws -> [CardHistoryItem] {
-        let session = makeSession()
-        let path = "/cardapi/getCardHistory/\(serialNumber)/0/\(limit)"
-        let raw = try await performRequest(
-            session: session,
-            path: path,
-            method: "GET",
-            additionalHeaders: ["X-Requested-With": "XMLHttpRequest"]
-        )
+        let raw = try await daemonService.getCardHistoryRaw(serialNumber: serialNumber, limit: limit)
 
         guard let root = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
             throw NSError(domain: "testEM", code: 500, userInfo: [NSLocalizedDescriptionKey: "History parse failed"])
@@ -838,50 +770,6 @@ final class TestEMViewModel: ObservableObject {
         let date = Date(timeIntervalSince1970: TimeInterval(rawMs) / 1000.0)
         let offsetSeconds = TimeZone.current.secondsFromGMT(for: date)
         return rawMs - Int64(offsetSeconds * 1000)
-    }
-
-    private func performRequest(
-        session: URLSession,
-        path: String,
-        method: String,
-        body: String? = nil,
-        contentType: String? = nil,
-        additionalHeaders: [String: String] = [:]
-    ) async throws -> Data {
-        let cleanPath = path.hasPrefix("/") ? String(path.dropFirst()) : path
-        let url = baseURL.appendingPathComponent(cleanPath)
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
-        request.setValue("*/*", forHTTPHeaderField: "Accept")
-        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
-
-        if let body {
-            request.httpBody = body.data(using: .utf8)
-        }
-        if let contentType {
-            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        }
-        additionalHeaders.forEach { key, value in
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw NSError(domain: "testEM", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid HTTP response"])
-        }
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw NSError(
-                domain: "testEM",
-                code: httpResponse.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: "HTTP \(httpResponse.statusCode)"]
-            )
-        }
-        return data
-    }
-
-    private func urlEncode(_ input: String) -> String {
-        input.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? input
     }
 
     private func base64ToHex(_ encoded: String) -> String? {
