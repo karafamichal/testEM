@@ -49,10 +49,73 @@ struct ContentView: View {
                     ZStack {
                         appBackground
                             .ignoresSafeArea()
-                        loginView
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
+                        if viewModel.isLoggedIn {
+                            if showSettings {
+                                settingsSheet
+                            } else if showHistoryScreen {
+                                historyScreenSheet
+                            } else {
+                                daemonView
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                            }
+                        } else {
+                            loginView
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                        }
                     }
+                    .toolbar {
+                        if viewModel.isLoggedIn && !showSettings && !showHistoryScreen {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button {
+                                    showAccountDialog = true
+                                } label: {
+                                    Text(viewModel.email.isEmpty ? "testEM" : viewModel.email)
+                                        .font(.headline)
+                                }
+                            }
+
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button {
+                                    settingsPage = .root
+                                    showSettings = true
+                                } label: {
+                                    Image(systemName: "gearshape.fill")
+                                }
+                            }
+                        }
+                    }
+                }
+                .sheet(isPresented: $showChangePinSheet) {
+                    changePinSheet
+                }
+                .sheet(isPresented: $showAccountDialog) {
+                    accountDialogSheet
+                }
+                .sheet(isPresented: $showTokenInfoDialog) {
+                    tokenInfoSheet
+                }
+                .fullScreenCover(isPresented: $showFullscreenQr) {
+                    fullscreenQrView
+                }
+                .alert("NFC UID", isPresented: $showNfcUidDialog) {
+                    Button("Copy") {
+                        UIPasteboard.general.string = nfcUidToShow
+                    }
+                    Button("Close", role: .cancel) { }
+                } message: {
+                    Text("Copy this UID to set it on the website:\n\n\(nfcUidToShow)")
+                }
+                .alert("Logout?", isPresented: $showLogoutConfirm) {
+                    Button("Cancel", role: .cancel) { }
+                    Button("Yes, Logout", role: .destructive) {
+                        viewModel.logout()
+                        showSettings = false
+                        showHistoryScreen = false
+                    }
+                } message: {
+                    Text("Are you sure you want to logout?")
                 }
             }
         }
@@ -60,75 +123,6 @@ struct ContentView: View {
             viewModel.handleScenePhase(newValue)
         }
         .tint(viewModel.currentAccentColor)
-        .fullScreenCover(isPresented: $viewModel.isLoggedIn) {
-            NavigationStack {
-                ZStack {
-                    appBackground
-                        .ignoresSafeArea()
-
-                    if showSettings {
-                        settingsSheet
-                    } else if showHistoryScreen {
-                        historyScreenSheet
-                    } else {
-                        daemonView
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                    }
-                }
-                .toolbar {
-                    if !showSettings && !showHistoryScreen {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button {
-                                showAccountDialog = true
-                            } label: {
-                                Text(viewModel.email.isEmpty ? "testEM" : viewModel.email)
-                                    .font(.headline)
-                            }
-                        }
-
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button {
-                                settingsPage = .root
-                                showSettings = true
-                            } label: {
-                                Image(systemName: "gearshape.fill")
-                            }
-                        }
-                    }
-                }
-            }
-            .interactiveDismissDisabled(true)
-            .sheet(isPresented: $showChangePinSheet) {
-                changePinSheet
-            }
-            .sheet(isPresented: $showAccountDialog) {
-                accountDialogSheet
-            }
-            .sheet(isPresented: $showTokenInfoDialog) {
-                tokenInfoSheet
-            }
-            .fullScreenCover(isPresented: $showFullscreenQr) {
-                fullscreenQrView
-            }
-            .alert("NFC UID", isPresented: $showNfcUidDialog) {
-                Button("Copy") {
-                    UIPasteboard.general.string = nfcUidToShow
-                }
-                Button("Close", role: .cancel) { }
-            } message: {
-                Text("Copy this UID to set it on the website:\n\n\(nfcUidToShow)")
-            }
-            .alert("Logout?", isPresented: $showLogoutConfirm) {
-                Button("Cancel", role: .cancel) { }
-                Button("Yes, Logout", role: .destructive) {
-                    viewModel.logout()
-                    showSettings = false
-                }
-            } message: {
-                Text("Are you sure you want to logout?")
-            }
-        }
     }
 
     private var appBackground: some View {
