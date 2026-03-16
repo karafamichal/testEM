@@ -17,6 +17,7 @@ final class QRDaemonService {
 
     private var sessionBaseURL: URL
     private let cookieStorage = HTTPCookieStorage()
+    private var customCookieJar: [String: HTTPCookie] = [:]
     private let userAgent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
 
     private var lastTokenHex: String?
@@ -105,6 +106,7 @@ final class QRDaemonService {
 
     func clearSessionCookies() {
         cookieStorage.cookies?.forEach { cookieStorage.deleteCookie($0) }
+        customCookieJar.removeAll()
         lastTokenHex = nil
         lastTokenBase64 = nil
         isAuthenticated = false
@@ -280,7 +282,7 @@ final class QRDaemonService {
 
             isAuthenticated = true
             authFailures = 0
-            onStatus("Login successful (total stored cookies: \(cookieStorage.cookies?.count ?? 0))")
+            onStatus("Login successful (total stored cookies: \(allCookies(for: sessionBaseURL).count))")
 
             await withTaskGroup(of: Void.self) { group in
                 group.addTask { [weak self] in
@@ -530,7 +532,7 @@ final class QRDaemonService {
             ])
             let tokenURL = sessionBaseURL.appendingPathComponent("cardapi/getQrToken")
             
-            let matchedCookies = cookieStorage.cookies(for: tokenURL)?.count ?? 0
+            let matchedCookies = allCookies(for: tokenURL).count
             onStatus("[TOKEN] URL=\(tokenURL.absoluteString), matched cookies=\(matchedCookies)/4")
             let cookieHeaderValue = cookieHeader(for: tokenURL)
             let hasWpis = cookieHeaderValue.contains("WPIS=")
@@ -790,6 +792,7 @@ final class QRDaemonService {
             let cookies = HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: responseUrl)
             for cookie in cookies {
                 cookieStorage.setCookie(cookie)
+                customCookieJar[cookie.name] = cookie
             }
         }
         forceParseCookies(from: httpResponse)
@@ -835,8 +838,18 @@ final class QRDaemonService {
         return headers
     }
 
+    private func allCookies(for url: URL) -> [HTTPCookie] {
+        var cookies = cookieStorage.cookies(for: url) ?? []
+        for (_, cookie) in customCookieJar {
+            if !cookies.contains(where: { $0.name == cookie.name }) {
+                cookies.append(cookie)
+            }
+        }
+        return cookies
+    }
+
     private func cookieHeader(for url: URL) -> String {
-        let cookies = cookieStorage.cookies(for: url) ?? []
+        let cookies = allCookies(for: url)
         let sorted = cookies.sorted {
             if $0.name.caseInsensitiveCompare("WPIS") == .orderedSame { return true }
             if $1.name.caseInsensitiveCompare("WPIS") == .orderedSame { return false }
@@ -846,7 +859,7 @@ final class QRDaemonService {
     }
 
     private func csrfToken(for url: URL) -> String? {
-        let raw = (cookieStorage.cookies(for: url) ?? []).first {
+        let raw = allCookies(for: url).first {
             ["XSRF-TOKEN", "CSRF-TOKEN", "csrftoken"].contains($0.name)
         }?.value
         guard let raw else { return nil }
@@ -860,8 +873,9 @@ final class QRDaemonService {
             .init(properties: [.domain: host, .path: "/", .name: "pisnotshowhint", .value: "true", .secure: "TRUE", .expires: expires]),
             .init(properties: [.domain: host, .path: "/", .name: "piscookiewindow", .value: "{%22requiredCookies%22:true%2C%22analyticsCookies%22:true}", .secure: "TRUE", .expires: expires])
         ].compactMap { $0 }
-        for cookie in cookies where cookieStorage.cookies?.contains(where: { $0.name == cookie.name }) != true {
+        for cookie in cookies where customCookieJar[cookie.name] == nil {
             cookieStorage.setCookie(cookie)
+            customCookieJar[cookie.name] = cookie
         }
     }
 
@@ -899,17 +913,7 @@ final class QRDaemonService {
                 .expires: Date().addingTimeInterval(30 * 24 * 60 * 60)
             ]) {
                 cookieStorage.setCookie(cookie)
-                print("[QRDaemon] Force parsed and saved cookie: \(name)")
-            }
-        }
-    }
-
-    private func deriveDisplayName(user: [String: Any], card: [String: Any], fallback: [String: Any]) -> String {
-        let cardFullName = readString(card, keys: ["fullName", "fullname", "ownerFullName", "name"])
-        let cardFirstName = readString(card, keys: ["ownerFirstName", "firstName", "firstname", "first_name"])
-        let cardLastName = readString(card, keys: ["ownerLastName", "lastName", "lastname", "last_name"])
-        let dataFullName = readString(user, keys: ["fullName", "fullname", "name"])
-        let dataFirstName = readString(user, keys: ["firstName", "firstname", "first_name"])
+                  customCookieJar[cookie.name] = cookie
         let dataLastName = readString(user, keys: ["lastName", "lastname", "last_name"])
 
         if !cardFullName.isEmpty { return cardFullName }
