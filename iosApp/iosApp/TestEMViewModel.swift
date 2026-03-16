@@ -78,9 +78,7 @@ final class TestEMViewModel: ObservableObject {
     @Published var hiddenSections: Set<SectionId> = [.error, .nfc]
 
     private let credentialsManager = CredentialsManager.shared
-    private let daemonService = QRDaemonService()
-    private var pollTask: Task<Void, Never>?
-    private let pollIntervalNs: UInt64 = QRDaemonConfig.pollIntervalNs
+    private var daemonService: QRDaemonService?
     private var backgroundAt: Date?
     private var isBiometricPromptInProgress = false
     private var didAttemptAutoBiometricThisForeground = false
@@ -135,44 +133,20 @@ final class TestEMViewModel: ObservableObject {
         }
 
         isLoggingIn = true
-    isLoggedIn = true
-    isSessionReady = false
+        isLoggedIn = true
+        isSessionReady = true
         errorMessage = ""
-    statusMessage = "Connecting..."
-
-        Task {
-            defer { isLoggingIn = false }
-            do {
-                serialNumber = ""
-            try await daemonService.warmSessionAndLogin(email: email, password: password)
-            isSessionReady = true
-                errorMessage = ""
-                statusMessage = "Login successful"
-                persistCredentials()
-
-                do {
-                    try await loadAccountDetails()
-                    if serialNumber.isEmpty {
-                        statusMessage = "Login successful, waiting for SNR"
-                    }
-                } catch {
-                    statusMessage = "Login successful, account details pending"
-                }
-
-                await loadCardHistory()
-                startPolling()
-            } catch {
-                isLoggedIn = false
-                isSessionReady = false
-                errorMessage = "Login failed: \(error.localizedDescription)"
-                statusMessage = "Login failed"
-            }
-        }
+        statusMessage = "Connecting..."
+        initializeDaemonService()
+        persistCredentials()
+        isLoggingIn = false
+        startPolling()
     }
 
     func logout() {
         stopPolling()
-        daemonService.clearSessionCookies()
+        daemonService?.clearSessionCookies()
+        daemonService = nil
         isLoggedIn = false
         isSessionReady = false
         nfcEnabled = false
@@ -189,67 +163,24 @@ final class TestEMViewModel: ObservableObject {
 
     func startPolling() {
         guard isLoggedIn && isSessionReady else { return }
-        guard !serialNumber.isEmpty else {
-            statusMessage = "Loading account details to obtain serial number..."
-            Task {
-                do {
-                    try await loadAccountDetails()
-                    if serialNumber.isEmpty {
-                        statusMessage = "Unable to find serial number from account details."
-                        return
-                    }
-                    startPolling()
-                } catch {
-                    statusMessage = "Failed to load serial number"
-                    errorMessage = "Failed to load serial number: \(error.localizedDescription)"
-                }
-            }
-            return
-        }
         if isPolling { return }
         isPolling = true
-        statusMessage = "Polling started"
-
-        pollTask = Task {
-            while !Task.isCancelled {
-                do {
-                    try await pollOnce()
-                } catch {
-                    errorMessage = "Polling error: \(error.localizedDescription)"
-                    statusMessage = "Polling error"
-                }
-                try? await Task.sleep(nanoseconds: pollIntervalNs)
-            }
-        }
+        statusMessage = "Starting polling..."
+        daemonService?.startPolling()
     }
 
     func stopPolling() {
-        pollTask?.cancel()
-        pollTask = nil
+        daemonService?.stopPolling()
         isPolling = false
         statusMessage = "Polling stopped"
     }
 
     func loadCardHistory(limit: Int = 20) async {
         guard isLoggedIn && isSessionReady else { return }
-        if serialNumber.isEmpty {
-            do {
-                try await loadAccountDetails()
-            } catch {
-                historyState.isLoading = false
-                historyState.errorMessage = "Failed to load serial number: \(error.localizedDescription)"
-                return
-            }
-            if serialNumber.isEmpty {
-                historyState.isLoading = false
-                historyState.errorMessage = "Serial number not found in account details."
-                return
-            }
-        }
         historyState.isLoading = true
         historyState.errorMessage = ""
         do {
-            let items = try await fetchCardHistory(limit: limit)
+            let items = try await daemonService?.fetchCardHistory(limit: limit) ?? []
             historyState = CardHistoryState(
                 isLoading: false,
                 items: items,
@@ -302,9 +233,11 @@ final class TestEMViewModel: ObservableObject {
 
     func toggleNfc() -> String? {
         nfcEnabled.toggle()
+        daemonService?.setNfcMode(enabled: nfcEnabled, uid: nfcUid)
         if nfcEnabled {
             if nfcUid.isEmpty {
                 nfcUid = generateUid()
+                daemonService?.setNfcMode(enabled: true, uid: nfcUid)
                 statusMessage = "NFC mode enabled"
                 return nfcUid
             }
@@ -466,6 +399,69 @@ final class TestEMViewModel: ObservableObject {
         credentialsManager.setSerial(serialNumber)
     }
 
+    private func initializeDaemonService() {
+        daemonService?.stopPolling()
+        daemonService = QRDaemonService(
+            baseURL: QRDaemonConfig.baseURL,
+            username: email.trimmingCharacters(in: .whitespacesAndNewlines),
+            password: password,
+            initialSerialNumber: serialNumber,
+            initialNfcUid: nfcUid,
+            initialNfcEnabled: nfcEnabled,
+            onTokenUpdate: { [weak self] hex, base64 in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.tokenHex = hex
+                    self.tokenBase64 = base64
+                    self.qrPayload = base64
+                    self.lastUpdated = Date()
+                    self.errorMessage = ""
+                    self.isPolling = true
+                }
+            },
+            onError: { [weak self] error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.errorMessage = error
+                    if error.hasPrefix("Login failed") {
+                        self.isLoggedIn = false
+                        self.isSessionReady = false
+                        self.isPolling = false
+                    }
+                }
+            },
+            onUserName: { [weak self] name in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.accountDetails.accountName = name
+                }
+            },
+            onSerialNumber: { [weak self] snr in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.serialNumber = snr
+                    self.credentialsManager.setSerial(snr)
+                }
+            },
+            onAccountInfo: { [weak self] details in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.accountDetails = details
+                    self.isSessionReady = true
+                }
+            },
+            onStatus: { [weak self] status in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.statusMessage = status
+                    if status == "Session ready" {
+                        self.isSessionReady = true
+                    }
+                }
+            }
+        )
+    }
+
     private func loadStoredThemePresets() -> [ThemePreset]? {
         guard let data = UserDefaults.standard.data(forKey: prefThemePresets) else {
             return nil
@@ -532,269 +528,11 @@ final class TestEMViewModel: ObservableObject {
         return String(format: "%02X%02X%02X%02X", alpha, red, green, blue)
     }
 
-    private func pollOnce() async throws {
-        let encoded = try await daemonService.getQrToken(serialNumber: serialNumber)
-
-        tokenBase64 = encoded
-        tokenHex = base64ToHex(encoded) ?? ""
-        qrPayload = tokenHex.isEmpty ? encoded : tokenHex
-        lastUpdated = Date()
-        statusMessage = "Polling active"
-        errorMessage = ""
-    }
-
     func loadAccountDetails() async throws {
-        let raw = try await daemonService.getAccountDetailRaw()
-
-        guard let root = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
-            throw NSError(domain: "testEM", code: 500, userInfo: [NSLocalizedDescriptionKey: "Account detail parse failed"])
+        guard let daemonService else {
+            throw NSError(domain: "testEM", code: -1, userInfo: [NSLocalizedDescriptionKey: "Service not initialized"])
         }
-
-        let data = (root["data"] as? [String: Any]) ?? root
-        let user = (data["wertyzUser"] as? [String: Any]) ?? (data["user"] as? [String: Any]) ?? data
-        let card = firstCard(from: user) ?? firstCard(from: data) ?? [:]
-        let ticket = firstTicket(from: card) ?? [:]
-
-        let snr = readString(card, keys: ["snr", "cardSnr", "cardSNR", "cardNumber", "serialNumber"])
-        if !snr.isEmpty {
-            serialNumber = snr
-            credentialsManager.setSerial(snr)
-        }
-
-        let templateRaw = readString(card, keys: ["template"])
-        let templateBase64 = readString(card, keys: ["base64", "cardBase64"]).isEmpty
-            ? extractTemplateBase64(templateRaw)
-            : readString(card, keys: ["base64", "cardBase64"])
-        let accountName = readDisplayName(from: user, fallback: data)
-
-        accountDetails = AccountDetails(
-            accountName: accountName,
-            cardTypeName: readString(card, keys: ["cardTypeName", "typeName", "cardType"]),
-            organizationName: readString(card, keys: ["organizationName", "organization", "companyName"]),
-            cardValidFrom: readInt64(card, keys: ["validFrom", "cardValidFrom"]),
-            cardValidTo: readInt64(card, keys: ["validTo", "cardValidTo"]),
-            ticketValidFrom: readInt64(ticket, keys: ["timeValidityFrom", "validFrom"]),
-            ticketValidTo: readInt64(ticket, keys: ["timeValidityTo", "validTo"]),
-            discountValidFrom: readInt64(card, keys: ["discountValidFrom"]),
-            discountValidTo: readInt64(card, keys: ["discountValidTo"]),
-            creditLastBalance: readMoney(card, keys: ["creditLastBalance", "credit"]),
-            currencySymbol: readString(card, keys: ["currencySymbol", "currency"]),
-            cardTemplateBase64: templateBase64
-        )
-    }
-
-    private func readDisplayName(from user: [String: Any], fallback: [String: Any]) -> String {
-        let direct = readString(user, keys: ["name", "fullName", "displayName", "username", "login"])
-        if !direct.isEmpty {
-            return direct
-        }
-
-        let first = readString(user, keys: ["firstName", "firstname", "givenName"])
-        let last = readString(user, keys: ["lastName", "lastname", "surname", "familyName"])
-        let joined = [first, last].filter { !$0.isEmpty }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !joined.isEmpty {
-            return joined
-        }
-
-        return readString(fallback, keys: ["name", "fullName", "displayName"])
-    }
-
-    private func fetchCardHistory(limit: Int) async throws -> [CardHistoryItem] {
-        let raw = try await daemonService.getCardHistoryRaw(serialNumber: serialNumber, limit: limit)
-
-        guard let root = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
-            throw NSError(domain: "testEM", code: 500, userInfo: [NSLocalizedDescriptionKey: "History parse failed"])
-        }
-
-        let tickets = root["tickets"] as? [[String: Any]] ?? []
-        let transactions = root["transactions"] as? [[String: Any]] ?? []
-        let currency = readString(tickets.first ?? [:], keys: ["currencySymbol"])
-        var result: [CardHistoryItem] = []
-
-        for (index, ticket) in tickets.enumerated() {
-            let saleTimeSec = readInt64(ticket, keys: ["saleTime"])
-            let saleTimeMs = normalizeHistoryTimestamp(saleTimeSec * 1000)
-            let ticketId = readString(ticket, keys: ["ticketSNR"]).isEmpty ? "ticket-\(saleTimeMs)-\(index)" : readString(ticket, keys: ["ticketSNR"])
-            let tariffName = readString(ticket, keys: ["tariffName"])
-            let ticketTypeName = readString(ticket, keys: ["ticketTypeName"])
-            let ticketTypeId = readInt(ticket, keys: ["ticketTypeId"])
-            let priceCents = readInt64(ticket, keys: ["price"])
-            let oldBalance = readOptionalInt64(ticket, keys: ["oldBalance"])
-            let newBalance = readOptionalInt64(ticket, keys: ["newBalance"])
-            let title = ticketTypeName.isEmpty ? "Ticket" : ticketTypeName
-            let detailLabel = tariffName.isEmpty ? "Card event" : tariffName
-            let balancePart: String
-            if let oldBalance, let newBalance {
-                balancePart = " | \(formatAmount(cents: oldBalance, currency: currency)) -> \(formatAmount(cents: newBalance, currency: currency))"
-            } else {
-                balancePart = ""
-            }
-            let amount: String
-            if ticketTypeId == 3 || priceCents < 0 {
-                amount = "+\(formatAmount(cents: abs(priceCents), currency: currency))"
-            } else {
-                amount = "-\(formatAmount(cents: abs(priceCents), currency: currency))"
-            }
-
-            result.append(
-                CardHistoryItem(
-                    id: ticketId,
-                    sourceType: .ticket,
-                    timestampMs: saleTimeMs,
-                    title: title,
-                    subtitle: detailLabel + balancePart,
-                    amountText: amount
-                )
-            )
-        }
-
-        for (index, tx) in transactions.enumerated() {
-            let createdAtSec = readInt64(tx, keys: ["createdAt"])
-            let createdAtMs = normalizeHistoryTimestamp(createdAtSec * 1000)
-            let txType = readInt(tx, keys: ["transactionType"])
-            let changes = tx["changes"] as? [[String: Any]] ?? []
-            let subtitle = buildChangesSubtitle(changes)
-
-            result.append(
-                CardHistoryItem(
-                    id: "transaction-\(createdAtMs)-\(index)",
-                    sourceType: .transaction,
-                    timestampMs: createdAtMs,
-                    title: "Transaction #\(txType)",
-                    subtitle: subtitle,
-                    amountText: ""
-                )
-            )
-        }
-
-        return result.sorted { $0.timestampMs > $1.timestampMs }
-    }
-
-    private func buildChangesSubtitle(_ changes: [[String: Any]]) -> String {
-        var parts: [String] = []
-        for change in changes {
-            let value = readString(change, keys: ["value", "valueAfter", "valueBefore"])
-            if !value.isEmpty {
-                parts.append(value)
-            }
-        }
-        return parts.isEmpty ? "Transaction details" : parts.joined(separator: " | ")
-    }
-
-    private func extractTemplateBase64(_ raw: String) -> String {
-        if raw.isEmpty {
-            return ""
-        }
-        if let data = raw.data(using: .utf8),
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let value = object["base64"] as? String {
-            return value
-        }
-        return ""
-    }
-
-    private func firstCard(from dict: [String: Any]) -> [String: Any]? {
-        if let card = dict["card"] as? [String: Any] {
-            return card
-        }
-        if let cards = dict["cards"] as? [[String: Any]], let first = cards.first {
-            return first
-        }
-        if let user = dict["wertyzUser"] as? [String: Any] {
-            return firstCard(from: user)
-        }
-        if let user = dict["user"] as? [String: Any] {
-            return firstCard(from: user)
-        }
-        return nil
-    }
-
-    private func firstTicket(from card: [String: Any]) -> [String: Any]? {
-        guard let tickets = card["tickets"] as? [[String: Any]] else {
-            return nil
-        }
-        if let active = tickets.first(where: { ($0["active"] as? Bool) == true }) {
-            return active
-        }
-        return tickets.first
-    }
-
-    private func readString(_ dict: [String: Any], keys: [String]) -> String {
-        for key in keys {
-            if let value = dict[key] as? String {
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    return trimmed
-                }
-            }
-        }
-        return ""
-    }
-
-    private func readInt64(_ dict: [String: Any], keys: [String]) -> Int64 {
-        for key in keys {
-            if let v = dict[key] as? Int64 { return v }
-            if let v = dict[key] as? Int { return Int64(v) }
-            if let v = dict[key] as? Double { return Int64(v) }
-            if let v = dict[key] as? String, let parsed = Int64(v) { return parsed }
-        }
-        return 0
-    }
-
-    private func readOptionalInt64(_ dict: [String: Any], keys: [String]) -> Int64? {
-        for key in keys {
-            if let v = dict[key] as? Int64 { return v }
-            if let v = dict[key] as? Int { return Int64(v) }
-            if let v = dict[key] as? Double { return Int64(v) }
-            if let v = dict[key] as? String, let parsed = Int64(v) { return parsed }
-        }
-        return nil
-    }
-
-    private func readInt(_ dict: [String: Any], keys: [String]) -> Int {
-        Int(readInt64(dict, keys: keys))
-    }
-
-    private func readMoney(_ dict: [String: Any], keys: [String]) -> Double? {
-        for key in keys {
-            if let v = dict[key] as? Double {
-                if v.rounded(.towardZero) == v {
-                    return v / 100.0
-                }
-                return v
-            }
-            if let v = dict[key] as? Int64 {
-                return Double(v) / 100.0
-            }
-            if let v = dict[key] as? Int {
-                return Double(v) / 100.0
-            }
-            if let v = dict[key] as? String {
-                let normalized = v.replacingOccurrences(of: ",", with: ".")
-                if let parsed = Double(normalized) {
-                    if normalized.contains(".") {
-                        return parsed
-                    }
-                    return parsed / 100.0
-                }
-            }
-        }
-        return nil
-    }
-
-    private func formatAmount(cents: Int64, currency: String) -> String {
-        let value = Double(cents) / 100.0
-        let amount = String(format: "%.2f", value)
-        return currency.isEmpty ? amount : "\(amount) \(currency)"
-    }
-
-    private func normalizeHistoryTimestamp(_ rawMs: Int64) -> Int64 {
-        if rawMs <= 0 {
-            return rawMs
-        }
-        let date = Date(timeIntervalSince1970: TimeInterval(rawMs) / 1000.0)
-        let offsetSeconds = TimeZone.current.secondsFromGMT(for: date)
-        return rawMs - Int64(offsetSeconds * 1000)
+        try await daemonService.refreshAccountDetails()
     }
 
     private func base64ToHex(_ encoded: String) -> String? {

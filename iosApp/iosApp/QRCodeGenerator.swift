@@ -7,9 +7,10 @@ enum QRCodeGenerator {
         let context = CIContext()
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(payload.utf8)
-        filter.correctionLevel = "M"
+        filter.correctionLevel = "H"
         guard let outputImage = filter.outputImage else { return nil }
-        let transformed = outputImage.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+        let scale = max(1, Int(QRDaemonConfig.qrCodeSize / max(outputImage.extent.width, 1)))
+        let transformed = outputImage.transformed(by: CGAffineTransform(scaleX: CGFloat(scale), y: CGFloat(scale)))
         guard let cgImage = context.createCGImage(transformed, from: transformed.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }
