@@ -419,10 +419,10 @@ final class QRDaemonService {
                     additionalHeaders: standardHeaders(referer: sessionBaseURL.appendingPathComponent("account"), includeCSRF: false)
                 )
 
-                if result.response.statusCode >= 200, result.response.statusCode < 300 {
-                    let body = String(data: result.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if result.1.statusCode >= 200, result.1.statusCode < 300 {
+                    let body = String(data: result.0, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     if !body.isEmpty, body != "{}", body != "[]" {
-                        return result
+                        return (data: result.0, response: result.1)
                     }
                 }
             } catch {
