@@ -29,6 +29,7 @@ final class QRDaemonService {
     private var authFailures = 0
     private var isPolling = false
     private var lastSnrRefreshAttempt: Date?
+    private var lastAccountDetailRaw: String?
 
     init(
         baseURL: URL = QRDaemonConfig.baseURL,
@@ -331,7 +332,33 @@ final class QRDaemonService {
             additionalHeaders: standardHeaders(referer: sessionBaseURL.appendingPathComponent("account/login"), includeCSRF: false)
         )
         onStatus("getAccountDetail HTTP \(response.statusCode)")
+        lastAccountDetailRaw = String(data: data, encoding: .utf8)
         try parseAndEmitAccountDetails(from: data)
+
+        if serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let storedSerial = CredentialsManager.shared.loadSerial().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !storedSerial.isEmpty {
+                serialNumber = storedSerial
+                onSerialNumber(storedSerial)
+                onStatus("Loaded SNR")
+                return
+            }
+
+            if let raw = lastAccountDetailRaw,
+               let recovered = extractSnrFromRawJson(raw),
+               !recovered.isEmpty {
+                serialNumber = recovered
+                onSerialNumber(recovered)
+                onStatus("Loaded SNR")
+                return
+            }
+
+            let preview = (lastAccountDetailRaw ?? "")
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+                .prefix(140)
+            onStatus("No SNR in account detail: \(preview)")
+        }
     }
 
     private func pollTokens() async throws {
@@ -388,6 +415,15 @@ final class QRDaemonService {
             if !storedSerial.isEmpty {
                 serialNumber = storedSerial
                 identifier = storedSerial
+            }
+            if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let raw = lastAccountDetailRaw,
+               let recovered = extractSnrFromRawJson(raw),
+               !recovered.isEmpty {
+                serialNumber = recovered
+                onSerialNumber(recovered)
+                identifier = recovered
+                onStatus("Loaded SNR")
             }
         }
         if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -824,20 +860,31 @@ final class QRDaemonService {
 
     private func readString(_ dict: [String: Any], keys: [String]) -> String {
         for key in keys {
-            if let value = dict[key] as? String {
+            if let value = valueForKeyCaseInsensitive(dict, key: key) as? String {
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty { return trimmed }
             }
-            if let value = dict[key] as? NSNumber {
+            if let value = valueForKeyCaseInsensitive(dict, key: key) as? NSNumber {
                 let asString = value.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !asString.isEmpty { return asString }
             }
-            if let value = dict[key], !(value is NSNull) {
+            if let value = valueForKeyCaseInsensitive(dict, key: key), !(value is NSNull) {
                 let asString = String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !asString.isEmpty, asString != "<null>" { return asString }
             }
         }
         return ""
+    }
+
+    private func valueForKeyCaseInsensitive(_ dict: [String: Any], key: String) -> Any? {
+        if let exact = dict[key] {
+            return exact
+        }
+        let lower = key.lowercased()
+        for (candidate, value) in dict where candidate.lowercased() == lower {
+            return value
+        }
+        return nil
     }
 
     private func findFirstString(in value: Any, keys: Set<String>) -> String? {
@@ -881,7 +928,8 @@ final class QRDaemonService {
     private func extractSnrFromRawJson(_ text: String) -> String? {
         let patterns = [
             #""(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)"\s*:\s*"([^"]+)""#,
-            #""(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)"\s*:\s*([0-9]+)"#
+            #""(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)"\s*:\s*([0-9]+)"#,
+            #"(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)\s*[:=]\s*\"?([A-Za-z0-9_-]{4,})\"?"#
         ]
 
         for pattern in patterns {
