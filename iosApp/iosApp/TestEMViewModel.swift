@@ -461,6 +461,7 @@ final class TestEMViewModel: ObservableObject {
                 }
             },
             onStatus: { [weak self] status in
+                print("[QRDaemon] \(status)")
                 Task { @MainActor in
                     guard let self else { return }
                     self.statusMessage = status
