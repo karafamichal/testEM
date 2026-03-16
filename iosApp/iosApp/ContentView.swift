@@ -50,6 +50,27 @@ struct CardHistoryState {
     var lastUpdated: Date?
 }
 
+struct ThemePreset: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let accent: Color
+}
+
+enum SettingsPage {
+    case root
+    case layout
+    case security
+}
+
+enum SectionId: String, CaseIterable {
+    case status
+    case qr
+    case account
+    case history
+    case controls
+    case error
+}
+
 @MainActor
 final class TestEMViewModel: ObservableObject {
     @Published var email: String
@@ -73,7 +94,17 @@ final class TestEMViewModel: ObservableObject {
     @Published var isPinSet = false
     @Published var isAppUnlocked = true
     @Published var biometricEnabled = true
-    @Published var lockTimeoutSeconds = 0
+    @Published var lockTimeoutSeconds = 30
+    @Published var amoledEnabled = false
+    @Published var languageCode = "sk"
+    @Published var themePresets: [ThemePreset] = [
+        ThemePreset(id: "classic", name: "Classic", accent: Color(red: 0.40, green: 0.31, blue: 0.64)),
+        ThemePreset(id: "ocean", name: "Ocean", accent: Color(red: 0.07, green: 0.44, blue: 0.39)),
+        ThemePreset(id: "sunset", name: "Sunset", accent: Color(red: 0.91, green: 0.37, blue: 0.02))
+    ]
+    @Published var selectedThemeId = "classic"
+    @Published var layoutOrder: [SectionId] = [.status, .qr, .account, .history, .controls, .error]
+    @Published var hiddenSections: Set<SectionId> = [.error]
 
     private let baseURL = URL(string: "https://sadzv.qrbus.me")!
     private let cookieStorage = HTTPCookieStorage()
@@ -88,6 +119,11 @@ final class TestEMViewModel: ObservableObject {
     private let prefSerial = "testem.serial"
     private let prefBiometricEnabled = "testem.biometricEnabled"
     private let prefLockTimeout = "testem.lockTimeoutSeconds"
+    private let prefAmoledEnabled = "testem.amoledEnabled"
+    private let prefLanguageCode = "testem.languageCode"
+    private let prefSelectedThemeId = "testem.selectedThemeId"
+    private let prefLayoutOrder = "testem.layoutOrder"
+    private let prefHiddenSections = "testem.hiddenSections"
     private let prefPinSalt = "testem.pinSalt"
     private let prefPinHash = "testem.pinHash"
 
@@ -96,7 +132,21 @@ final class TestEMViewModel: ObservableObject {
         self.password = UserDefaults.standard.string(forKey: prefPassword) ?? ""
         self.serialNumber = UserDefaults.standard.string(forKey: prefSerial) ?? ""
         self.biometricEnabled = UserDefaults.standard.object(forKey: prefBiometricEnabled) as? Bool ?? true
-        self.lockTimeoutSeconds = UserDefaults.standard.object(forKey: prefLockTimeout) as? Int ?? 0
+        self.amoledEnabled = UserDefaults.standard.object(forKey: prefAmoledEnabled) as? Bool ?? false
+        self.languageCode = UserDefaults.standard.string(forKey: prefLanguageCode) ?? "sk"
+        self.selectedThemeId = UserDefaults.standard.string(forKey: prefSelectedThemeId) ?? "classic"
+        let savedTimeout = UserDefaults.standard.object(forKey: prefLockTimeout) as? Int ?? 30
+        self.lockTimeoutSeconds = max(30, savedTimeout)
+        UserDefaults.standard.set(self.lockTimeoutSeconds, forKey: prefLockTimeout)
+        if let rawOrder = UserDefaults.standard.array(forKey: prefLayoutOrder) as? [String] {
+            let mapped = rawOrder.compactMap { SectionId(rawValue: $0) }
+            if !mapped.isEmpty {
+                self.layoutOrder = mapped
+            }
+        }
+        if let rawHidden = UserDefaults.standard.array(forKey: prefHiddenSections) as? [String] {
+            self.hiddenSections = Set(rawHidden.compactMap { SectionId(rawValue: $0) })
+        }
         self.isPinSet = pinHashAndSalt() != nil
         self.isAppUnlocked = !isPinSet
     }
@@ -118,18 +168,24 @@ final class TestEMViewModel: ObservableObject {
         Task {
             defer { isLoggingIn = false }
             do {
+                serialNumber = ""
                 try await warmSessionAndLogin()
-                persistCredentials()
                 isLoggedIn = true
                 errorMessage = ""
                 statusMessage = "Login successful"
-                try? await loadAccountDetails()
-                await loadCardHistory()
-                if serialNumber.isEmpty {
-                    statusMessage = "Login successful (serial number not found yet)"
-                } else {
-                    startPolling()
+
+                try await loadAccountDetails()
+                guard !serialNumber.isEmpty else {
+                    throw NSError(
+                        domain: "testEM",
+                        code: 400,
+                        userInfo: [NSLocalizedDescriptionKey: "SNR was not found in account details"]
+                    )
                 }
+
+                persistCredentials()
+                await loadCardHistory()
+                startPolling()
             } catch {
                 isLoggedIn = false
                 errorMessage = "Login failed: \(error.localizedDescription)"
@@ -261,8 +317,52 @@ final class TestEMViewModel: ObservableObject {
     }
 
     func setLockTimeoutSeconds(_ seconds: Int) {
-        lockTimeoutSeconds = seconds
-        UserDefaults.standard.set(seconds, forKey: prefLockTimeout)
+        lockTimeoutSeconds = max(30, seconds)
+        UserDefaults.standard.set(lockTimeoutSeconds, forKey: prefLockTimeout)
+    }
+
+    func setAmoledEnabled(_ enabled: Bool) {
+        amoledEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: prefAmoledEnabled)
+    }
+
+    func setLanguageCode(_ code: String) {
+        languageCode = code
+        UserDefaults.standard.set(code, forKey: prefLanguageCode)
+    }
+
+    func selectThemePreset(_ presetId: String) {
+        selectedThemeId = presetId
+        UserDefaults.standard.set(presetId, forKey: prefSelectedThemeId)
+    }
+
+    func moveLayoutItem(_ id: SectionId, direction: Int) {
+        guard let index = layoutOrder.firstIndex(of: id) else { return }
+        let target = index + direction
+        guard layoutOrder.indices.contains(target) else { return }
+        var updated = layoutOrder
+        let moved = updated.remove(at: index)
+        updated.insert(moved, at: target)
+        layoutOrder = updated
+        UserDefaults.standard.set(updated.map { $0.rawValue }, forKey: prefLayoutOrder)
+    }
+
+    func setSectionHidden(_ id: SectionId, hidden: Bool) {
+        if hidden {
+            hiddenSections.insert(id)
+        } else {
+            hiddenSections.remove(id)
+        }
+        UserDefaults.standard.set(hiddenSections.map { $0.rawValue }, forKey: prefHiddenSections)
+    }
+
+    func changePin(currentPin: String, newPin: String) -> Bool {
+        guard verifyPin(currentPin) else { return false }
+        return setPin(newPin)
+    }
+
+    var currentAccentColor: Color {
+        themePresets.first(where: { $0.id == selectedThemeId })?.accent ?? .green
     }
 
     func handleScenePhase(_ phase: ScenePhase) {
@@ -274,10 +374,8 @@ final class TestEMViewModel: ObservableObject {
             }
         case .active:
             guard isPinSet else { return }
-            let timeout = lockTimeoutSeconds
-            if timeout == 0 {
-                isAppUnlocked = false
-            } else if let bg = backgroundAt {
+            let timeout = max(30, lockTimeoutSeconds)
+            if let bg = backgroundAt {
                 if Date().timeIntervalSince(bg) >= Double(timeout) {
                     isAppUnlocked = false
                 }
@@ -301,7 +399,7 @@ final class TestEMViewModel: ObservableObject {
 
         let context = LAContext()
         var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
             if let error, !triggeredAutomatically {
                 self.errorMessage = "Biometric unavailable: \(error.localizedDescription)"
             }
@@ -310,7 +408,7 @@ final class TestEMViewModel: ObservableObject {
 
         do {
             let ok = try await context.evaluatePolicy(
-                .deviceOwnerAuthenticationWithBiometrics,
+                .deviceOwnerAuthentication,
                 localizedReason: "Unlock testEM"
             )
             if ok {
@@ -837,6 +935,13 @@ private struct PinUnlockView: View {
 struct ContentView: View {
     @StateObject private var viewModel = TestEMViewModel()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showSettings = false
+    @State private var settingsPage: SettingsPage = .root
+    @State private var showChangePinSheet = false
+    @State private var changePinCurrent = ""
+    @State private var changePinNew = ""
+    @State private var changePinConfirm = ""
+    @State private var changePinError = ""
 
     var body: some View {
         NavigationStack {
@@ -853,10 +958,30 @@ struct ContentView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .background(viewModel.amoledEnabled ? Color.black : Color(.systemGroupedBackground))
             .navigationTitle("testEM")
+            .toolbar {
+                if viewModel.isLoggedIn && viewModel.isAppUnlocked {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            settingsPage = .root
+                            showSettings = true
+                        } label: {
+                            Image(systemName: "gearshape.fill")
+                        }
+                    }
+                }
+            }
         }
         .onChange(of: scenePhase) { _, newValue in
             viewModel.handleScenePhase(newValue)
+        }
+        .tint(viewModel.currentAccentColor)
+        .sheet(isPresented: $showSettings) {
+            settingsSheet
+        }
+        .sheet(isPresented: $showChangePinSheet) {
+            changePinSheet
         }
     }
 
@@ -909,115 +1034,103 @@ struct ContentView: View {
     private var daemonView: some View {
         ScrollView {
             VStack(spacing: 16) {
-                QRCodeView(payload: viewModel.qrPayload)
-                    .frame(width: 260, height: 260)
+                ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
+                    if !viewModel.hiddenSections.contains(id) || !hideableSections.contains(id) {
+                        sectionView(for: id)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
 
-                if !viewModel.tokenHex.isEmpty {
-                    GroupBox("Token (Hex)") {
+    private var hideableSections: Set<SectionId> {
+        [.status, .error]
+    }
+
+    @ViewBuilder
+    private func sectionView(for id: SectionId) -> some View {
+        switch id {
+        case .status:
+            cardContainer("Status") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(viewModel.statusMessage)
+                    if let updated = viewModel.lastUpdated {
+                        Text("Last update: \(updated.formatted(date: .omitted, time: .standard))")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .qr:
+            cardContainer("QR") {
+                VStack(spacing: 12) {
+                    QRCodeView(payload: viewModel.qrPayload)
+                        .frame(width: 260, height: 260)
+                    if !viewModel.tokenHex.isEmpty {
                         Text(viewModel.tokenHex)
-                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .font(.system(size: 12, design: .monospaced))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-
-                if !viewModel.tokenBase64.isEmpty {
-                    GroupBox("Token (Base64)") {
-                        Text(viewModel.tokenBase64)
-                            .font(.system(size: 12, weight: .regular, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity)
+            }
+        case .account:
+            cardContainer("Account") {
+                VStack(alignment: .leading, spacing: 6) {
+                    labeled("SNR", viewModel.serialNumber)
+                    labeled("Card Type", viewModel.accountDetails.cardTypeName)
+                    labeled("Organization", viewModel.accountDetails.organizationName)
+                    labeled("Card Valid To", dateText(fromMs: viewModel.accountDetails.cardValidTo))
+                    labeled("Ticket Valid To", dateText(fromMs: viewModel.accountDetails.ticketValidTo))
+                    if let credit = viewModel.accountDetails.creditLastBalance {
+                        let currency = viewModel.accountDetails.currencySymbol
+                        labeled("Credit", String(format: "%.2f %@", credit, currency))
                     }
                 }
-
-                GroupBox("Account Details") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        labeled("SNR", viewModel.serialNumber)
-                        labeled("Card Type", viewModel.accountDetails.cardTypeName)
-                        labeled("Organization", viewModel.accountDetails.organizationName)
-                        labeled("Card Valid To", dateText(fromMs: viewModel.accountDetails.cardValidTo))
-                        labeled("Ticket Valid To", dateText(fromMs: viewModel.accountDetails.ticketValidTo))
-                        if let credit = viewModel.accountDetails.creditLastBalance {
-                            let currency = viewModel.accountDetails.currencySymbol
-                            labeled("Credit", String(format: "%.2f %@", credit, currency))
-                        }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .history:
+            cardContainer("History") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Button("Refresh History") {
+                        Task { await viewModel.loadCardHistory() }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
 
-                GroupBox("History") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Button("Refresh History") {
-                            Task { await viewModel.loadCardHistory() }
-                        }
+                    if viewModel.historyState.isLoading {
+                        ProgressView()
+                    }
 
-                        if viewModel.historyState.isLoading {
-                            ProgressView()
-                        }
+                    if !viewModel.historyState.errorMessage.isEmpty {
+                        Text(viewModel.historyState.errorMessage)
+                            .foregroundStyle(.red)
+                    }
 
-                        if !viewModel.historyState.errorMessage.isEmpty {
-                            Text(viewModel.historyState.errorMessage)
-                                .foregroundStyle(.red)
-                        }
-
-                        ForEach(viewModel.historyState.items.prefix(20)) { item in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text(item.title).font(.headline)
-                                    Spacer()
-                                    Text(item.amountText)
-                                        .foregroundStyle(item.amountText.hasPrefix("+") ? .green : .primary)
-                                }
-                                Text(item.subtitle)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Text(dateText(fromMs: item.timestampMs))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    ForEach(viewModel.historyState.items.prefix(20)) { item in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(item.title).font(.headline)
+                                Spacer()
+                                Text(item.amountText)
+                                    .foregroundStyle(item.amountText.hasPrefix("+") ? .green : .primary)
                             }
-                            Divider()
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                GroupBox("Security") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Enable Face ID / Touch ID", isOn: Binding(
-                            get: { viewModel.biometricEnabled },
-                            set: { viewModel.setBiometricEnabled($0) }
-                        ))
-
-                        Picker("Lock Timeout", selection: Binding(
-                            get: { viewModel.lockTimeoutSeconds },
-                            set: { viewModel.setLockTimeoutSeconds($0) }
-                        )) {
-                            Text("Immediate").tag(0)
-                            Text("30s").tag(30)
-                            Text("1m").tag(60)
-                            Text("5m").tag(300)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                GroupBox("Status") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(viewModel.statusMessage)
-                        if let updated = viewModel.lastUpdated {
-                            Text("Last update: \(updated.formatted(date: .omitted, time: .standard))")
-                                .font(.footnote)
+                            Text(item.subtitle)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text(dateText(fromMs: item.timestampMs))
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        if !viewModel.errorMessage.isEmpty {
-                            Text(viewModel.errorMessage)
-                                .foregroundStyle(.red)
-                        }
+                        Divider()
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-
-                HStack(spacing: 12) {
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .controls:
+            cardContainer("Controls") {
+                VStack(spacing: 10) {
                     Button(viewModel.isPolling ? "Stop Polling" : "Start Polling") {
                         if viewModel.isPolling {
                             viewModel.stopPolling()
@@ -1025,6 +1138,7 @@ struct ContentView: View {
                             viewModel.startPolling()
                         }
                     }
+                    .frame(maxWidth: .infinity)
 
                     Button("Refresh Account") {
                         Task {
@@ -1036,14 +1150,273 @@ struct ContentView: View {
                             }
                         }
                     }
-
-                    Button("Logout", role: .destructive) {
-                        viewModel.logout()
-                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
             }
-            .frame(maxWidth: .infinity)
+        case .error:
+            if !viewModel.errorMessage.isEmpty {
+                cardContainer("Errors") {
+                    Text(viewModel.errorMessage)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private func cardContainer<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.headline)
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity)
+        .background(viewModel.amoledEnabled ? Color(.secondarySystemBackground) : Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var settingsSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    switch settingsPage {
+                    case .root:
+                        settingsRootView
+                    case .layout:
+                        layoutSettingsView
+                    case .security:
+                        securitySettingsView
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle(settingsPageTitle)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if settingsPage != .root {
+                        Button("Back") {
+                            settingsPage = .root
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        showSettings = false
+                    }
+                }
+            }
+            .background(viewModel.amoledEnabled ? Color.black : Color(.systemGroupedBackground))
+        }
+    }
+
+    private var settingsPageTitle: String {
+        switch settingsPage {
+        case .root: return "Settings"
+        case .layout: return "Layout"
+        case .security: return "Security"
+        }
+    }
+
+    private var settingsRootView: some View {
+        VStack(spacing: 14) {
+            cardContainer("Theme Presets") {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(viewModel.themePresets) { preset in
+                        HStack {
+                            Image(systemName: viewModel.selectedThemeId == preset.id ? "largecircle.fill.circle" : "circle")
+                            Text(preset.name)
+                            Spacer()
+                            Circle().fill(preset.accent).frame(width: 16, height: 16)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            viewModel.selectThemePreset(preset.id)
+                        }
+                    }
+
+                    Toggle("AMOLED mode", isOn: Binding(
+                        get: { viewModel.amoledEnabled },
+                        set: { viewModel.setAmoledEnabled($0) }
+                    ))
+                }
+            }
+
+            cardContainer("Language") {
+                VStack(alignment: .leading, spacing: 8) {
+                    languageRow(code: "sk", label: "Slovak (preferred)")
+                    languageRow(code: "en", label: "English")
+                }
+            }
+
+            cardContainer("Layout") {
+                Button("Open Layout Settings") {
+                    settingsPage = .layout
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+            }
+
+            cardContainer("Security") {
+                Button("Open Security Settings") {
+                    settingsPage = .security
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+            }
+
+            cardContainer("Account") {
+                Button("Logout", role: .destructive) {
+                    viewModel.logout()
+                    showSettings = false
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var layoutSettingsView: some View {
+        VStack(spacing: 12) {
+            ForEach(Array(viewModel.layoutOrder.enumerated()), id: \.element.rawValue) { index, id in
+                cardContainer(sectionTitle(id)) {
+                    HStack(spacing: 8) {
+                        if hideableSections.contains(id) {
+                            Toggle("Visible", isOn: Binding(
+                                get: { !viewModel.hiddenSections.contains(id) },
+                                set: { viewModel.setSectionHidden(id, hidden: !$0) }
+                            ))
+                        }
+                        Spacer()
+                        Button("Up") {
+                            viewModel.moveLayoutItem(id, direction: -1)
+                        }
+                        .disabled(index == 0)
+                        Button("Down") {
+                            viewModel.moveLayoutItem(id, direction: 1)
+                        }
+                        .disabled(index == viewModel.layoutOrder.count - 1)
+                    }
+                }
+            }
+        }
+    }
+
+    private var securitySettingsView: some View {
+        VStack(spacing: 14) {
+            cardContainer("Biometrics") {
+                Toggle("Enable Face ID / Touch ID", isOn: Binding(
+                    get: { viewModel.biometricEnabled },
+                    set: { viewModel.setBiometricEnabled($0) }
+                ))
+            }
+
+            cardContainer("Lock Timeout") {
+                VStack(alignment: .leading, spacing: 6) {
+                    lockTimeoutRow(seconds: 30, label: "30 seconds")
+                    lockTimeoutRow(seconds: 60, label: "1 minute")
+                    lockTimeoutRow(seconds: 300, label: "5 minutes")
+                }
+            }
+
+            cardContainer("PIN") {
+                Button("Change PIN") {
+                    changePinCurrent = ""
+                    changePinNew = ""
+                    changePinConfirm = ""
+                    changePinError = ""
+                    showChangePinSheet = true
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var changePinSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Current") {
+                    SecureField("Current PIN", text: $changePinCurrent)
+                        .keyboardType(.numberPad)
+                }
+                Section("New") {
+                    SecureField("New PIN (4-8 digits)", text: $changePinNew)
+                        .keyboardType(.numberPad)
+                    SecureField("Confirm New PIN", text: $changePinConfirm)
+                        .keyboardType(.numberPad)
+                }
+                if !changePinError.isEmpty {
+                    Section("Error") {
+                        Text(changePinError).foregroundStyle(.red)
+                    }
+                }
+                Section {
+                    Button("Update PIN") {
+                        if changePinCurrent.count < 4 {
+                            changePinError = "Enter current PIN."
+                            return
+                        }
+                        if changePinNew.count < 4 {
+                            changePinError = "New PIN is too short."
+                            return
+                        }
+                        if changePinNew != changePinConfirm {
+                            changePinError = "PIN confirmation does not match."
+                            return
+                        }
+                        if viewModel.changePin(currentPin: changePinCurrent, newPin: changePinNew) {
+                            showChangePinSheet = false
+                        } else {
+                            changePinError = "Current PIN is incorrect."
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Change PIN")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") {
+                        showChangePinSheet = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func sectionTitle(_ id: SectionId) -> String {
+        switch id {
+        case .status: return "Polling Status"
+        case .qr: return "QR Code"
+        case .account: return "Account"
+        case .history: return "History"
+        case .controls: return "Controls"
+        case .error: return "Errors"
+        }
+    }
+
+    private func languageRow(code: String, label: String) -> some View {
+        HStack {
+            Image(systemName: viewModel.languageCode == code ? "largecircle.fill.circle" : "circle")
+            Text(label)
+            Spacer()
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            viewModel.setLanguageCode(code)
+        }
+    }
+
+    private func lockTimeoutRow(seconds: Int, label: String) -> some View {
+        HStack {
+            Image(systemName: viewModel.lockTimeoutSeconds == seconds ? "largecircle.fill.circle" : "circle")
+            Text(label)
+            Spacer()
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            viewModel.setLockTimeoutSeconds(seconds)
         }
     }
 
