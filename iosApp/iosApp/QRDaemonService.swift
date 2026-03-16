@@ -408,10 +408,28 @@ final class QRDaemonService {
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return nil
             }
-            let success = json["success"] as? Bool ?? false
+            let success: Bool = {
+                if let bool = json["success"] as? Bool { return bool }
+                if let intValue = json["success"] as? Int { return intValue != 0 }
+                if let stringValue = json["success"] as? String {
+                    let normalized = stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    return normalized == "true" || normalized == "1" || normalized == "yes"
+                }
+                return false
+            }()
             let dataField = json["data"] as? String ?? ""
             let base64Field = json["base64"] as? String ?? ""
             if !success || (dataField.isEmpty && base64Field.isEmpty) {
+                let typeField = String(describing: json["type"] ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let messageField = String(describing: json["message"] ?? json["msg"] ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let detail = [typeField, messageField]
+                    .filter { !$0.isEmpty && $0 != "<null>" }
+                    .joined(separator: ": ")
+                if !detail.isEmpty {
+                    onStatus("No token available - \(detail)")
+                }
                 return nil
             }
 
@@ -737,6 +755,9 @@ final class QRDaemonService {
     }
 
     private func urlEncode(_ input: String) -> String {
-        input.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? input
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._*")
+        let encoded = input.addingPercentEncoding(withAllowedCharacters: allowed) ?? input
+        return encoded.replacingOccurrences(of: "%20", with: "+")
     }
 }
