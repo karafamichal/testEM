@@ -339,13 +339,12 @@ final class QRDaemonService {
             do {
                 onStatus("Fetching token...")
                 guard let payload = try await fetchQRToken() else {
-                    onStatus("No token yet - retrying in 1.5s")
                     try await Task.sleep(nanoseconds: QRDaemonConfig.shortRetryNs)
                     continue
                 }
 
                 if payload.decodedBytes.isEmpty || payload.rawBase64.isEmpty {
-                    onStatus("No token yet - retrying in 1.5s")
+                    onStatus("No token yet - empty payload")
                     try await Task.sleep(nanoseconds: QRDaemonConfig.shortRetryNs)
                     continue
                 }
@@ -407,10 +406,12 @@ final class QRDaemonService {
             }
 
             guard response.statusCode == 200 else {
+                onStatus("Token HTTP \(response.statusCode)")
                 return nil
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                onStatus("Token parse error: non-JSON response")
                 return nil
             }
             let success: Bool = {
@@ -422,18 +423,28 @@ final class QRDaemonService {
                 }
                 return false
             }()
-            let dataField = json["data"] as? String ?? ""
-            let base64Field = json["base64"] as? String ?? ""
+
+            let dataObject = json["data"] as? [String: Any]
+            let dataField = json["data"] as? String
+                ?? dataObject?["data"] as? String
+                ?? dataObject?["token"] as? String
+                ?? ""
+            let base64Field = json["base64"] as? String
+                ?? dataObject?["base64"] as? String
+                ?? dataObject?["tokenBase64"] as? String
+                ?? ""
             if !success || (dataField.isEmpty && base64Field.isEmpty) {
                 let typeField = String(describing: json["type"] ?? "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                let messageField = String(describing: json["message"] ?? json["msg"] ?? "")
+                let messageField = String(describing: json["message"] ?? json["msg"] ?? dataObject?["message"] ?? dataObject?["msg"] ?? "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let detail = [typeField, messageField]
                     .filter { !$0.isEmpty && $0 != "<null>" }
                     .joined(separator: ": ")
                 if !detail.isEmpty {
                     onStatus("No token available - \(detail)")
+                } else {
+                    onStatus("No token available - API returned empty token")
                 }
                 return nil
             }
