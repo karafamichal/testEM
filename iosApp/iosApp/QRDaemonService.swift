@@ -503,9 +503,17 @@ final class QRDaemonService {
         }
 
         let cardSNR = readString(card, keys: ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
-        let snr = cardSNR.isEmpty
+        var snr = cardSNR.isEmpty
             ? readString(data, keys: ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
             : cardSNR
+
+        if snr.isEmpty,
+           let recovered = findFirstString(
+                in: root,
+                 keys: ["snr", "cardsnr", "card_snr", "cardnumber", "serialnumber", "serial_number", "serial"]
+           ) {
+            snr = recovered
+        }
 
         if !snr.isEmpty, snr != serialNumber {
             serialNumber = snr
@@ -741,6 +749,44 @@ final class QRDaemonService {
             }
         }
         return ""
+    }
+
+    private func findFirstString(in value: Any, keys: Set<String>) -> String? {
+        if let dict = value as? [String: Any] {
+            for (rawKey, rawValue) in dict {
+                let key = rawKey.lowercased()
+                if keys.contains(key) {
+                    if let stringValue = rawValue as? String {
+                        let trimmed = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty { return trimmed }
+                    }
+                    if let numberValue = rawValue as? NSNumber {
+                        let asString = numberValue.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !asString.isEmpty { return asString }
+                    }
+                    let described = String(describing: rawValue).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !described.isEmpty, described != "<null>" {
+                        return described
+                    }
+                }
+            }
+
+            for (_, child) in dict {
+                if let found = findFirstString(in: child, keys: keys) {
+                    return found
+                }
+            }
+            return nil
+        }
+
+        if let array = value as? [Any] {
+            for child in array {
+                if let found = findFirstString(in: child, keys: keys) {
+                    return found
+                }
+            }
+        }
+        return nil
     }
 
     private func readInt64(_ dict: [String: Any], keys: [String]) -> Int64 {
