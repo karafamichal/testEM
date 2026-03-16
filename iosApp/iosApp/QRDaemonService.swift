@@ -492,7 +492,17 @@ final class QRDaemonService {
             throw NSError(domain: "testEM", code: 500, userInfo: [NSLocalizedDescriptionKey: "Account detail parse failed"])
         }
 
-        let data = (root["data"] as? [String: Any]) ?? root
+        let data: [String: Any] = {
+            if let dict = root["data"] as? [String: Any] {
+                return dict
+            }
+            if let dataString = root["data"] as? String,
+               let dataBytes = dataString.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: dataBytes) as? [String: Any] {
+                return parsed
+            }
+            return root
+        }()
         let user = (data["wertyzUser"] as? [String: Any]) ?? (data["user"] as? [String: Any]) ?? data
         let card = firstCard(from: user) ?? firstCard(from: data) ?? [:]
         let ticket = firstTicket(from: card) ?? [:]
@@ -510,8 +520,14 @@ final class QRDaemonService {
         if snr.isEmpty,
            let recovered = findFirstString(
                 in: root,
-                 keys: ["snr", "cardsnr", "card_snr", "cardnumber", "serialnumber", "serial_number", "serial"]
+                keys: ["snr", "cardsnr", "card_snr", "cardnumber", "cardserial", "serialnumber", "serial_number", "serial"]
            ) {
+            snr = recovered
+        }
+
+        if snr.isEmpty,
+           let rawText = String(data: raw, encoding: .utf8),
+           let recovered = extractSnrFromRawJson(rawText) {
             snr = recovered
         }
 
@@ -618,6 +634,9 @@ final class QRDaemonService {
             "X-Requested-With": "XMLHttpRequest",
             "Origin": sessionBaseURL.absoluteString,
             "Referer": referer.absoluteString,
+            "Sec-CH-UA": "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"Google Chrome\";v=\"144\"",
+            "Sec-CH-UA-Mobile": "?1",
+            "Sec-CH-UA-Platform": "\"Android\"",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
@@ -666,6 +685,32 @@ final class QRDaemonService {
             guard String(describing: key).caseInsensitiveCompare("Set-Cookie") == .orderedSame else { return nil }
             return String(describing: value)
         }
+
+        let combined = setCookieHeaders.joined(separator: ",")
+        let regex = try? NSRegularExpression(pattern: "WPIS=([^;]+)", options: [.caseInsensitive])
+        let range = NSRange(location: 0, length: combined.utf16.count)
+        let matches = regex?.matches(in: combined, options: [], range: range) ?? []
+
+        if !matches.isEmpty {
+            for match in matches {
+                guard match.numberOfRanges > 1,
+                      let valueRange = Range(match.range(at: 1), in: combined) else { continue }
+                let value = String(combined[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty else { continue }
+                if let cookie = HTTPCookie(properties: [
+                    .domain: host,
+                    .path: "/",
+                    .name: "WPIS",
+                    .value: value,
+                    .secure: "TRUE",
+                    .expires: Date().addingTimeInterval(30 * 24 * 60 * 60)
+                ]) {
+                    cookieStorage.setCookie(cookie)
+                }
+            }
+            return
+        }
+
         for header in setCookieHeaders {
             let matches = header.components(separatedBy: ",")
             for part in matches {
@@ -784,6 +829,27 @@ final class QRDaemonService {
                 if let found = findFirstString(in: child, keys: keys) {
                     return found
                 }
+            }
+        }
+        return nil
+    }
+
+    private func extractSnrFromRawJson(_ text: String) -> String? {
+        let patterns = [
+            #""(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)"\s*:\s*"([^"]+)""#,
+            #""(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)"\s*:\s*([0-9]+)"#
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let nsRange = NSRange(location: 0, length: text.utf16.count)
+            guard let match = regex.firstMatch(in: text, options: [], range: nsRange),
+                  match.numberOfRanges > 1,
+                  let valueRange = Range(match.range(at: 1), in: text) else { continue }
+
+            let value = String(text[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty {
+                return value
             }
         }
         return nil
