@@ -356,44 +356,53 @@ final class QRDaemonService {
             return nil
         }
 
-        let session = makeSession()
-        let tokenBody = "post[serialnumber]=\(urlEncode(identifier))"
-        let (data, response) = try await performRequestWithResponse(
-            session: session,
-            url: sessionBaseURL.appendingPathComponent("cardapi/getQrToken"),
-            method: "POST",
-            body: tokenBody,
-            contentType: "application/x-www-form-urlencoded; charset=UTF-8",
-            additionalHeaders: standardHeaders(referer: sessionBaseURL.appendingPathComponent("account"), includeCSRF: true)
-        )
+        do {
+            let session = makeSession()
+            let tokenBody = "post[serialnumber]=\(urlEncode(identifier))"
+            let (data, response) = try await performRequestWithResponse(
+                session: session,
+                url: sessionBaseURL.appendingPathComponent("cardapi/getQrToken"),
+                method: "POST",
+                body: tokenBody,
+                contentType: "application/x-www-form-urlencoded; charset=UTF-8",
+                additionalHeaders: standardHeaders(referer: sessionBaseURL.appendingPathComponent("account"), includeCSRF: true)
+            )
 
-        if response.statusCode == 401 || response.url?.path.contains("/account/login") == true {
-            throw NSError(domain: "testEM", code: 401, userInfo: [NSLocalizedDescriptionKey: "401 Unauthorized - Session expired"])
-        }
+            if response.statusCode == 401 || response.url?.path.contains("/account/login") == true {
+                throw NSError(domain: "testEM", code: 401, userInfo: [NSLocalizedDescriptionKey: "401 Unauthorized - Session expired"])
+            }
 
-        guard response.statusCode == 200 else {
+            guard response.statusCode == 200 else {
+                return nil
+            }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return nil
+            }
+            let success = json["success"] as? Bool ?? false
+            let dataField = json["data"] as? String ?? ""
+            let base64Field = json["base64"] as? String ?? ""
+            if !success || (dataField.isEmpty && base64Field.isEmpty) {
+                return nil
+            }
+
+            let rawToken = base64Field.isEmpty ? dataField : base64Field
+            let normalized = rawToken.replacingOccurrences(of: " ", with: "+")
+            let stripped = normalized.replacingOccurrences(of: "[^A-Za-z0-9+/=_-]", with: "", options: .regularExpression)
+            let padded = stripped + String(repeating: "=", count: (4 - (stripped.count % 4)) % 4)
+            guard let decoded = Data(base64Encoded: padded, options: [.ignoreUnknownCharacters]) else {
+                return nil
+            }
+            authFailures = 0
+            return QrTokenPayload(rawBase64: rawToken, decodedBytes: decoded)
+        } catch {
+            let message = error.localizedDescription
+            if message.contains("401") || message.contains("Unauthorized") {
+                onStatus("Session expired: \(message)")
+                throw error
+            }
             return nil
         }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        let success = json["success"] as? Bool ?? false
-        let dataField = json["data"] as? String ?? ""
-        let base64Field = json["base64"] as? String ?? ""
-        if !success || (dataField.isEmpty && base64Field.isEmpty) {
-            return nil
-        }
-
-        let rawToken = base64Field.isEmpty ? dataField : base64Field
-        let normalized = rawToken.replacingOccurrences(of: " ", with: "+")
-        let stripped = normalized.replacingOccurrences(of: "[^A-Za-z0-9+/=_-]", with: "", options: .regularExpression)
-        let padded = stripped + String(repeating: "=", count: (4 - (stripped.count % 4)) % 4)
-        guard let decoded = Data(base64Encoded: padded, options: [.ignoreUnknownCharacters]) else {
-            return nil
-        }
-        authFailures = 0
-        return QrTokenPayload(rawBase64: rawToken, decodedBytes: decoded)
     }
 
     private func parseAndEmitAccountDetails(from raw: Data) throws {

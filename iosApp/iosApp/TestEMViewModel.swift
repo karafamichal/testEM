@@ -166,7 +166,7 @@ final class TestEMViewModel: ObservableObject {
     }
 
     func startPolling() {
-        guard isLoggedIn && isSessionReady else { return }
+        guard isLoggedIn, daemonService != nil else { return }
         if isPolling { return }
         isPolling = true
         statusMessage = "Starting polling..."
@@ -176,6 +176,7 @@ final class TestEMViewModel: ObservableObject {
     func stopPolling() {
         daemonService?.stopPolling()
         isPolling = false
+        errorMessage = ""
         statusMessage = "Polling stopped"
     }
 
@@ -430,11 +431,7 @@ final class TestEMViewModel: ObservableObject {
                     guard let self else { return }
                     self.errorMessage = error
                     self.isLoggingIn = false
-                    if error.hasPrefix("Login failed") && !self.hasEstablishedSession {
-                        self.isLoggedIn = false
-                        self.isSessionReady = false
-                        self.isPolling = false
-                    }
+                    self.statusMessage = "Error: \(error)"
                 }
             },
             onUserName: { [weak self] name in
