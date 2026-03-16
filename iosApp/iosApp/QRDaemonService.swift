@@ -253,14 +253,14 @@ final class QRDaemonService {
             let (loginData, loginRawResponse) = try await session.data(for: loginRequest)
             guard let loginResponse = loginRawResponse as? HTTPURLResponse else {
                 throw NSError(domain: "testEM", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid login response"])
-            }
-            maybePersistWpisCookie(from: loginResponse)
+              }
 
-            guard loginResponse.statusCode == 200 else {
-                throw NSError(domain: "testEM", code: loginResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Login failed: \(loginResponse.statusCode)"])
-            }
+              forceParseCookies(from: loginResponse)
 
-            let loginSucceeded: Bool = {
+              guard loginResponse.statusCode == 200 else {
+                  throw NSError(domain: "testEM", code: loginResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Login failed: \(loginResponse.statusCode)"])
+              }
+              let loginSucceeded: Bool = {
                 if let decoded = try? JSONDecoder().decode(LoginResponse.self, from: loginData) {
                     return decoded.success
                 }
@@ -792,6 +792,7 @@ final class QRDaemonService {
                 cookieStorage.setCookie(cookie)
             }
         }
+        forceParseCookies(from: httpResponse)
 
         if httpResponse.statusCode == 401 {
             throw NSError(domain: "testEM", code: 401, userInfo: [NSLocalizedDescriptionKey: "401 Unauthorized - Session expired"])
@@ -864,7 +865,7 @@ final class QRDaemonService {
         }
     }
 
-    private func maybePersistWpisCookie(from response: HTTPURLResponse) {
+    private func forceParseCookies(from response: HTTPURLResponse) {
         guard let host = sessionBaseURL.host else { return }
         let setCookieHeaders = response.allHeaderFields.compactMap { key, value -> String? in
             guard String(describing: key).caseInsensitiveCompare("Set-Cookie") == .orderedSame else { return nil }
@@ -872,47 +873,33 @@ final class QRDaemonService {
         }
 
         let combined = setCookieHeaders.joined(separator: ",")
-        let regex = try? NSRegularExpression(pattern: "WPIS=([^;]+)", options: [.caseInsensitive])
+        
+        let pattern = "(WPIS|XSRF-TOKEN|CSRF-TOKEN|JSESSIONID|sessionid)=([^;]+)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return }
+        
         let range = NSRange(location: 0, length: combined.utf16.count)
-        let matches = regex?.matches(in: combined, options: [], range: range) ?? []
-
-        if !matches.isEmpty {
-            for match in matches {
-                guard match.numberOfRanges > 1,
-                      let valueRange = Range(match.range(at: 1), in: combined) else { continue }
-                let value = String(combined[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !value.isEmpty else { continue }
-                if let cookie = HTTPCookie(properties: [
-                    .domain: host,
-                    .path: "/",
-                    .name: "WPIS",
-                    .value: value,
-                    .secure: "TRUE",
-                    .expires: Date().addingTimeInterval(30 * 24 * 60 * 60)
-                ]) {
-                    cookieStorage.setCookie(cookie)
-                }
-            }
-            return
-        }
-
-        for header in setCookieHeaders {
-            let matches = header.components(separatedBy: ",")
-            for part in matches {
-                guard let range = part.range(of: "WPIS=") else { continue }
-                let suffix = part[range.upperBound...]
-                let value = suffix.split(separator: ";", maxSplits: 1).first.map(String.init) ?? ""
-                guard !value.isEmpty else { continue }
-                if let cookie = HTTPCookie(properties: [
-                    .domain: host,
-                    .path: "/",
-                    .name: "WPIS",
-                    .value: value,
-                    .secure: "TRUE",
-                    .expires: Date().addingTimeInterval(30 * 24 * 60 * 60)
-                ]) {
-                    cookieStorage.setCookie(cookie)
-                }
+        let matches = regex.matches(in: combined, options: [], range: range)
+        
+        for match in matches {
+            guard match.numberOfRanges > 2,
+                  let nameRange = Range(match.range(at: 1), in: combined),
+                  let valueRange = Range(match.range(at: 2), in: combined) else { continue }
+            
+            let name = String(combined[nameRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = String(combined[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            guard !name.isEmpty && !value.isEmpty else { continue }
+            
+            if let cookie = HTTPCookie(properties: [
+                .domain: host,
+                .path: "/",
+                .name: name,
+                .value: value,
+                .secure: "TRUE",
+                .expires: Date().addingTimeInterval(30 * 24 * 60 * 60)
+            ]) {
+                cookieStorage.setCookie(cookie)
+                print("[QRDaemon] Force parsed and saved cookie: \(name)")
             }
         }
     }
