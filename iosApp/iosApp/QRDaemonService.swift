@@ -277,6 +277,24 @@ final class QRDaemonService {
                 )
             }
 
+            if serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if let loginText = String(data: loginData, encoding: .utf8) {
+                    _ = trySetRecoveredSnr(from: loginText)
+                }
+            }
+
+            if serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let tokenCookies = cookieStorage.cookies(for: QRDaemonConfig.tokenAPI) ?? []
+                for cookie in tokenCookies {
+                    if trySetRecoveredSnr(from: cookie.value) {
+                        break
+                    }
+                    if let decoded = cookie.value.removingPercentEncoding, trySetRecoveredSnr(from: decoded) {
+                        break
+                    }
+                }
+            }
+
             isAuthenticated = true
             authFailures = 0
             onStatus("Login successful (cookies: \((cookieStorage.cookies(for: QRDaemonConfig.tokenAPI) ?? []).count))")
@@ -1085,6 +1103,23 @@ final class QRDaemonService {
             }
         }
         return nil
+    }
+
+    @discardableResult
+    private func trySetRecoveredSnr(from text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let recovered = extractSnrFromRawJson(trimmed),
+              !recovered.isEmpty else {
+            return false
+        }
+
+        if recovered != serialNumber {
+            serialNumber = recovered
+            onSerialNumber(recovered)
+        }
+        onStatus("Loaded SNR")
+        return true
     }
 
     private func parseJSONObjectString(_ raw: String) -> [String: Any]? {
