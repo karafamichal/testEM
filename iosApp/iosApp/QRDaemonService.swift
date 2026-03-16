@@ -70,6 +70,7 @@ final class QRDaemonService {
             return
         }
 
+        isPolling = false
         isPolling = true
         pollingTask?.cancel()
         pollingTask = Task(priority: .background) { [weak self] in
@@ -86,7 +87,7 @@ final class QRDaemonService {
             } catch {
                 self.onError("Polling error: \(error.localizedDescription)")
                 self.onStatus("Polling error - restarting in 5s: \(error.localizedDescription)")
-                try? await Task.sleep(nanoseconds: QRDaemonConfig.retryDelayNs)
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
                 if !Task.isCancelled {
                     self.isPolling = false
                     self.startPolling()
@@ -469,15 +470,17 @@ final class QRDaemonService {
         onStatus("Polling for token...")
         while !Task.isCancelled {
             do {
+                onStatus("[POLL] Loop iteration starting...")
                 onStatus("Fetching token...")
                 guard let payload = try await fetchQRToken() else {
-                    try await Task.sleep(nanoseconds: QRDaemonConfig.shortRetryNs)
+                    onStatus("No token yet - retrying in 1.5s")
+                    try await Task.sleep(nanoseconds: 1_500_000_000)
                     continue
                 }
 
                 if payload.decodedBytes.isEmpty || payload.rawBase64.isEmpty {
-                    onStatus("No token yet - empty payload")
-                    try await Task.sleep(nanoseconds: QRDaemonConfig.shortRetryNs)
+                    onStatus("No token yet - retrying in 1.5s")
+                    try await Task.sleep(nanoseconds: 1_500_000_000)
                     continue
                 }
 
@@ -489,7 +492,7 @@ final class QRDaemonService {
                     onStatus("Token updated")
                 }
 
-                try await Task.sleep(nanoseconds: QRDaemonConfig.pollIntervalNs)
+                try await Task.sleep(nanoseconds: 25_000_000_000)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -506,43 +509,64 @@ final class QRDaemonService {
                 } else {
                     onError("Unexpected error: \(error.localizedDescription)")
                     onStatus("Error in poll loop: \(error.localizedDescription)")
-                    try await Task.sleep(nanoseconds: QRDaemonConfig.retryDelayNs)
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
                 }
             }
         }
     }
 
     private func fetchQRToken() async throws -> QrTokenPayload? {
-        let identifier = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let identifier = (nfcEnabled && !nfcUid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ? nfcUid : serialNumber
         if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             onStatus("No SNR yet - waiting")
             return nil
         }
 
         do {
+            onStatus("[FETCH] Building token request...")
             let session = makeSession()
             let tokenBody = makeFormBody([
                 "post[serialnumber]": identifier
             ])
+            let tokenURL = sessionBaseURL.appendingPathComponent("cardapi/getQrToken")
+            
+            let matchedCookies = cookieStorage.cookies(for: tokenURL)?.count ?? 0
+            onStatus("[TOKEN] URL=\(tokenURL.absoluteString), matched cookies=\(matchedCookies)/4")
+            let cookieHeaderValue = cookieHeader(for: tokenURL)
+            let hasWpis = cookieHeaderValue.contains("WPIS=")
+            onStatus("[TOKEN] Cookie header \(hasWpis ? "contains" : "missing") WPIS")
+            
+            onStatus("[TOKEN] Making HTTP request...")
             let (data, response) = try await performRequestWithResponse(
                 session: session,
-                url: sessionBaseURL.appendingPathComponent("cardapi/getQrToken"),
+                url: tokenURL,
                 method: "POST",
                 body: tokenBody,
                 contentType: "application/x-www-form-urlencoded; charset=UTF-8",
                 additionalHeaders: standardHeaders(referer: sessionBaseURL.appendingPathComponent("account"), includeCSRF: true)
             )
+            onStatus("[TOKEN] HTTP call succeeded")
+            onStatus("[TOKEN] Response received")
+            let bodyString = String(data: data, encoding: .utf8) ?? ""
+            onStatus("[TOKEN] Body read: \(bodyString.count) chars")
+            onStatus("[TOKEN] Got HTTP \(response.statusCode)")
 
-            if response.statusCode == 401 || response.url?.path.contains("/account/login") == true {
+            if response.statusCode == 401 {
+                onStatus("Token 401 body: \(String(bodyString.prefix(200)))")
+                throw NSError(domain: "testEM", code: 401, userInfo: [NSLocalizedDescriptionKey: "401 Unauthorized - Session expired"])
+            }
+            if response.url?.path.contains("/account/login") == true {
+                onStatus("Token redirect to login")
                 throw NSError(domain: "testEM", code: 401, userInfo: [NSLocalizedDescriptionKey: "401 Unauthorized - Session expired"])
             }
 
             guard response.statusCode == 200 else {
-                onStatus("Token HTTP \(response.statusCode)")
+                let snippet = String(bodyString.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ").prefix(120))
+                onStatus("Token HTTP \(response.statusCode): \(snippet)")
                 return nil
             }
 
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 onStatus("Token parse error: non-JSON response")
                 return nil
             }
@@ -555,6 +579,8 @@ final class QRDaemonService {
                 }
                 return false
             }()
+            
+            onStatus("Token response: success=\(success)")
 
             let dataObject = json["data"] as? [String: Any]
             let dataField = json["data"] as? String
@@ -566,18 +592,7 @@ final class QRDaemonService {
                 ?? dataObject?["tokenBase64"] as? String
                 ?? ""
             if !success || (dataField.isEmpty && base64Field.isEmpty) {
-                let typeField = String(describing: json["type"] ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                let messageField = String(describing: json["message"] ?? json["msg"] ?? dataObject?["message"] ?? dataObject?["msg"] ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                let detail = [typeField, messageField]
-                    .filter { !$0.isEmpty && $0 != "<null>" }
-                    .joined(separator: ": ")
-                if !detail.isEmpty {
-                    onStatus("No token available - \(detail)")
-                } else {
-                    onStatus("No token available - API returned empty token")
-                }
+                onStatus("No token available - waiting")
                 return nil
             }
 
@@ -589,7 +604,7 @@ final class QRDaemonService {
                 .replacingOccurrences(of: "_", with: "/")
             let padded = base64Standard + String(repeating: "=", count: (4 - (base64Standard.count % 4)) % 4)
             guard let decoded = Data(base64Encoded: padded, options: [.ignoreUnknownCharacters]) else {
-                onStatus("Token decode failed")
+                onStatus("Invalid token format")
                 return nil
             }
             authFailures = 0
@@ -599,8 +614,10 @@ final class QRDaemonService {
             if message.contains("401") || message.contains("Unauthorized") {
                 onStatus("Session expired: \(message)")
                 throw error
+            } else {
+                onStatus("Token request error: \(message)")
+                return nil
             }
-            return nil
         }
     }
 
