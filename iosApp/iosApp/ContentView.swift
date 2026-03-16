@@ -1047,6 +1047,8 @@ private struct PinSetupView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
     }
 }
 
@@ -1090,12 +1092,15 @@ private struct PinUnlockView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
     }
 }
 
 struct ContentView: View {
     @StateObject private var viewModel = TestEMViewModel()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showSettings = false
     @State private var settingsPage: SettingsPage = .root
     @State private var showAccountDialog = false
@@ -1192,8 +1197,18 @@ struct ContentView: View {
     }
 
     private var appBackground: some View {
-        let top = viewModel.amoledEnabled ? Color.black : Color(red: 0.92, green: 0.97, blue: 0.95)
-        let bottom = viewModel.amoledEnabled ? Color(red: 0.06, green: 0.06, blue: 0.06) : Color(red: 0.84, green: 0.92, blue: 0.89)
+        let top: Color
+        let bottom: Color
+        if viewModel.amoledEnabled {
+            top = .black
+            bottom = Color(red: 0.05, green: 0.05, blue: 0.05)
+        } else if colorScheme == .dark {
+            top = Color(red: 0.10, green: 0.13, blue: 0.12)
+            bottom = Color(red: 0.06, green: 0.08, blue: 0.08)
+        } else {
+            top = Color(red: 0.92, green: 0.97, blue: 0.95)
+            bottom = Color(red: 0.84, green: 0.92, blue: 0.89)
+        }
         return LinearGradient(colors: [top, bottom], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
@@ -1912,11 +1927,16 @@ struct ContentView: View {
 
     private var fullscreenQrView: some View {
         ZStack {
-            Color.white.ignoresSafeArea()
+            Color(.systemBackground).ignoresSafeArea()
             VStack {
                 Spacer()
-                QRCodeView(payload: viewModel.qrPayload)
-                    .frame(width: 300, height: 300)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.white)
+                    QRCodeView(payload: viewModel.qrPayload)
+                        .padding(10)
+                }
+                .frame(width: 300, height: 300)
                 Spacer()
                 Button("Close") {
                     showFullscreenQr = false
