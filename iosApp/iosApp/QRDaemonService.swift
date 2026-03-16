@@ -341,14 +341,6 @@ final class QRDaemonService {
         }
 
         if serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let storedSerial = CredentialsManager.shared.loadSerial().trimmingCharacters(in: .whitespacesAndNewlines)
-            if !storedSerial.isEmpty {
-                serialNumber = storedSerial
-                onSerialNumber(storedSerial)
-                onStatus("Loaded SNR")
-                return
-            }
-
             let probe = snrProbeSummary(from: lastAccountDetailRaw ?? "")
             onStatus("No SNR in account detail (\(probe))")
         }
@@ -521,7 +513,7 @@ final class QRDaemonService {
     }
 
     private func fetchQRToken() async throws -> QrTokenPayload? {
-        let identifier = (nfcEnabled && !nfcUid.isEmpty) ? nfcUid : serialNumber
+        let identifier = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             onStatus("No SNR yet - waiting")
             return nil
