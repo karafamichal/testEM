@@ -254,18 +254,48 @@ final class QRDaemonService {
                 throw NSError(domain: "testEM", code: loginResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Login failed: \(loginResponse.statusCode)"])
             }
 
-            let decoded = try JSONDecoder().decode(LoginResponse.self, from: loginData)
-            guard decoded.success else {
-                throw NSError(domain: "testEM", code: 401, userInfo: [NSLocalizedDescriptionKey: "Login failed: API returned success=false"])
+            let loginSucceeded: Bool = {
+                if let decoded = try? JSONDecoder().decode(LoginResponse.self, from: loginData) {
+                    return decoded.success
+                }
+                guard let json = try? JSONSerialization.jsonObject(with: loginData) as? [String: Any] else {
+                    return false
+                }
+                return json["success"] as? Bool ?? false
+            }()
+            guard loginSucceeded else {
+                let responsePreview = String(data: loginData, encoding: .utf8)?.prefix(200) ?? "<non-utf8>"
+                throw NSError(
+                    domain: "testEM",
+                    code: 401,
+                    userInfo: [NSLocalizedDescriptionKey: "Login failed: API returned unsuccessful response (
+\(responsePreview))"]
+                )
             }
 
             isAuthenticated = true
             authFailures = 0
             onStatus("Login successful (cookies: \((cookieStorage.cookies(for: QRDaemonConfig.tokenAPI) ?? []).count))")
 
-            async let uidVerification: Void = verifySession(session: session)
-            async let accountLoad: Void = loadAccountDetailAfterLogin(session: session)
-            _ = try await (uidVerification, accountLoad)
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await self.verifySession(session: session)
+                    } catch {
+                        self.onStatus("getUId request failed: \(error.localizedDescription)")
+                    }
+                }
+                group.addTask { [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await self.loadAccountDetailAfterLogin(session: session)
+                    } catch {
+                        self.onStatus("getAccountDetail request failed: \(error.localizedDescription)")
+                    }
+                }
+                await group.waitForAll()
+            }
 
             onStatus("Session ready")
         } catch {
