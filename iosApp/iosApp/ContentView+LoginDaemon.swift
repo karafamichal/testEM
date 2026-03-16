@@ -60,54 +60,6 @@ extension ContentView {
     var daemonView: some View {
         ScrollView {
             VStack(spacing: 16) {
-                HStack {
-                    Button {
-                        showAccountDialog = true
-                    } label: {
-                        Text(viewModel.email.isEmpty ? "testEM" : viewModel.email)
-                            .font(.headline)
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer()
-
-                    Button {
-                        settingsPage = .root
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.title3)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if !viewModel.isSessionReady {
-                    cardContainer("Session") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(spacing: 10) {
-                                if viewModel.isLoggingIn {
-                                    ProgressView()
-                                }
-                                Text(viewModel.statusMessage.isEmpty ? "Connecting..." : viewModel.statusMessage)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-
-                            if !viewModel.errorMessage.isEmpty {
-                                Text(viewModel.errorMessage)
-                                    .foregroundStyle(.red)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-
-                            Button("Retry Login") {
-                                viewModel.login()
-                            }
-                            .frame(maxWidth: .infinity)
-                            .buttonStyle(.borderedProminent)
-                            .disabled(viewModel.isLoggingIn)
-                        }
-                    }
-                }
-
                 ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
                     if !viewModel.hiddenSections.contains(id) || !hideableSections.contains(id) {
                         sectionView(for: id)
@@ -205,7 +157,7 @@ extension ContentView {
         case .controls:
             cardContainer("Controls") {
                 VStack(spacing: 10) {
-                    Button(viewModel.isPolling ? "Stop" : "Get QR") {
+                    Button(viewModel.isPolling ? "Stop" : "Start") {
                         if viewModel.isPolling {
                             viewModel.stopPolling()
                         } else {

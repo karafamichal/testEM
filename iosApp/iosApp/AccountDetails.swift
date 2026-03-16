@@ -1,6 +1,7 @@
 import Foundation
 
 struct AccountDetails {
+    var accountName: String = ""
     var cardTypeName: String = ""
     var organizationName: String = ""
     var cardValidFrom: Int64 = 0

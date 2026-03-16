@@ -369,6 +369,11 @@ final class TestEMViewModel: ObservableObject {
         themePresets.first(where: { $0.id == selectedThemeId })?.primary ?? .green
     }
 
+    var appTitleName: String {
+        let trimmed = accountDetails.accountName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "testEM" : trimmed
+    }
+
     func handleScenePhase(_ phase: ScenePhase) {
         switch phase {
         case .background:
@@ -379,13 +384,14 @@ final class TestEMViewModel: ObservableObject {
         case .active:
             guard isPinSet else { return }
             let timeout = max(0, lockTimeoutSeconds)
-            if timeout == 0 {
-                isAppUnlocked = false
-            } else if let bg = backgroundAt {
-                if Date().timeIntervalSince(bg) >= Double(timeout) {
+            if let bg = backgroundAt {
+                if timeout == 0 {
+                    isAppUnlocked = false
+                } else if Date().timeIntervalSince(bg) >= Double(timeout) {
                     isAppUnlocked = false
                 }
             }
+            backgroundAt = nil
             if biometricEnabled && !isAppUnlocked && !didAttemptAutoBiometricThisForeground {
                 didAttemptAutoBiometricThisForeground = true
                 Task {
@@ -558,8 +564,10 @@ final class TestEMViewModel: ObservableObject {
         let templateBase64 = readString(card, keys: ["base64", "cardBase64"]).isEmpty
             ? extractTemplateBase64(templateRaw)
             : readString(card, keys: ["base64", "cardBase64"])
+        let accountName = readDisplayName(from: user, fallback: data)
 
         accountDetails = AccountDetails(
+            accountName: accountName,
             cardTypeName: readString(card, keys: ["cardTypeName", "typeName", "cardType"]),
             organizationName: readString(card, keys: ["organizationName", "organization", "companyName"]),
             cardValidFrom: readInt64(card, keys: ["validFrom", "cardValidFrom"]),
@@ -572,6 +580,22 @@ final class TestEMViewModel: ObservableObject {
             currencySymbol: readString(card, keys: ["currencySymbol", "currency"]),
             cardTemplateBase64: templateBase64
         )
+    }
+
+    private func readDisplayName(from user: [String: Any], fallback: [String: Any]) -> String {
+        let direct = readString(user, keys: ["name", "fullName", "displayName", "username", "login"])
+        if !direct.isEmpty {
+            return direct
+        }
+
+        let first = readString(user, keys: ["firstName", "firstname", "givenName"])
+        let last = readString(user, keys: ["lastName", "lastname", "surname", "familyName"])
+        let joined = [first, last].filter { !$0.isEmpty }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !joined.isEmpty {
+            return joined
+        }
+
+        return readString(fallback, keys: ["name", "fullName", "displayName"])
     }
 
     private func fetchCardHistory(limit: Int) async throws -> [CardHistoryItem] {

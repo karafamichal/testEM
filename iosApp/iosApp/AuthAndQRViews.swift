@@ -13,16 +13,10 @@ struct QRCodeView: View {
                 .resizable()
                 .scaledToFit()
         } else {
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.secondary.opacity(0.15))
-                .overlay(
-                    VStack(spacing: 4) {
-                        Text("No Token")
-                        Text("Waiting for token...")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                )
+            Text("Waiting for token...")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
     }
 

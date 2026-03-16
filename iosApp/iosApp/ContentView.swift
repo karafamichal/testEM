@@ -71,7 +71,7 @@ struct ContentView: View {
                                 Button {
                                     showAccountDialog = true
                                 } label: {
-                                    Text(viewModel.email.isEmpty ? "testEM" : viewModel.email)
+                                    Text(viewModel.appTitleName)
                                         .font(.headline)
                                 }
                             }

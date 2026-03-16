@@ -7,7 +7,7 @@ extension ContentView {
                 VStack(spacing: 12) {
                     cardContainer("Account") {
                         VStack(alignment: .leading, spacing: 8) {
-                            labeled("Name", viewModel.email.isEmpty ? "testEM" : viewModel.email)
+                            labeled("Name", viewModel.appTitleName)
                             labeled("Email", viewModel.email)
                             labeled("SNR", viewModel.serialNumber)
                             if !viewModel.nfcUid.isEmpty {
