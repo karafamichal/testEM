@@ -498,10 +498,29 @@ final class QRDaemonService {
         let jsonObject = try JSONSerialization.jsonObject(with: raw)
 
         if let rootString = jsonObject as? String {
+            if let parsedDict = parseJSONObjectString(rootString) {
+                try parseAndEmitAccountDetails(from: try JSONSerialization.data(withJSONObject: parsedDict))
+                return
+            }
             if let recovered = extractSnrFromRawJson(rootString), !recovered.isEmpty, recovered != serialNumber {
                 serialNumber = recovered
                 onSerialNumber(recovered)
                 onStatus("Loaded SNR")
+            }
+            return
+        }
+
+        if let rootArray = jsonObject as? [Any] {
+            if let recovered = findFirstString(
+                in: rootArray,
+                keys: ["snr", "cardsnr", "card_snr", "cardnumber", "cardserial", "serialnumber", "serial_number", "serial"]
+            ), !recovered.isEmpty, recovered != serialNumber {
+                serialNumber = recovered
+                onSerialNumber(recovered)
+                onStatus("Loaded SNR")
+            }
+            if let firstDict = rootArray.first(where: { $0 is [String: Any] }) as? [String: Any] {
+                try parseAndEmitAccountDetails(from: try JSONSerialization.data(withJSONObject: firstDict))
             }
             return
         }
@@ -523,8 +542,7 @@ final class QRDaemonService {
                 return dict
             }
             if let dataString = root["data"] as? String,
-               let dataBytes = dataString.data(using: .utf8),
-               let parsed = try? JSONSerialization.jsonObject(with: dataBytes) as? [String: Any] {
+               let parsed = parseJSONObjectString(dataString) {
                 return parsed
             }
             return root
@@ -876,6 +894,30 @@ final class QRDaemonService {
             let value = String(text[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
             if !value.isEmpty {
                 return value
+            }
+        }
+        return nil
+    }
+
+    private func parseJSONObjectString(_ raw: String) -> [String: Any]? {
+        let candidates = [
+            raw,
+            raw.replacingOccurrences(of: "\\\\", with: "\\").replacingOccurrences(of: "\\\"", with: "\""),
+            raw.removingPercentEncoding ?? raw
+        ]
+
+        for candidate in candidates {
+            guard let bytes = candidate.data(using: .utf8),
+                  let parsed = try? JSONSerialization.jsonObject(with: bytes) else { continue }
+
+            if let dict = parsed as? [String: Any] {
+                return dict
+            }
+
+            if let wrapped = parsed as? String,
+               wrapped != candidate,
+               let nested = parseJSONObjectString(wrapped) {
+                return nested
             }
         }
         return nil
