@@ -28,9 +28,7 @@ final class QRDaemonService {
     private var isAuthenticated = false
     private var authFailures = 0
     private var isPolling = false
-    private var lastSnrRefreshAttempt: Date?
     private var lastAccountDetailRaw: String?
-    private var knownOrganizationIds: Set<Int> = [11872333]
 
     init(
         baseURL: URL = QRDaemonConfig.baseURL,
@@ -279,24 +277,6 @@ final class QRDaemonService {
                 )
             }
 
-            if serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                if let loginText = String(data: loginData, encoding: .utf8) {
-                    _ = trySetRecoveredSnr(from: loginText)
-                }
-            }
-
-            if serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let tokenCookies = cookieStorage.cookies(for: QRDaemonConfig.tokenAPI) ?? []
-                for cookie in tokenCookies {
-                    if trySetRecoveredSnr(from: cookie.value) {
-                        break
-                    }
-                    if let decoded = cookie.value.removingPercentEncoding, trySetRecoveredSnr(from: decoded) {
-                        break
-                    }
-                }
-            }
-
             isAuthenticated = true
             authFailures = 0
             onStatus("Login successful (cookies: \((cookieStorage.cookies(for: QRDaemonConfig.tokenAPI) ?? []).count))")
@@ -333,19 +313,12 @@ final class QRDaemonService {
     private func verifySession(session: URLSession) async throws {
         onStatus("Verifying session (getUId)...")
         let url = sessionBaseURL.appendingPathComponent("accountapi/getUId")
-        let (data, response) = try await performRequestWithResponse(
+        let (_, response) = try await performRequestWithResponse(
             session: session,
             url: url,
             method: "GET",
             additionalHeaders: standardHeaders(referer: sessionBaseURL, includeCSRF: false)
         )
-        if let bodyText = String(data: data, encoding: .utf8), !bodyText.isEmpty {
-            _ = trySetRecoveredSnr(from: bodyText)
-            let extractedIds = extractOrganizationIds(from: bodyText)
-            if !extractedIds.isEmpty {
-                knownOrganizationIds.formUnion(extractedIds)
-            }
-        }
         onStatus("getUId HTTP \(response.statusCode)")
     }
 
@@ -361,34 +334,10 @@ final class QRDaemonService {
         onStatus("getAccountDetail HTTP \(response.statusCode)")
         var bodyText = String(data: data, encoding: .utf8) ?? ""
 
-        _ = trySetSnrFromAccountDetailPayload(bodyText)
-
-        let trimmedInitial = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if response.statusCode >= 200,
-           response.statusCode < 300,
-           serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           (trimmedInitial == "{}" || trimmedInitial == "[]") {
-            if let fallback = try await loadAccountDetailViaApiAuth(session: session) {
-                data = fallback.data
-                response = fallback.response
-                bodyText = String(data: data, encoding: .utf8) ?? ""
-                onStatus("getAccountDetail fallback /api/auth/getAccountDetail HTTP \(response.statusCode)")
-                _ = trySetSnrFromAccountDetailPayload(bodyText)
-            }
-        }
-
         lastAccountDetailRaw = bodyText
-
-        _ = trySetRecoveredSnr(from: bodyText)
 
         if response.statusCode >= 200, response.statusCode < 300, !bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             parseAndEmitAccountDetailsKotlinStyle(from: bodyText)
-        }
-
-        do {
-            try parseAndEmitAccountDetails(from: data)
-        } catch {
-            onStatus("getAccountDetail parse failed")
         }
 
         if serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -400,152 +349,9 @@ final class QRDaemonService {
                 return
             }
 
-            if let raw = lastAccountDetailRaw,
-               trySetRecoveredSnr(from: raw) {
-                return
-            }
-
             let probe = snrProbeSummary(from: lastAccountDetailRaw ?? "")
             onStatus("No SNR in account detail (\(probe))")
         }
-    }
-
-    @discardableResult
-    private func trySetSnrFromAccountDetailPayload(_ bodyText: String) -> Bool {
-        let snrKeys = ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"]
-        guard let bodyData = bodyText.data(using: .utf8),
-              let payload = try? JSONSerialization.jsonObject(with: bodyData) else {
-            return false
-        }
-
-        let root: [String: Any]
-        if let dict = payload as? [String: Any] {
-            root = dict
-        } else if let stringPayload = payload as? String,
-                  let parsed = parseJSONObjectString(stringPayload) {
-            root = parsed
-        } else {
-            return false
-        }
-
-        let data: [String: Any] = {
-            if let dict = root["data"] as? [String: Any] {
-                return dict
-            }
-            if let dataString = root["data"] as? String,
-               let parsed = parseJSONObjectString(dataString) {
-                return parsed
-            }
-            return root
-        }()
-
-        let userObj = (data["wertyzUser"] as? [String: Any]) ?? (data["user"] as? [String: Any]) ?? data
-        let cardObj = firstCard(from: userObj) ?? firstCard(from: data) ?? [:]
-
-        let snr = readString(cardObj, keys: snrKeys).isEmpty
-            ? readString(data, keys: snrKeys)
-            : readString(cardObj, keys: snrKeys)
-
-        guard !snr.isEmpty else { return false }
-        if snr != serialNumber {
-            serialNumber = snr
-            onSerialNumber(snr)
-        }
-        onStatus("Loaded SNR")
-        return true
-    }
-
-    private func loadAccountDetailViaApiAuth(session: URLSession) async throws -> (data: Data, response: HTTPURLResponse)? {
-        let candidateOrgIds: [Int] = {
-            var ids = knownOrganizationIds
-            let serial = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-            if serial.count >= 8,
-               let prefix = Int(String(serial.prefix(8))) {
-                ids.insert(prefix)
-            }
-            ids.insert(11872333)
-            return Array(ids)
-        }()
-
-        for organizationSystemEntityId in candidateOrgIds {
-            let jsonBody = "{\"organizationSystemEntityId\":\(organizationSystemEntityId),\"subUserId\":null}"
-            do {
-                let result = try await performRequestWithResponse(
-                    session: session,
-                    url: sessionBaseURL.appendingPathComponent("api/auth/getAccountDetail"),
-                    method: "POST",
-                    body: jsonBody,
-                    contentType: "application/json",
-                    additionalHeaders: standardHeaders(referer: sessionBaseURL.appendingPathComponent("account"), includeCSRF: false)
-                )
-
-                if result.1.statusCode >= 200, result.1.statusCode < 300 {
-                    let body = String(data: result.0, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    if !body.isEmpty, body != "{}", body != "[]" {
-                        return (data: result.0, response: result.1)
-                    }
-                }
-            } catch {
-                continue
-            }
-        }
-        return nil
-    }
-
-    private func extractOrganizationIds(from text: String) -> Set<Int> {
-        let keys = Set(["organizationsystementityid", "organizationid", "orgid"])
-        var ids = Set<Int>()
-
-        func collect(from value: Any) {
-            if let dict = value as? [String: Any] {
-                for (key, rawValue) in dict {
-                    let lowered = key.lowercased()
-                    if keys.contains(lowered) {
-                        if let intValue = rawValue as? Int {
-                            ids.insert(intValue)
-                        } else if let int64Value = rawValue as? Int64 {
-                            ids.insert(Int(int64Value))
-                        } else if let numberValue = rawValue as? NSNumber {
-                            ids.insert(numberValue.intValue)
-                        } else if let stringValue = rawValue as? String,
-                                  let parsed = Int(stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                            ids.insert(parsed)
-                        }
-                    }
-                    collect(from: rawValue)
-                }
-                return
-            }
-
-            if let array = value as? [Any] {
-                for child in array {
-                    collect(from: child)
-                }
-            }
-        }
-
-        if let bytes = text.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: bytes) {
-            collect(from: json)
-        }
-
-        let regexPatterns = [
-            #"\"organizationSystemEntityId\"\s*:\s*(\d+)"#,
-            #"\"organizationId\"\s*:\s*(\d+)"#,
-            #"\"orgId\"\s*:\s*(\d+)"#
-        ]
-        for pattern in regexPatterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
-            let range = NSRange(location: 0, length: text.utf16.count)
-            for match in regex.matches(in: text, options: [], range: range) {
-                guard match.numberOfRanges > 1,
-                      let valueRange = Range(match.range(at: 1), in: text),
-                      let parsed = Int(String(text[valueRange])) else { continue }
-                ids.insert(parsed)
-            }
-        }
-
-        return ids
     }
 
     private func parseAndEmitAccountDetailsKotlinStyle(from bodyText: String) {
@@ -635,13 +441,9 @@ final class QRDaemonService {
             onUserName(derivedName)
         }
 
-        let snrFromCard = readString(cardObj, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
-        let snrFromRequests = extractSnrFromUserRequests(userObj) ?? extractSnrFromUserRequests(data) ?? ""
-        let snr = !snrFromCard.isEmpty
-            ? snrFromCard
-            : (!snrFromRequests.isEmpty
-                ? snrFromRequests
-                : readString(data, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"]))
+        let snr = readString(cardObj, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"]).isEmpty
+            ? readString(data, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
+            : readString(cardObj, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
 
         if !snr.isEmpty, snr != serialNumber {
             serialNumber = snr
@@ -719,42 +521,10 @@ final class QRDaemonService {
     }
 
     private func fetchQRToken() async throws -> QrTokenPayload? {
-        var identifier = (nfcEnabled && !nfcUid.isEmpty) ? nfcUid : serialNumber
+        let identifier = (nfcEnabled && !nfcUid.isEmpty) ? nfcUid : serialNumber
         if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let storedSerial = CredentialsManager.shared.loadSerial().trimmingCharacters(in: .whitespacesAndNewlines)
-            if !storedSerial.isEmpty {
-                serialNumber = storedSerial
-                identifier = storedSerial
-            }
-            if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               let raw = lastAccountDetailRaw,
-               trySetRecoveredSnr(from: raw) {
-                identifier = serialNumber
-            }
-        }
-        if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let now = Date()
-            let shouldRefresh = lastSnrRefreshAttempt == nil || now.timeIntervalSince(lastSnrRefreshAttempt!) >= 5
-            if shouldRefresh {
-                lastSnrRefreshAttempt = now
-                onStatus("No SNR yet - refreshing account details")
-                do {
-                    try await loadAccountDetailAfterLogin(session: makeSession())
-                } catch {
-                    onStatus("No SNR yet - account detail refresh failed")
-                }
-                identifier = (nfcEnabled && !nfcUid.isEmpty) ? nfcUid : serialNumber
-                if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                   let raw = lastAccountDetailRaw,
-                   trySetRecoveredSnr(from: raw) {
-                    identifier = serialNumber
-                }
-            }
-            if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let probe = snrProbeSummary(from: lastAccountDetailRaw ?? "")
-                onStatus("No SNR yet - waiting (\(probe))")
-                return nil
-            }
+            onStatus("No SNR yet - waiting")
+            return nil
         }
 
         do {
