@@ -268,8 +268,7 @@ final class QRDaemonService {
                 throw NSError(
                     domain: "testEM",
                     code: 401,
-                    userInfo: [NSLocalizedDescriptionKey: "Login failed: API returned unsuccessful response (
-\(responsePreview))"]
+                    userInfo: [NSLocalizedDescriptionKey: "Login failed: API returned unsuccessful response (\(responsePreview))"]
                 )
             }
 
