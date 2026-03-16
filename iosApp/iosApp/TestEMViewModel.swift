@@ -82,6 +82,7 @@ final class TestEMViewModel: ObservableObject {
     private var backgroundAt: Date?
     private var isBiometricPromptInProgress = false
     private var didAttemptAutoBiometricThisForeground = false
+    private var hasEstablishedSession = false
 
     private let prefBiometricEnabled = "testem.biometricEnabled"
     private let prefLockTimeout = "testem.lockTimeoutSeconds"
@@ -133,6 +134,7 @@ final class TestEMViewModel: ObservableObject {
         }
 
         isLoggingIn = true
+        hasEstablishedSession = false
         isLoggedIn = true
         isSessionReady = true
         errorMessage = ""
@@ -147,8 +149,10 @@ final class TestEMViewModel: ObservableObject {
         stopPolling()
         daemonService?.clearSessionCookies()
         daemonService = nil
+        isLoggingIn = false
         isLoggedIn = false
         isSessionReady = false
+        hasEstablishedSession = false
         nfcEnabled = false
         nfcUid = ""
         tokenBase64 = ""
@@ -411,11 +415,13 @@ final class TestEMViewModel: ObservableObject {
             onTokenUpdate: { [weak self] hex, base64 in
                 Task { @MainActor in
                     guard let self else { return }
+                    self.hasEstablishedSession = true
                     self.tokenHex = hex
                     self.tokenBase64 = base64
                     self.qrPayload = base64
                     self.lastUpdated = Date()
                     self.errorMessage = ""
+                    self.isLoggingIn = false
                     self.isPolling = true
                 }
             },
@@ -423,7 +429,8 @@ final class TestEMViewModel: ObservableObject {
                 Task { @MainActor in
                     guard let self else { return }
                     self.errorMessage = error
-                    if error.hasPrefix("Login failed") {
+                    self.isLoggingIn = false
+                    if error.hasPrefix("Login failed") && !self.hasEstablishedSession {
                         self.isLoggedIn = false
                         self.isSessionReady = false
                         self.isPolling = false
@@ -446,7 +453,9 @@ final class TestEMViewModel: ObservableObject {
             onAccountInfo: { [weak self] details in
                 Task { @MainActor in
                     guard let self else { return }
+                    self.hasEstablishedSession = true
                     self.accountDetails = details
+                    self.isLoggingIn = false
                     self.isSessionReady = true
                 }
             },
@@ -455,6 +464,8 @@ final class TestEMViewModel: ObservableObject {
                     guard let self else { return }
                     self.statusMessage = status
                     if status == "Session ready" {
+                        self.hasEstablishedSession = true
+                        self.isLoggingIn = false
                         self.isSessionReady = true
                     }
                 }
