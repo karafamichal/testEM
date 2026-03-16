@@ -28,6 +28,7 @@ final class QRDaemonService {
     private var isAuthenticated = false
     private var authFailures = 0
     private var isPolling = false
+    private var lastSnrRefreshAttempt: Date?
 
     init(
         baseURL: URL = QRDaemonConfig.baseURL,
@@ -381,10 +382,24 @@ final class QRDaemonService {
     }
 
     private func fetchQRToken() async throws -> QrTokenPayload? {
-        let identifier = (nfcEnabled && !nfcUid.isEmpty) ? nfcUid : serialNumber
+        var identifier = (nfcEnabled && !nfcUid.isEmpty) ? nfcUid : serialNumber
         if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            onStatus("No SNR yet - waiting")
-            return nil
+            let now = Date()
+            let shouldRefresh = lastSnrRefreshAttempt == nil || now.timeIntervalSince(lastSnrRefreshAttempt!) >= 5
+            if shouldRefresh {
+                lastSnrRefreshAttempt = now
+                onStatus("No SNR yet - refreshing account details")
+                do {
+                    try await loadAccountDetailAfterLogin(session: makeSession())
+                } catch {
+                    onStatus("No SNR yet - account detail refresh failed")
+                }
+                identifier = (nfcEnabled && !nfcUid.isEmpty) ? nfcUid : serialNumber
+            }
+            if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                onStatus("No SNR yet - waiting")
+                return nil
+            }
         }
 
         do {
@@ -684,14 +699,30 @@ final class QRDaemonService {
     private func firstCard(from dict: [String: Any]) -> [String: Any]? {
         if let card = dict["card"] as? [String: Any] { return card }
         if let cards = dict["cards"] as? [[String: Any]], let first = cards.first { return first }
+        if let cardsAny = dict["cards"] as? [Any] {
+            for item in cardsAny {
+                if let card = item as? [String: Any] { return card }
+            }
+        }
         if let user = dict["wertyzUser"] as? [String: Any] { return firstCard(from: user) }
         if let user = dict["user"] as? [String: Any] { return firstCard(from: user) }
         return nil
     }
 
     private func firstTicket(from card: [String: Any]) -> [String: Any]? {
-        guard let tickets = card["tickets"] as? [[String: Any]] else { return nil }
-        return tickets.first(where: { ($0["active"] as? Bool) == true }) ?? tickets.first
+        if let tickets = card["tickets"] as? [[String: Any]] {
+            return tickets.first(where: { ($0["active"] as? Bool) == true }) ?? tickets.first
+        }
+        if let ticketsAny = card["tickets"] as? [Any] {
+            var first: [String: Any]?
+            for item in ticketsAny {
+                guard let ticket = item as? [String: Any] else { continue }
+                if first == nil { first = ticket }
+                if let active = ticket["active"] as? Bool, active { return ticket }
+            }
+            return first
+        }
+        return nil
     }
 
     private func readString(_ dict: [String: Any], keys: [String]) -> String {
@@ -699,6 +730,14 @@ final class QRDaemonService {
             if let value = dict[key] as? String {
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty { return trimmed }
+            }
+            if let value = dict[key] as? NSNumber {
+                let asString = value.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !asString.isEmpty { return asString }
+            }
+            if let value = dict[key], !(value is NSNull) {
+                let asString = String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !asString.isEmpty, asString != "<null>" { return asString }
             }
         }
         return ""
