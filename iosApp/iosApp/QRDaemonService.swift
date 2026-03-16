@@ -475,9 +475,12 @@ final class QRDaemonService {
         }
 
         let snrFromCard = readString(cardObj, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
+        let snrFromRequests = extractSnrFromUserRequests(userObj) ?? extractSnrFromUserRequests(data)
         let snr = !snrFromCard.isEmpty
             ? snrFromCard
-            : readString(data, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"])
+            : (!snrFromRequests.isEmpty
+                ? snrFromRequests
+                : readString(data, ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"]))
 
         if !snr.isEmpty, snr != serialNumber {
             serialNumber = snr
@@ -749,6 +752,11 @@ final class QRDaemonService {
                 in: root,
                 keys: ["snr", "cardsnr", "card_snr", "cardnumber", "cardserial", "serialnumber", "serial_number", "serial"]
            ) {
+            snr = recovered
+        }
+
+        if snr.isEmpty,
+           let recovered = extractSnrFromUserRequests(user) ?? extractSnrFromUserRequests(data) {
             snr = recovered
         }
 
@@ -1035,6 +1043,16 @@ final class QRDaemonService {
     }
 
     private func findFirstString(in value: Any, keys: Set<String>) -> String? {
+        if let stringValue = value as? String {
+            let trimmed = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return nil }
+            if let parsed = parseJSONObjectString(trimmed),
+               let found = findFirstString(in: parsed, keys: keys) {
+                return found
+            }
+            return extractSnrFromRawJson(trimmed)
+        }
+
         if let dict = value as? [String: Any] {
             for (rawKey, rawValue) in dict {
                 let key = rawKey.lowercased()
@@ -1069,6 +1087,60 @@ final class QRDaemonService {
                 }
             }
         }
+        return nil
+    }
+
+    private func extractSnrFromUserRequests(_ source: [String: Any]) -> String? {
+        let keys: Set<String> = ["snr", "cardsnr", "card_snr", "cardnumber", "cardserial", "serialnumber", "serial_number", "serial"]
+
+        func extract(from requestObject: [String: Any]) -> String? {
+            if let metadataDict = requestObject["Metadata"] as? [String: Any],
+               let found = findFirstString(in: metadataDict, keys: keys),
+               !found.isEmpty {
+                return found
+            }
+
+            if let metadataString = requestObject["Metadata"] as? String {
+                if let parsed = parseJSONObjectString(metadataString),
+                   let found = findFirstString(in: parsed, keys: keys),
+                   !found.isEmpty {
+                    return found
+                }
+                if let found = extractSnrFromRawJson(metadataString), !found.isEmpty {
+                    return found
+                }
+            }
+
+            if let found = findFirstString(in: requestObject, keys: keys), !found.isEmpty {
+                return found
+            }
+            return nil
+        }
+
+        let requestArrays: [[Any]] = [
+            source["userRequests"] as? [Any] ?? [],
+            source["requests"] as? [Any] ?? []
+        ]
+
+        for requestArray in requestArrays {
+            for item in requestArray {
+                guard let requestObject = item as? [String: Any] else { continue }
+                if let found = extract(from: requestObject) {
+                    return found
+                }
+            }
+        }
+
+        if let user = source["wertyzUser"] as? [String: Any], let found = extractSnrFromUserRequests(user) {
+            return found
+        }
+        if let user = source["user"] as? [String: Any], let found = extractSnrFromUserRequests(user) {
+            return found
+        }
+        if let data = source["data"] as? [String: Any], let found = extractSnrFromUserRequests(data) {
+            return found
+        }
+
         return nil
     }
 
