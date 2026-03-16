@@ -333,7 +333,11 @@ final class QRDaemonService {
         )
         onStatus("getAccountDetail HTTP \(response.statusCode)")
         lastAccountDetailRaw = String(data: data, encoding: .utf8)
-        try parseAndEmitAccountDetails(from: data)
+        do {
+            try parseAndEmitAccountDetails(from: data)
+        } catch {
+            onStatus("getAccountDetail parse failed")
+        }
 
         if serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let storedSerial = CredentialsManager.shared.loadSerial().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -438,6 +442,15 @@ final class QRDaemonService {
                     onStatus("No SNR yet - account detail refresh failed")
                 }
                 identifier = (nfcEnabled && !nfcUid.isEmpty) ? nfcUid : serialNumber
+                if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   let raw = lastAccountDetailRaw,
+                   let recovered = extractSnrFromRawJson(raw),
+                   !recovered.isEmpty {
+                    serialNumber = recovered
+                    onSerialNumber(recovered)
+                    identifier = recovered
+                    onStatus("Loaded SNR")
+                }
             }
             if identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 onStatus("No SNR yet - waiting")
@@ -929,7 +942,8 @@ final class QRDaemonService {
         let patterns = [
             #""(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)"\s*:\s*"([^"]+)""#,
             #""(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)"\s*:\s*([0-9]+)"#,
-            #"(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)\s*[:=]\s*\"?([A-Za-z0-9_-]{4,})\"?"#
+            #"(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)\s*[:=]\s*\"?([A-Za-z0-9_-]{4,})\"?"#,
+            #"\\"(?:snr|cardSnr|cardSNR|cardNumber|serialNumber|serialnumber|card_snr|serial_number)\\"\s*:\s*\\"([^\\"]+)\\""#
         ]
 
         for pattern in patterns {
