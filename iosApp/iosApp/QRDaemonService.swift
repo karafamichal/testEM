@@ -267,7 +267,7 @@ final class QRDaemonService {
                 guard let json = try? JSONSerialization.jsonObject(with: loginData) as? [String: Any] else {
                     return false
                 }
-                return json["success"] as? Bool ?? false
+                return (json["success"] as? Bool) ?? (json["success"] as? Int == 1) ?? false
             }()
             guard loginSucceeded else {
                 let responsePreview = String(data: loginData, encoding: .utf8)?.prefix(200) ?? "<non-utf8>"
@@ -280,7 +280,7 @@ final class QRDaemonService {
 
             isAuthenticated = true
             authFailures = 0
-            onStatus("Login successful (cookies: \((cookieStorage.cookies(for: QRDaemonConfig.tokenAPI) ?? []).count))")
+            onStatus("Login successful (total stored cookies: \(cookieStorage.cookies?.count ?? 0))")
 
             await withTaskGroup(of: Void.self) { group in
                 group.addTask { [weak self] in
@@ -784,6 +784,15 @@ final class QRDaemonService {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NSError(domain: "testEM", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid HTTP response"])
         }
+        
+        // Force cookie storage manually
+        if let headerFields = httpResponse.allHeaderFields as? [String: String], let responseUrl = httpResponse.url {
+            let cookies = HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: responseUrl)
+            for cookie in cookies {
+                cookieStorage.setCookie(cookie)
+            }
+        }
+
         if httpResponse.statusCode == 401 {
             throw NSError(domain: "testEM", code: 401, userInfo: [NSLocalizedDescriptionKey: "401 Unauthorized - Session expired"])
         }
