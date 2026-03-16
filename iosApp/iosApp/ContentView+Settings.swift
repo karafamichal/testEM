@@ -4,7 +4,7 @@ extension ContentView {
     var settingsSheet: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 14) {
+                VStack(spacing: dp(10)) {
                     switch settingsPage {
                     case .root:
                         settingsRootView
@@ -14,7 +14,7 @@ extension ContentView {
                         securitySettingsView
                     }
                 }
-                .padding(16)
+                .padding(dp(12))
             }
             .navigationTitle(settingsPageTitle)
             .toolbar {
@@ -41,8 +41,8 @@ extension ContentView {
     }
 
     var settingsRootView: some View {
-        VStack(spacing: 14) {
-            cardContainer("Theme Presets") {
+        VStack(spacing: dp(10)) {
+            cardContainer("Theme presets") {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(viewModel.themePresets) { preset in
                         HStack {
@@ -68,33 +68,33 @@ extension ContentView {
                 }
             }
 
-            cardContainer("Create Preset") {
+            cardContainer("Create preset") {
                 VStack(alignment: .leading, spacing: 10) {
                     TextField("Preset name", text: $presetName)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal, dp(10))
+                        .padding(.vertical, dp(8))
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: dp(12)))
 
                     TextField("Primary hex (RRGGBB or AARRGGBB)", text: $primaryHex)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal, dp(10))
+                        .padding(.vertical, dp(8))
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: dp(12)))
 
                     TextField("Secondary hex (RRGGBB or AARRGGBB)", text: $secondaryHex)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal, dp(10))
+                        .padding(.vertical, dp(8))
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: dp(12)))
 
                     TextField("Tertiary hex (RRGGBB or AARRGGBB)", text: $tertiaryHex)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal, dp(10))
+                        .padding(.vertical, dp(8))
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: dp(12)))
 
                     Button("Save preset") {
                         guard
@@ -162,7 +162,7 @@ extension ContentView {
     }
 
     var layoutSettingsView: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: dp(10)) {
             ForEach(Array(viewModel.layoutOrder.enumerated()), id: \.element.rawValue) { index, id in
                 cardContainer(sectionTitle(id)) {
                     HStack(spacing: 8) {
@@ -200,7 +200,7 @@ extension ContentView {
     }
 
     var securitySettingsView: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: dp(10)) {
             cardContainer("Biometrics") {
                 Toggle("Biometrics", isOn: Binding(
                     get: { viewModel.biometricEnabled },
@@ -208,7 +208,7 @@ extension ContentView {
                 ))
             }
 
-            cardContainer("Lock Timeout") {
+            cardContainer("Lock timeout") {
                 VStack(alignment: .leading, spacing: 6) {
                     lockTimeoutRow(seconds: 0, label: "Immediately")
                     lockTimeoutRow(seconds: 30, label: "After 30 seconds")
@@ -217,9 +217,9 @@ extension ContentView {
 
                     TextField("Custom seconds", text: $customTimeout)
                         .keyboardType(.numberPad)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal, dp(10))
+                        .padding(.vertical, dp(8))
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: dp(12)))
                         .onChange(of: customTimeout) { _, value in
                             let digits = value.filter { $0.isNumber }
                             if digits != value {

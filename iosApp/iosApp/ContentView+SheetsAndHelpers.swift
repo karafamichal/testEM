@@ -4,7 +4,7 @@ extension ContentView {
     var accountDialogSheet: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 12) {
+                VStack(spacing: dp(10)) {
                     cardContainer("Account") {
                         VStack(alignment: .leading, spacing: 8) {
                             labeled("Name", viewModel.appTitleName)
@@ -34,7 +34,7 @@ extension ContentView {
                         }
                     }
                 }
-                .padding(16)
+                .padding(dp(12))
             }
             .navigationTitle("Account")
             .toolbar {
@@ -50,7 +50,7 @@ extension ContentView {
     var historyScreenSheet: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 12) {
+                VStack(spacing: dp(10)) {
                     cardContainer("Tickets & Payments History") {
                         VStack(alignment: .leading, spacing: 10) {
                             if viewModel.historyState.isLoading {
@@ -114,14 +114,14 @@ extension ContentView {
                                             .foregroundStyle(.secondary)
                                     }
                                 }
-                                .padding(12)
+                                .padding(dp(10))
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(cardColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .background(cardColor, in: RoundedRectangle(cornerRadius: dp(12), style: .continuous))
                             }
                         }
                     }
                 }
-                .padding(16)
+                .padding(dp(12))
             }
             .navigationTitle("Tickets & Payments History")
             .toolbar {
@@ -143,7 +143,7 @@ extension ContentView {
     var tokenInfoSheet: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 12) {
+                VStack(spacing: dp(10)) {
                     if viewModel.tokenHex.isEmpty {
                         cardContainer("Token Information") {
                             Text("Waiting for token...")
@@ -165,7 +165,7 @@ extension ContentView {
                         }
                     }
                 }
-                .padding(16)
+                .padding(dp(12))
             }
             .navigationTitle("Token Information")
             .toolbar {
@@ -184,12 +184,12 @@ extension ContentView {
             VStack {
                 Spacer()
                 ZStack {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: dp(14), style: .continuous)
                         .fill(Color.white)
                     QRCodeView(payload: viewModel.qrPayload)
-                        .padding(10)
+                        .padding(dp(8))
                 }
-                .frame(width: 300, height: 300)
+                .frame(width: dp(260), height: dp(260))
                 Spacer()
                 Button("Close") {
                     showFullscreenQr = false

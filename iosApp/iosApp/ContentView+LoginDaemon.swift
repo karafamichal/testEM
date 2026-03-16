@@ -4,29 +4,29 @@ extension ContentView {
     var loginView: some View {
         GeometryReader { geometry in
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: dp(12)) {
                     VStack(spacing: 4) {
                         Text("testEM")
-                            .font(.largeTitle.weight(.bold))
+                            .font(.system(size: 30 * uiScale, weight: .bold))
                         Text("Real-time QR Token Generator")
-                            .font(.subheadline)
+                            .font(.system(size: 13 * uiScale))
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
 
                     cardContainer("Credentials") {
-                        VStack(spacing: 12) {
+                        VStack(spacing: dp(10)) {
                             TextField("Email or Username", text: $viewModel.email)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                                .padding(.horizontal, dp(10))
+                                .padding(.vertical, dp(8))
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: dp(18), style: .continuous))
 
                             SecureField("Password", text: $viewModel.password)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                                .padding(.horizontal, dp(10))
+                                .padding(.vertical, dp(8))
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: dp(18), style: .continuous))
                         }
                     }
 
@@ -44,11 +44,11 @@ extension ContentView {
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.roundedRectangle(radius: 18))
+                    .buttonBorderShape(.roundedRectangle(radius: dp(16)))
                     .disabled(viewModel.isLoggingIn)
-                    .frame(height: 56)
+                    .frame(height: dp(48))
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, dp(6))
                 .frame(maxWidth: 520)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: geometry.size.height)
@@ -59,7 +59,7 @@ extension ContentView {
 
     var daemonView: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: dp(12)) {
                 ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
                     if !viewModel.hiddenSections.contains(id) || !hideableSections.contains(id) {
                         sectionView(for: id)
@@ -79,23 +79,23 @@ extension ContentView {
         switch id {
         case .status:
             cardContainer("Polling status") {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: dp(6)) {
                     HStack {
                         Text("Status:")
                             .fontWeight(.bold)
                         Spacer()
                         Text(viewModel.isPolling ? "Polling Active" : "Polling Paused")
                             .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
+                            .padding(.horizontal, dp(7))
+                            .padding(.vertical, dp(3))
                             .background(viewModel.isPolling ? Color.green.opacity(0.2) : Color.gray.opacity(0.2), in: Capsule())
                     }
                     Text("Last Update: \(viewModel.lastUpdated?.formatted(date: .omitted, time: .standard) ?? "Never")")
-                        .font(.footnote)
+                        .font(.system(size: 12 * uiScale))
                         .foregroundStyle(.secondary)
                     if !viewModel.statusMessage.isEmpty {
                         Text(viewModel.statusMessage)
-                            .font(.footnote)
+                            .font(.system(size: 12 * uiScale))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -103,7 +103,7 @@ extension ContentView {
             }
         case .qr:
             cardContainer("Current QR Code") {
-                VStack(spacing: 12) {
+                VStack(spacing: dp(10)) {
                     HStack {
                         Spacer()
                         Button {
@@ -111,14 +111,14 @@ extension ContentView {
                         } label: {
                             Image(systemName: "info.circle.fill")
                                 .font(.caption)
-                                .padding(8)
+                                .padding(dp(6))
                                 .background(Color(.secondarySystemBackground), in: Circle())
                         }
                         .buttonStyle(.plain)
                     }
 
                     QRCodeView(payload: viewModel.qrPayload)
-                        .frame(width: 260, height: 260)
+                        .frame(width: dp(220), height: dp(220))
                         .onTapGesture {
                             showFullscreenQr = true
                         }
@@ -133,7 +133,7 @@ extension ContentView {
             }
         case .nfc:
             cardContainer("NFC") {
-                VStack(spacing: 10) {
+                VStack(spacing: dp(8)) {
                     Button(viewModel.nfcEnabled ? "Switch to QR" : "Switch to NFC") {
                         let uid = viewModel.toggleNfc()
                         if let uid {
@@ -143,7 +143,7 @@ extension ContentView {
                     }
                     .frame(maxWidth: .infinity)
                     .buttonStyle(.bordered)
-                    .buttonBorderShape(.roundedRectangle(radius: 14))
+                    .buttonBorderShape(.roundedRectangle(radius: dp(12)))
                     .disabled(viewModel.qrPayload.isEmpty)
 
                     if viewModel.nfcEnabled && !viewModel.nfcUid.isEmpty {
@@ -156,7 +156,7 @@ extension ContentView {
             }
         case .controls:
             cardContainer("Controls") {
-                VStack(spacing: 10) {
+                VStack(spacing: dp(8)) {
                     Button(viewModel.isPolling ? "Stop" : "Start") {
                         if viewModel.isPolling {
                             viewModel.stopPolling()
@@ -165,18 +165,18 @@ extension ContentView {
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 56)
+                    .frame(height: dp(48))
                     .tint(viewModel.isPolling ? .red : viewModel.currentAccentColor)
                     .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.roundedRectangle(radius: 18))
+                    .buttonBorderShape(.roundedRectangle(radius: dp(16)))
 
                     Button("Ticket & Payment History") {
                         showHistoryScreen = true
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 56)
+                    .frame(height: dp(48))
                     .buttonStyle(.bordered)
-                    .buttonBorderShape(.roundedRectangle(radius: 18))
+                    .buttonBorderShape(.roundedRectangle(radius: dp(16)))
                     .disabled(viewModel.qrPayload.isEmpty)
                 }
             }
@@ -192,15 +192,15 @@ extension ContentView {
     }
 
     func cardContainer<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: dp(8)) {
             Text(title)
-                .font(.headline)
+                .font(.system(size: 16 * uiScale, weight: .semibold))
             content()
         }
-        .padding(16)
+        .padding(dp(12))
         .frame(maxWidth: .infinity)
         .background(viewModel.amoledEnabled ? Color(.secondarySystemBackground) : Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .shadow(color: Color.black.opacity(viewModel.amoledEnabled ? 0.0 : 0.08), radius: 10, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: dp(16), style: .continuous))
+        .shadow(color: Color.black.opacity(viewModel.amoledEnabled ? 0.0 : 0.08), radius: dp(8), x: 0, y: 2)
     }
 }

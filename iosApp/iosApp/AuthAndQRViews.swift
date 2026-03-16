@@ -3,18 +3,25 @@ import Foundation
 import CoreImage.CIFilterBuiltins
 import UIKit
 
+private let compactScale: CGFloat = min(max(UIScreen.main.bounds.width / 390.0, 0.84), 1.0)
+
+private func s(_ value: CGFloat) -> CGFloat {
+    value * compactScale
+}
+
 struct QRCodeView: View {
     let payload: String
 
     var body: some View {
-        if let image = QRCodeGenerator.makeImage(from: payload) {
+        let trimmedPayload = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedPayload.isEmpty, let image = QRCodeGenerator.makeImage(from: trimmedPayload) {
             Image(uiImage: image)
                 .interpolation(.none)
                 .resizable()
                 .scaledToFit()
         } else {
             Text("Waiting for token...")
-                .font(.subheadline)
+                .font(.system(size: 13 * compactScale))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
@@ -29,25 +36,25 @@ struct PinSetupView: View {
     @State private var error = ""
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: s(12)) {
             Text("Set App PIN")
-                .font(.system(size: 24, weight: .bold))
+                .font(.system(size: 22 * compactScale, weight: .bold))
             Text("Protect your app with a PIN")
-                .font(.footnote)
+                .font(.system(size: 12 * compactScale))
                 .foregroundStyle(.secondary)
 
-            VStack(spacing: 12) {
+            VStack(spacing: s(10)) {
                 SecureField("PIN (4-8 digits)", text: $pin)
                     .keyboardType(.numberPad)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, s(12))
+                    .padding(.vertical, s(10))
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: s(16), style: .continuous))
 
                 SecureField("Confirm PIN", text: $confirmPin)
                     .keyboardType(.numberPad)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, s(12))
+                    .padding(.vertical, s(10))
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: s(16), style: .continuous))
 
                 if !error.isEmpty {
                     Text(error)
@@ -71,11 +78,11 @@ struct PinSetupView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.roundedRectangle(radius: 16))
+                .buttonBorderShape(.roundedRectangle(radius: s(14)))
             }
-            .padding(16)
-            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 3)
+            .padding(s(12))
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: s(16), style: .continuous))
+            .shadow(color: Color.black.opacity(0.08), radius: s(8), x: 0, y: 2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
@@ -87,19 +94,19 @@ struct PinUnlockView: View {
     @State private var error = ""
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: s(12)) {
             Text("Unlock")
-                .font(.system(size: 24, weight: .bold))
+                .font(.system(size: 22 * compactScale, weight: .bold))
             Text("Enter PIN or use biometrics")
-                .font(.footnote)
+                .font(.system(size: 12 * compactScale))
                 .foregroundStyle(.secondary)
 
-            VStack(spacing: 12) {
+            VStack(spacing: s(10)) {
                 SecureField("PIN", text: $pin)
                     .keyboardType(.numberPad)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, s(12))
+                    .padding(.vertical, s(10))
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: s(16), style: .continuous))
 
                 if !error.isEmpty {
                     Text(error)
@@ -118,7 +125,7 @@ struct PinUnlockView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.roundedRectangle(radius: 16))
+                .buttonBorderShape(.roundedRectangle(radius: s(14)))
 
                 if viewModel.biometricEnabled {
                     Button("Use Face ID / Touch ID") {
@@ -133,12 +140,12 @@ struct PinUnlockView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .buttonStyle(.bordered)
-                    .buttonBorderShape(.roundedRectangle(radius: 16))
+                    .buttonBorderShape(.roundedRectangle(radius: s(14)))
                 }
             }
-            .padding(16)
-            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 3)
+            .padding(s(12))
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: s(16), style: .continuous))
+            .shadow(color: Color.black.opacity(0.08), radius: s(8), x: 0, y: 2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }

@@ -26,6 +26,14 @@ struct ContentView: View {
     @State var secondaryHex = ""
     @State var tertiaryHex = ""
 
+    var uiScale: CGFloat {
+        min(max(UIScreen.main.bounds.width / 390.0, 0.84), 1.0)
+    }
+
+    func dp(_ value: CGFloat) -> CGFloat {
+        value * uiScale
+    }
+
     var body: some View {
         Group {
             if !viewModel.isPinSet {
@@ -119,6 +127,7 @@ struct ContentView: View {
                 }
             }
         }
+        .dynamicTypeSize(.xSmall ... .large)
         .onChange(of: scenePhase) { _, newValue in
             viewModel.handleScenePhase(newValue)
         }
