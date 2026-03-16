@@ -353,15 +353,19 @@ final class QRDaemonService {
         onStatus("getAccountDetail HTTP \(response.statusCode)")
         var bodyText = String(data: data, encoding: .utf8) ?? ""
 
+        _ = trySetSnrFromAccountDetailPayload(bodyText)
+
         let trimmedInitial = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
         if response.statusCode >= 200,
            response.statusCode < 300,
+           serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            (trimmedInitial == "{}" || trimmedInitial == "[]") {
             if let fallback = try await loadAccountDetailViaApiAuth(session: session) {
                 data = fallback.data
                 response = fallback.response
                 bodyText = String(data: data, encoding: .utf8) ?? ""
                 onStatus("getAccountDetail fallback /api/auth/getAccountDetail HTTP \(response.statusCode)")
+                _ = trySetSnrFromAccountDetailPayload(bodyText)
             }
         }
 
@@ -396,6 +400,51 @@ final class QRDaemonService {
             let probe = snrProbeSummary(from: lastAccountDetailRaw ?? "")
             onStatus("No SNR in account detail (\(probe))")
         }
+    }
+
+    @discardableResult
+    private func trySetSnrFromAccountDetailPayload(_ bodyText: String) -> Bool {
+        let snrKeys = ["snr", "cardSnr", "cardSNR", "cardNumber", "cardnumber", "serialNumber", "serialnumber"]
+        guard let bodyData = bodyText.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: bodyData) else {
+            return false
+        }
+
+        let root: [String: Any]
+        if let dict = payload as? [String: Any] {
+            root = dict
+        } else if let stringPayload = payload as? String,
+                  let parsed = parseJSONObjectString(stringPayload) {
+            root = parsed
+        } else {
+            return false
+        }
+
+        let data: [String: Any] = {
+            if let dict = root["data"] as? [String: Any] {
+                return dict
+            }
+            if let dataString = root["data"] as? String,
+               let parsed = parseJSONObjectString(dataString) {
+                return parsed
+            }
+            return root
+        }()
+
+        let userObj = (data["wertyzUser"] as? [String: Any]) ?? (data["user"] as? [String: Any]) ?? data
+        let cardObj = firstCard(from: userObj) ?? firstCard(from: data) ?? [:]
+
+        let snr = readString(cardObj, keys: snrKeys).isEmpty
+            ? readString(data, keys: snrKeys)
+            : readString(cardObj, keys: snrKeys)
+
+        guard !snr.isEmpty else { return false }
+        if snr != serialNumber {
+            serialNumber = snr
+            onSerialNumber(snr)
+        }
+        onStatus("Loaded SNR")
+        return true
     }
 
     private func loadAccountDetailViaApiAuth(session: URLSession) async throws -> (data: Data, response: HTTPURLResponse)? {
