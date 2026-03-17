@@ -61,11 +61,13 @@ extension ContentView {
         GeometryReader { geometry in
             ScrollView {
                 VStack(spacing: dp(12)) {
+                    Spacer(minLength: 0)
                     ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
                         if !viewModel.hiddenSections.contains(id) || !hideableSections.contains(id) {
                             sectionView(for: id)
                         }
                     }
+                    Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: geometry.size.height)
