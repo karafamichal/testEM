@@ -32,7 +32,7 @@ extension ContentView {
         }
     }
 
-    var settingsPageTitle: String {
+    var settingsPageTitle: LocalizedStringKey {
         switch settingsPage {
         case .root: return "Settings"
         case .layout: return "Layout"

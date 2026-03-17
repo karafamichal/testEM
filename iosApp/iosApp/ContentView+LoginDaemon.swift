@@ -58,15 +58,19 @@ extension ContentView {
     }
 
     var daemonView: some View {
-        ScrollView {
-            VStack(spacing: dp(12)) {
-                ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
-                    if !viewModel.hiddenSections.contains(id) || !hideableSections.contains(id) {
-                        sectionView(for: id)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: dp(12)) {
+                    ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
+                        if !viewModel.hiddenSections.contains(id) || !hideableSections.contains(id) {
+                            sectionView(for: id)
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: geometry.size.height)
             }
-            .frame(maxWidth: .infinity)
+            .scrollBounceBehavior(.basedOnSize)
         }
     }
 
@@ -120,12 +124,6 @@ extension ContentView {
                         .onTapGesture {
                             showFullscreenQr = true
                         }
-                    if !viewModel.tokenHex.isEmpty {
-                        Text(viewModel.tokenHex)
-                            .font(.system(size: 12, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -189,7 +187,7 @@ extension ContentView {
         }
     }
 
-    func cardContainer<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    func cardContainer<Content: View>(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: dp(8)) {
             Text(title)
                 .font(.system(size: 16 * uiScale, weight: .semibold))
@@ -197,8 +195,8 @@ extension ContentView {
         }
         .padding(dp(12))
         .frame(maxWidth: .infinity)
-        .background(viewModel.amoledEnabled ? Color(.secondarySystemBackground) : Color(.systemBackground))
+        .background(viewModel.amoledEnabled ? Color(white: 0.05) : Color(UIColor.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: dp(16), style: .continuous))
-        .shadow(color: Color.black.opacity(viewModel.amoledEnabled ? 0.0 : 0.08), radius: dp(8), x: 0, y: 2)
+        .shadow(color: Color.black.opacity(viewModel.amoledEnabled ? 0.0 : 0.04), radius: dp(8), x: 0, y: 2)
     }
 }

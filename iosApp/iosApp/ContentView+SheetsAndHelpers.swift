@@ -93,7 +93,7 @@ extension ContentView {
                                 }()
 
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(dateText(fromMs: item.timestampMs))
+                                    Text(dateText(fromMs: item.timestampMs, includeTime: true))
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
 
@@ -253,11 +253,18 @@ extension ContentView {
         return Color(red: r, green: g, blue: b, opacity: a)
     }
 
-    func dateText(fromMs value: Int64) -> String {
+    func dateText(fromMs value: Int64, includeTime: Bool = false) -> String {
         if value <= 0 {
             return "-"
         }
-        let date = Date(timeIntervalSince1970: TimeInterval(value) / 1000.0)
-        return date.formatted(date: .abbreviated, time: .shortened)
+        let timestampMs = value < 10_000_000_000 ? value * 1000 : value
+        let date = Date(timeIntervalSince1970: TimeInterval(timestampMs) / 1000.0)
+        let formatter = DateFormatter()
+        if includeTime {
+            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        } else {
+            formatter.dateFormat = "yyyy-MM-dd"
+        }
+        return formatter.string(from: date)
     }
 }

@@ -1,0 +1,1689 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "testEM": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "testEM"
+          }
+        }
+      }
+    },
+    "Back": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Späť"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nastavenia"
+          }
+        }
+      }
+    },
+    "Layout": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rozloženie"
+          }
+        }
+      }
+    },
+    "Security": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bezpečnosť"
+          }
+        }
+      }
+    },
+    "Theme presets": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Predvoľby témy"
+          }
+        }
+      }
+    },
+    "Create preset": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vytvoriť predvoľbu"
+          }
+        }
+      }
+    },
+    "Preset name": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Názov predvoľby"
+          }
+        }
+      }
+    },
+    "Primary hex (RRGGBB or AARRGGBB)": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Primárny hex (RRGGBB alebo AARRGGBB)"
+          }
+        }
+      }
+    },
+    "Secondary hex (RRGGBB or AARRGGBB)": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sekundárny hex (RRGGBB alebo AARRGGBB)"
+          }
+        }
+      }
+    },
+    "Tertiary hex (RRGGBB or AARRGGBB)": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terciárny hex (RRGGBB alebo AARRGGBB)"
+          }
+        }
+      }
+    },
+    "Save preset": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uložiť predvoľbu"
+          }
+        }
+      }
+    },
+    "Language": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jazyk"
+          }
+        }
+      }
+    },
+    "Slovak (preferred)": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Slovenčina (preferovaná)"
+          }
+        }
+      }
+    },
+    "English": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Angličtina"
+          }
+        }
+      }
+    },
+    "Reorder or hide sections": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zmeniť poradie alebo skryť sekcie"
+          }
+        }
+      }
+    },
+    "Open layout settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otvoriť nastavenia rozloženia"
+          }
+        }
+      }
+    },
+    "PIN, biometrics, and lock timeout": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PIN, biometria a čas zamknutia"
+          }
+        }
+      }
+    },
+    "Open security settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otvoriť nastavenia zabezpečenia"
+          }
+        }
+      }
+    },
+    "Account": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Účet"
+          }
+        }
+      }
+    },
+    "Logout": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odhlásiť sa"
+          }
+        }
+      }
+    },
+    "Polling status": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stav obnovovania"
+          }
+        }
+      }
+    },
+    "QR code": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "QR kód"
+          }
+        }
+      }
+    },
+    "NFC button": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tlačidlo NFC"
+          }
+        }
+      }
+    },
+    "Controls": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ovládanie"
+          }
+        }
+      }
+    },
+    "Errors": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chyby"
+          }
+        }
+      }
+    },
+    "Visible": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Viditeľné"
+          }
+        }
+      }
+    },
+    "Hidden": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skryté"
+          }
+        }
+      }
+    },
+    "Always visible": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vždy viditeľné"
+          }
+        }
+      }
+    },
+    "Hide": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skryť"
+          }
+        }
+      }
+    },
+    "Show": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zobraziť"
+          }
+        }
+      }
+    },
+    "Up": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hore"
+          }
+        }
+      }
+    },
+    "Down": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dole"
+          }
+        }
+      }
+    },
+    "Set App PIN": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nastaviť PIN aplikácie"
+          }
+        }
+      }
+    },
+    "Create a PIN to unlock the app before login.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vytvorte PIN na odomknutie aplikácie pred prihlásením."
+          }
+        }
+      }
+    },
+    "PIN (4-8 digits)": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PIN (4-8 číslic)"
+          }
+        }
+      }
+    },
+    "Confirm PIN": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Potvrdiť PIN"
+          }
+        }
+      }
+    },
+    "PIN must be at least 4 digits.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PIN musí mať aspoň 4 číslice."
+          }
+        }
+      }
+    },
+    "PINs do not match.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PINy sa nezhodujú."
+          }
+        }
+      }
+    },
+    "Save PIN": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uložiť PIN"
+          }
+        }
+      }
+    },
+    "Unlock app": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odomknúť aplikáciu"
+          }
+        }
+      }
+    },
+    "Use biometrics to continue": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Použite biometriu na pokračovanie"
+          }
+        }
+      }
+    },
+    "Use PIN": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Použiť PIN"
+          }
+        }
+      }
+    },
+    "Unlock": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odomknúť"
+          }
+        }
+      }
+    },
+    "Enter your PIN or use biometrics.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zadajte PIN alebo použite biometriu."
+          }
+        }
+      }
+    },
+    "PIN": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PIN"
+          }
+        }
+      }
+    },
+    "Incorrect PIN.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nesprávny PIN."
+          }
+        }
+      }
+    },
+    "Use biometrics": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Použiť biometriu"
+          }
+        }
+      }
+    },
+    "Biometric not recognized.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Biometria nebola rozpoznaná."
+          }
+        }
+      }
+    },
+    "Real-time QR Token Generator": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Generátor QR Tokenov v reálnom čase"
+          }
+        }
+      }
+    },
+    "Email or Username": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "E-mail alebo používateľské meno"
+          }
+        }
+      }
+    },
+    "Password": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Heslo"
+          }
+        }
+      }
+    },
+    "Login": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prihlásiť sa"
+          }
+        }
+      }
+    },
+    "Token info": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informácie o tokene"
+          }
+        }
+      }
+    },
+    "QR Code": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "QR kód"
+          }
+        }
+      }
+    },
+    "QR Code Fullscreen": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "QR kód na celú obrazovku"
+          }
+        }
+      }
+    },
+    "Status:": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stav:"
+          }
+        }
+      }
+    },
+    "Polling Active": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obnovovanie aktívne"
+          }
+        }
+      }
+    },
+    "Polling Paused": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obnovovanie pozastavené"
+          }
+        }
+      }
+    },
+    "Last Update: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Posledná aktualizácia: %1$s"
+          }
+        }
+      }
+    },
+    "Never": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nikdy"
+          }
+        }
+      }
+    },
+    "Current QR Code": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktuálny QR kód"
+          }
+        }
+      }
+    },
+    "No Token": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Žiadny token"
+          }
+        }
+      }
+    },
+    "Switch to QR": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepnúť na QR"
+          }
+        }
+      }
+    },
+    "Switch to NFC": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepnúť na NFC"
+          }
+        }
+      }
+    },
+    "NFC UID": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NFC UID"
+          }
+        }
+      }
+    },
+    "Copy this UID to set it on the website:": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skopírujte toto UID a nastavte ho na webe:"
+          }
+        }
+      }
+    },
+    "Copy": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopírovať"
+          }
+        }
+      }
+    },
+    "Close": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zavrieť"
+          }
+        }
+      }
+    },
+    "Name: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meno: %1$s"
+          }
+        }
+      }
+    },
+    "Email: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "E-mail: %1$s"
+          }
+        }
+      }
+    },
+    "SNR: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SNR: %1$s"
+          }
+        }
+      }
+    },
+    "NFC UID: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NFC UID: %1$s"
+          }
+        }
+      }
+    },
+    "Card Type: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Typ karty: %1$s"
+          }
+        }
+      }
+    },
+    "Organization: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Organizácia: %1$s"
+          }
+        }
+      }
+    },
+    "Card Valid: %1$s - %2$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Platnosť karty: %1$s - %2$s"
+          }
+        }
+      }
+    },
+    "Ticket Valid: %1$s - %2$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Platnosť lístka: %1$s - %2$s"
+          }
+        }
+      }
+    },
+    "Discount Valid: %1$s - %2$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Platnosť zľavy: %1$s - %2$s"
+          }
+        }
+      }
+    },
+    "Credit: %1$s%2$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kredit: %1$s%2$s"
+          }
+        }
+      }
+    },
+    "Stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zastaviť"
+          }
+        }
+      }
+    },
+    "Get QR": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Získať QR"
+          }
+        }
+      }
+    },
+    "Ticket & Payment History": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "História lístkov a platieb"
+          }
+        }
+      }
+    },
+    "Tickets & Payments History": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "História lístkov a platieb"
+          }
+        }
+      }
+    },
+    "No history found.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenašla sa žiadna história."
+          }
+        }
+      }
+    },
+    "Refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obnoviť"
+          }
+        }
+      }
+    },
+    "Token Information": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informácie o tokene"
+          }
+        }
+      }
+    },
+    "Waiting for token...": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Čaká sa na token..."
+          }
+        }
+      }
+    },
+    "HEX: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HEX: %1$s"
+          }
+        }
+      }
+    },
+    "B64: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "B64: %1$s"
+          }
+        }
+      }
+    },
+    "Logout?": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odhlásiť sa?"
+          }
+        }
+      }
+    },
+    "Are you sure you want to logout?": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Naozaj sa chcete odhlásiť?"
+          }
+        }
+      }
+    },
+    "Yes, Logout": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Áno, odhlásiť sa"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zrušiť"
+          }
+        }
+      }
+    },
+    "Lock timeout": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Čas zamknutia"
+          }
+        }
+      }
+    },
+    "Immediately": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okamžite"
+          }
+        }
+      }
+    },
+    "After 30 seconds": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Po 30 sekundách"
+          }
+        }
+      }
+    },
+    "After 1 minute": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Po 1 minúte"
+          }
+        }
+      }
+    },
+    "After 5 minutes": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Po 5 minútach"
+          }
+        }
+      }
+    },
+    "After %1$ds": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Po %1$d s"
+          }
+        }
+      }
+    },
+    "Custom seconds": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vlastné sekundy"
+          }
+        }
+      }
+    },
+    "Biometrics": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Biometria"
+          }
+        }
+      }
+    },
+    "Change PIN": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zmeniť PIN"
+          }
+        }
+      }
+    },
+    "Current PIN": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktuálny PIN"
+          }
+        }
+      }
+    },
+    "New PIN (4-8 digits)": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nový PIN (4-8 číslic)"
+          }
+        }
+      }
+    },
+    "Confirm new PIN": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Potvrdiť nový PIN"
+          }
+        }
+      }
+    },
+    "Enter your current PIN.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zadajte aktuálny PIN."
+          }
+        }
+      }
+    },
+    "New PIN must be at least 4 digits.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nový PIN musí mať aspoň 4 číslice."
+          }
+        }
+      }
+    },
+    "New PINs do not match.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nové PINy sa nezhodujú."
+          }
+        }
+      }
+    },
+    "Current PIN is incorrect.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktuálny PIN je nesprávny."
+          }
+        }
+      }
+    },
+    "Update": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktualizovať"
+          }
+        }
+      }
+    },
+    "Primary / Secondary / Tertiary": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Primárna / Sekundárna / Terciárna"
+          }
+        }
+      }
+    },
+    "AMOLED mode": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AMOLED režim"
+          }
+        }
+      }
+    },
+    "Pure black background for OLED screens": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Čierne pozadie pre OLED displeje"
+          }
+        }
+      }
+    },
+    "-": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "-"
+          }
+        }
+      }
+    },
+    "Ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pripravené"
+          }
+        }
+      }
+    },
+    "NFC UID active": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NFC UID aktívne"
+          }
+        }
+      }
+    },
+    "Token updated": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token aktualizovaný"
+          }
+        }
+      }
+    },
+    "Token updated: %1$s...": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token aktualizovaný: %1$s..."
+          }
+        }
+      }
+    },
+    "Error: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chyba: %1$s"
+          }
+        }
+      }
+    },
+    "Starting polling...": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obnovovanie spustené..."
+          }
+        }
+      }
+    },
+    "Polling stopped": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obnovovanie zastavené"
+          }
+        }
+      }
+    },
+    "Polling stopped unexpectedly": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obnovovanie sa neočakávane zastavilo"
+          }
+        }
+      }
+    },
+    "[WARNING] Polling already running - ignoring duplicate call": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "[UPOZORNENIE] Obnovovanie už beží - duplicitné volanie ignorované"
+          }
+        }
+      }
+    },
+    "Polling error - restarting in 5s: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chyba obnovovania - reštart o 5 s: %1$s"
+          }
+        }
+      }
+    },
+    "Polling error: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chyba obnovovania: %1$s"
+          }
+        }
+      }
+    },
+    "NFC mode enabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Režim NFC zapnutý"
+          }
+        }
+      }
+    },
+    "NFC mode disabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Režim NFC vypnutý"
+          }
+        }
+      }
+    },
+    "Opening base URL...": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otvára sa základná URL..."
+          }
+        }
+      }
+    },
+    "Opening account page...": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otvára sa stránka účtu..."
+          }
+        }
+      }
+    },
+    "Submitting login...": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odosiela sa prihlásenie..."
+          }
+        }
+      }
+    },
+    "Login successful (cookies: %1$d)": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prihlásenie úspešné (cookies: %1$d)"
+          }
+        }
+      }
+    },
+    "Verifying session (getUId)...": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overuje sa relácia (getUId)..."
+          }
+        }
+      }
+    },
+    "getUId HTTP %1$d": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "getUId HTTP %1$d"
+          }
+        }
+      }
+    },
+    "Loading account detail...": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Načítavajú sa detaily účtu..."
+          }
+        }
+      }
+    },
+    "getAccountDetail HTTP %1$d": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "getAccountDetail HTTP %1$d"
+          }
+        }
+      }
+    },
+    "Loaded SNR": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SNR načítané"
+          }
+        }
+      }
+    },
+    "Warming up session...": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pripravuje sa relácia..."
+          }
+        }
+      }
+    },
+    "Session ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relácia pripravená"
+          }
+        }
+      }
+    },
+    "Login failed: %1$s": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prihlásenie zlyhalo: %1$s"
+          }
+        }
+      }
+    },
+    "Please fill in all fields": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vyplňte všetky polia"
+          }
+        }
+      }
+    },
+    "Enter PIN or use biometrics": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zadajte PIN alebo použite biometriu"
+          }
+        }
+      }
+    },
+    "Unlock app first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Najprv odomknite aplikáciu."
+          }
+        }
+      }
+    },
+    "Unlock testEM": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odomknúť testEM"
+          }
+        }
+      }
+    },
+    "Unlock with PIN": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odomknite pomocou PINu"
+          }
+        }
+      }
+    },
+    "Use Face ID / Touch ID": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Použite Face ID / Touch ID"
+          }
+        }
+      }
+    },
+    "Protect your app with a PIN": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chráňte svoju aplikáciu pomocou PINu"
+          }
+        }
+      }
+    },
+    "Enter current PIN.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zadajte aktuálny PIN."
+          }
+        }
+      }
+    },
+    "PIN must be 4-8 digits.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PIN musí mať 4 až 8 číslic."
+          }
+        }
+      }
+    },
+    "New PIN is too short.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nový PIN je príliš krátky."
+          }
+        }
+      }
+    },
+    "PIN confirmation does not match.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Potvrdenie PINu sa nezhoduje."
+          }
+        }
+      }
+    },
+    "B64: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "B64: %@"
+          }
+        }
+      }
+    },
+    "HEX: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HEX: %@"
+          }
+        }
+      }
+    },
+    "UID: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UID: %@"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

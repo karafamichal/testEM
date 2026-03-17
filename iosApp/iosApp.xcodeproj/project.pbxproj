@@ -110,6 +110,8 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+					slovak,
+					sk,
 				Base,
 			);
 			mainGroup = F1DEA611BD201D8602985556;

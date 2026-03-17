@@ -127,6 +127,7 @@ struct ContentView: View {
                 }
             }
         }
+        .environment(\.locale, Locale(identifier: viewModel.languageCode))
         .dynamicTypeSize(.xSmall ... .large)
         .onChange(of: scenePhase) { _, newValue in
             viewModel.handleScenePhase(newValue)
@@ -134,19 +135,14 @@ struct ContentView: View {
         .tint(viewModel.currentAccentColor)
     }
 
+    @ViewBuilder
     private var appBackground: some View {
-        let top: Color
-        let bottom: Color
         if viewModel.amoledEnabled {
-            top = .black
-            bottom = Color(red: 0.05, green: 0.05, blue: 0.05)
+            Color.black
         } else if colorScheme == .dark {
-            top = Color(red: 0.10, green: 0.13, blue: 0.12)
-            bottom = Color(red: 0.06, green: 0.08, blue: 0.08)
+            LinearGradient(colors: [Color(red: 0.10, green: 0.13, blue: 0.12), Color(red: 0.06, green: 0.08, blue: 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
         } else {
-            top = Color(red: 0.92, green: 0.97, blue: 0.95)
-            bottom = Color(red: 0.84, green: 0.92, blue: 0.89)
+            Color(UIColor.systemGroupedBackground)
         }
-        return LinearGradient(colors: [top, bottom], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 }
