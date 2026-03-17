@@ -28,7 +28,7 @@ extension ContentView {
                     }
                 }
             }
-            .background(viewModel.amoledEnabled ? Color.black : Color(.systemGroupedBackground))
+            .background(isAmoledActive ? Color.black : Color(.systemGroupedBackground))
         }
     }
 

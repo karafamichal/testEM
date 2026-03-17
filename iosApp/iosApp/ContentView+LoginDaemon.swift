@@ -61,16 +61,14 @@ extension ContentView {
         GeometryReader { geometry in
             ScrollView {
                 VStack(spacing: dp(12)) {
-                    Spacer(minLength: 0)
                     ForEach(viewModel.layoutOrder, id: \.rawValue) { id in
                         if !viewModel.hiddenSections.contains(id) || !hideableSections.contains(id) {
                             sectionView(for: id)
                         }
                     }
-                    Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: geometry.size.height)
+                .frame(minHeight: geometry.size.height, alignment: .top)
             }
             .scrollBounceBehavior(.basedOnSize)
         }
@@ -197,8 +195,8 @@ extension ContentView {
         }
         .padding(dp(12))
         .frame(maxWidth: .infinity)
-        .background(viewModel.amoledEnabled ? Color(white: 0.05) : Color(UIColor.secondarySystemGroupedBackground))
+        .background(isAmoledActive ? Color(white: 0.05) : Color(UIColor.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: dp(16), style: .continuous))
-        .shadow(color: Color.black.opacity(viewModel.amoledEnabled ? 0.0 : 0.04), radius: dp(8), x: 0, y: 2)
+        .shadow(color: Color.black.opacity(isAmoledActive ? 0.0 : 0.04), radius: dp(8), x: 0, y: 2)
     }
 }

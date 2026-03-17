@@ -135,9 +135,13 @@ struct ContentView: View {
         .tint(viewModel.currentAccentColor)
     }
 
+    private var isAmoledActive: Bool {
+        viewModel.amoledEnabled && colorScheme == .dark
+    }
+
     @ViewBuilder
     private var appBackground: some View {
-        if viewModel.amoledEnabled {
+        if isAmoledActive {
             Color.black
         } else if colorScheme == .dark {
             LinearGradient(colors: [Color(red: 0.10, green: 0.13, blue: 0.12), Color(red: 0.06, green: 0.08, blue: 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
