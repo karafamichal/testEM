@@ -135,7 +135,7 @@ struct ContentView: View {
         .tint(viewModel.currentAccentColor)
     }
 
-    private var isAmoledActive: Bool {
+    var isAmoledActive: Bool {
         viewModel.amoledEnabled && colorScheme == .dark
     }
 
