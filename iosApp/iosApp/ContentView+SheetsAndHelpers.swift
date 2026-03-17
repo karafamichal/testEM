@@ -53,7 +53,7 @@ extension ContentView {
                 VStack(spacing: dp(10)) {
                     cardContainer("Tickets & Payments History") {
                         VStack(alignment: .leading, spacing: 10) {
-                            if viewModel.historyState.isLoading {
+                            if viewModel.historyState.isLoading && viewModel.historyState.items.isEmpty {
                                 ProgressView()
                             }
 
@@ -122,6 +122,12 @@ extension ContentView {
                     }
                 }
                 .padding(dp(12))
+            }
+            .refreshable {
+                await viewModel.loadCardHistory()
+            }
+            .task {
+                await viewModel.loadCardHistory()
             }
             .navigationTitle("Tickets & Payments History")
             .toolbar {

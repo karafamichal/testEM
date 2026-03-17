@@ -297,7 +297,7 @@ extension ContentView {
         }
     }
 
-    func sectionTitle(_ id: SectionId) -> String {
+    func sectionTitle(_ id: SectionId) -> LocalizedStringKey {
         switch id {
         case .status: return "Polling status"
         case .qr: return "QR code"
