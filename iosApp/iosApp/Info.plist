@@ -10,5 +10,13 @@
 	<string>testEM</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>testEM uses Face ID to unlock the app securely.</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
 </dict>
 </plist>
