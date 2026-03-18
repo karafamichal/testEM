@@ -67,6 +67,8 @@ extension ContentView {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .frame(minHeight: geometry.size.height, alignment: .top)
             }

@@ -64,8 +64,6 @@ struct ContentView: View {
                                 historyScreenSheet
                             } else {
                                 daemonView
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
                             }
                         } else {
                             loginView
