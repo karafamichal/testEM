@@ -47,6 +47,7 @@ A cross-platform (Android & iOS) mobile application that logs into the SADZV por
 - **Field Testing (Inspectors):** This application has been successfully tested in the real world with official ticket inspectors, and the generated QR codes were scanned and validated perfectly. **However, we still do not guarantee that it will always work or be accepted by their systems. Use it at your own risk.**
 - **NFC Status:** The NFC functionality is strictly an early alpha test feature. It still isn't working properly and serves only as an experimental development tool.
 - **Network Sync:** If QR updates stall, verify your active internet connectivity and session login status.
+- **iOS Distribution:** As this app is not published on the public App Store, iOS users will need to sideload the application onto their devices using tools like [AltStore](https://altstore.io/), Sideloadly, or Signulous.
 - **Disclaimer:** This is an unofficial client for `sadzv.qrbus.me`, which is owned by EMtest. This app is not affiliated with, authorized, or endorsed by EMtest in any way.
 
 ## License
