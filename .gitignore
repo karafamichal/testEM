@@ -26,3 +26,13 @@ BUILD_REFERENCE.bat
 *.apk
 *.aab
 *.apks
+# Transient migration and build documentation (Android-exclusive and outdated)
+BUILD_FIX_SUMMARY.md
+BUILD_INSTRUCTIONS.md
+IMPLEMENTATION_SUMMARY.md
+QUICK_BUILD.md
+README_QR_DAEMON.md
+VERIFICATION_CHECKLIST.md
+
+# Legacy code folder (if not already ignored)
+testEM-old/

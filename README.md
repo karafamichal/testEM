@@ -49,10 +49,5 @@ A cross-platform (Android & iOS) mobile application that logs into the SADZV por
 - **Network Sync:** If QR updates stall, verify your active internet connectivity and session login status.
 - **Disclaimer:** This is an unofficial client for `sadzv.qrbus.me`, which is owned by EMtest. This app is not affiliated with, authorized, or endorsed by EMtest in any way.
 
-## Documentation
-- [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)
-- [QUICK_BUILD.md](QUICK_BUILD.md)
-- [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)
-
 ## License
 Proprietary - All Rights Reserved. See LICENSE.
