@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "509097201027",
+    "project_id": "testem-b23b2",
+    "storage_bucket": "testem-b23b2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:509097201027:android:11b9ca6643b080e2577ab6",
+        "android_client_info": {
+          "package_name": "com.ksjd.testem"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAyUHO-M694PAgtk5w-FZN7KgntuRiGN0s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
