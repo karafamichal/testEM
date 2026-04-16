@@ -21,6 +21,7 @@
     <string name="account_title">Account</string>
     <string name="logout">Logout</string>
     <string name="section_polling_status">Polling status</string>
+    <string name="section_low_credit_warning">Low credit warning</string>
     <string name="section_qr_code">QR code</string>
     <string name="section_nfc_button">NFC button</string>
     <string name="section_controls">Controls</string>
@@ -58,6 +59,8 @@
     <string name="qr_code_content_desc">QR Code</string>
     <string name="qr_code_fullscreen_content_desc">QR Code Fullscreen</string>
     <string name="status_label">Status:</string>
+    <string name="low_credit_title">Warning: Low Credit</string>
+    <string name="low_credit_message">Your credit is low (%1$.2f%2$s). Please top up to avoid service interruption.</string>
     <string name="polling_active">Polling Active</string>
     <string name="polling_paused">Polling Paused</string>
     <string name="last_update_label">Last Update: %1$s</string>

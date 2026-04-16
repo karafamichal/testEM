@@ -698,6 +698,16 @@ fun LayoutContent(
     val sections = order.mapNotNull { id ->
         when (id) {
             "status" -> if (hidden.contains(id)) null else LayoutSectionContent { StatusCard(qrState) }
+            "low_credit" -> if (hidden.contains(id)) {
+                null
+            } else {
+                val credit = qrState.accountDetails.creditLastBalance
+                if (credit != null && credit < 1.0) {
+                    LayoutSectionContent { LowCreditWarningCard(qrState.accountDetails) }
+                } else {
+                    null
+                }
+            }
             "qr" -> LayoutSectionContent { QRCodeDisplay(qrState, onShowFullscreenQr) }
             "nfc" -> if (hidden.contains(id)) null else LayoutSectionContent {
                 AccountActionsCard(
@@ -1085,12 +1095,13 @@ fun LayoutSettingsContent(
         }
         val titles = mapOf(
             "status" to stringResource(R.string.section_polling_status),
+            "low_credit" to stringResource(R.string.section_low_credit_warning),
             "qr" to stringResource(R.string.section_qr_code),
             "nfc" to stringResource(R.string.section_nfc_button),
             "controls" to stringResource(R.string.section_controls),
             "error" to stringResource(R.string.section_errors)
         )
-        val hideable = setOf("status", "nfc", "error")
+        val hideable = setOf("status", "low_credit", "nfc", "error")
         val hidden = appState.hiddenSections
         order.forEachIndexed { index, id ->
             SettingsItemCard {
@@ -1695,11 +1706,42 @@ fun LayoutOrderRow(
 private fun defaultLayoutOrderIds(): List<String> {
     return listOf(
         "status",
+        "low_credit",
         "qr",
         "nfc",
         "controls",
         "error"
     )
+}
+
+@Composable
+fun LowCreditWarningCard(details: AccountDetails) {
+    val balance = details.creditLastBalance ?: return
+    val currency = details.currencySymbol.ifBlank { "€" }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        ),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.low_credit_title),
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = stringResource(R.string.low_credit_message, balance, currency),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+        }
+    }
 }
 
 @Composable

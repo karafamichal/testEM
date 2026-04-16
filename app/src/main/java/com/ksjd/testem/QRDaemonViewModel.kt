@@ -87,6 +87,7 @@ class QRDaemonViewModel : ViewModel() {
 
     private val defaultLayoutOrder = listOf(
         "status",
+        "low_credit",
         "qr",
         "nfc",
         "controls",

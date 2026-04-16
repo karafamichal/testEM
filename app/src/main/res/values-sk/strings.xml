@@ -21,6 +21,7 @@
     <string name="account_title">Účet</string>
     <string name="logout">Odhlásiť sa</string>
     <string name="section_polling_status">Stav obnovovania</string>
+    <string name="section_low_credit_warning">Upozornenie na nizky kredit</string>
     <string name="section_qr_code">QR kód</string>
     <string name="section_nfc_button">Tlačidlo NFC</string>
     <string name="section_controls">Ovládanie</string>
@@ -58,6 +59,8 @@
     <string name="qr_code_content_desc">QR kód</string>
     <string name="qr_code_fullscreen_content_desc">QR kód na celú obrazovku</string>
     <string name="status_label">Stav:</string>
+    <string name="low_credit_title">Upozornenie: Nizky kredit</string>
+    <string name="low_credit_message">Vas kredit je nizky (%1$.2f%2$s). Dobite si kredit, aby ste predisli preruseniu sluzby.</string>
     <string name="polling_active">Obnovovanie aktívne</string>
     <string name="polling_paused">Obnovovanie pozastavené</string>
     <string name="last_update_label">Posledná aktualizácia: %1$s</string>
