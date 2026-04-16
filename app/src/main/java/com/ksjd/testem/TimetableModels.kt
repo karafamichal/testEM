@@ -38,6 +38,7 @@ data class TimetableConnection(
 
 data class TimetablePagingCursor(
     val citySlug: String,
+    val routePrefix: String,
     val fromText: String,
     val toText: String,
     val handle: String,

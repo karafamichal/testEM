@@ -48,8 +48,8 @@
     <string name="unlock_subtitle">Enter your PIN or use biometrics.</string>
     <string name="pin_label">PIN</string>
     <string name="pin_error_incorrect">Incorrect PIN.</string>
-    <string name="unlock_button">Unlock</string>
-    <string name="use_biometrics">Use biometrics</string>
+    <string name="unlock_button">Unlock with PIN</string>
+    <string name="use_biometrics">Unlock</string>
     <string name="biometric_not_recognized">Biometric not recognized.</string>
     <string name="login_subtitle">Real-time QR Token Generator</string>
     <string name="email_label">Email or Username</string>
@@ -163,7 +163,7 @@
     <string name="timetables_direct_only_label">Direct connections only</string>
     <string name="timetables_shortcut_description">Jump to the bus timetable search without leaving the app.</string>
     <string name="timetables_open_button">Open bus timetables</string>
-    <string name="timetables_search_button">Search timetables</string>
+    <string name="timetables_search_button">Search</string>
     <string name="timetables_results_title">Connections</string>
     <string name="timetables_leg_label">Leg %1$d</string>
     <string name="timetables_transfer_label">Transfer</string>

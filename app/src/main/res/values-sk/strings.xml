@@ -48,8 +48,8 @@
     <string name="unlock_subtitle">Zadajte PIN alebo použite biometriu.</string>
     <string name="pin_label">PIN</string>
     <string name="pin_error_incorrect">Nesprávny PIN.</string>
-    <string name="unlock_button">Odomknúť</string>
-    <string name="use_biometrics">Použiť biometriu</string>
+    <string name="unlock_button">Odomknúť PIN-om</string>
+    <string name="use_biometrics">Odomknúť</string>
     <string name="biometric_not_recognized">Biometria nebola rozpoznaná.</string>
     <string name="login_subtitle">Generátor QR tokenov v reálnom čase</string>
     <string name="email_label">E-mail alebo používateľské meno</string>
@@ -163,7 +163,7 @@
     <string name="timetables_direct_only_label">Iba priame spojenia</string>
     <string name="timetables_shortcut_description">Prejdite do vyhľadávania autobusových spojov bez opustenia aplikácie.</string>
     <string name="timetables_open_button">Otvoriť autobusové cestovné poriadky</string>
-    <string name="timetables_search_button">Vyhľadať spojenia</string>
+    <string name="timetables_search_button">Vyhľadať</string>
     <string name="timetables_results_title">Spojenia</string>
     <string name="timetables_leg_label">Úsek %1$d</string>
     <string name="timetables_transfer_label">Prestup</string>

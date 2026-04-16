@@ -873,7 +873,7 @@ fun LayoutContent(
                 ControlButtonsRow(qrState, onTogglePolling, onShowHistory)
             }
             "bus_search" -> if (hidden.contains(id)) null else LayoutSectionContent {
-                TimetableShortcutCard(onOpenTimetables)
+                TimetableShortcutButton(onOpenTimetables)
             }
             "error" -> {
                 if (hidden.contains(id)) {
@@ -1949,6 +1949,19 @@ fun TimetableShortcutCard(onOpenTimetables: () -> Unit) {
                 Text(stringResource(R.string.timetables_open_button))
             }
         }
+    }
+}
+
+@Composable
+fun TimetableShortcutButton(onOpenTimetables: () -> Unit) {
+    OutlinedButton(
+        onClick = onOpenTimetables,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Text(stringResource(R.string.timetables_open_button))
     }
 }
 

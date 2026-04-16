@@ -31,6 +31,7 @@ class CpTimetableService(
     suspend fun searchConnections(request: SearchRequest): Result<TimetableSearchResult> {
         return try {
             val city = normalizeCitySlug(request.citySlug)
+            val routePrefixes = routePrefixCandidates(city)
             val fromResolved = request.fromSuggestion ?: resolveStop(city, request.fromInput)
                 ?: throw IllegalStateException("Unable to resolve departure stop")
             val toResolved = request.toSuggestion ?: resolveStop(city, request.toInput)
@@ -54,31 +55,39 @@ class CpTimetableService(
                 .add("DefaultMaxArcLengthFrom", "true")
                 .build()
 
-            val searchUrl = buildPageUrl(city, "/spojenie/")
-            val searchReq = Request.Builder()
-                .url(searchUrl)
-                .post(form)
-                .addHeader("User-Agent", "Mozilla/5.0")
-                .addHeader("Referer", searchUrl)
-                .build()
+            var searchResult = TimetableSearchResult(emptyList(), null)
+            for (routePrefix in routePrefixes) {
+                val searchUrl = buildPageUrl(routePrefix, "/spojenie/")
+                val searchReq = Request.Builder()
+                    .url(searchUrl)
+                    .post(form)
+                    .addHeader("User-Agent", "Mozilla/5.0")
+                    .addHeader("Referer", searchUrl)
+                    .build()
 
-            val searchResult = client.newCall(searchReq).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw IllegalStateException("CP search failed: HTTP ${response.code}")
+                val candidate = client.newCall(searchReq).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw IllegalStateException("CP search failed: HTTP ${response.code}")
+                    }
+                    val html = response.body?.string().orEmpty()
+                    val connections = parseConnectionsFromHtml(html)
+                    val pagingCursor = extractPagingCursor(
+                        html = html,
+                        citySlug = city,
+                        routePrefix = routePrefix,
+                        fromText = fromResolved.selectedText,
+                        toText = toResolved.selectedText,
+                        listedIds = connections.map { it.id }
+                    )
+                    TimetableSearchResult(
+                        connections = connections,
+                        pagingCursor = pagingCursor
+                    )
                 }
-                val html = response.body?.string().orEmpty()
-                val connections = parseConnectionsFromHtml(html)
-                val pagingCursor = extractPagingCursor(
-                    html = html,
-                    citySlug = city,
-                    fromText = fromResolved.selectedText,
-                    toText = toResolved.selectedText,
-                    listedIds = connections.map { it.id }
-                )
-                TimetableSearchResult(
-                    connections = connections,
-                    pagingCursor = pagingCursor
-                )
+                searchResult = candidate
+                if (candidate.connections.isNotEmpty()) {
+                    break
+                }
             }
             Result.success(searchResult)
         } catch (error: Exception) {
@@ -93,6 +102,11 @@ class CpTimetableService(
 
         return try {
             val city = normalizeCitySlug(cursor.citySlug)
+            val routePrefix = if (cursor.routePrefix.isNotBlank()) {
+                cursor.routePrefix
+            } else {
+                routePrefixCandidates(city).first()
+            }
 
             val formBuilder = FormBody.Builder()
             cursor.listedIds.forEach { id ->
@@ -108,8 +122,8 @@ class CpTimetableService(
                 .add("to", cursor.toText)
                 .build()
 
-            val pagingUrl = buildPageUrl(city, "/Ajax/ConnPaging/?callback=cb")
-            val refererUrl = buildPageUrl(city, "/spojenie/")
+            val pagingUrl = buildPageUrl(routePrefix, "/Ajax/ConnPaging/?callback=cb")
+            val refererUrl = buildPageUrl(routePrefix, "/spojenie/")
             val pagingReq = Request.Builder()
                 .url(pagingUrl)
                 .post(form)
@@ -182,54 +196,70 @@ class CpTimetableService(
         val normalized = input.trim()
         if (normalized.isBlank()) return emptyList()
 
-        val lookupUrl = buildPageUrl(normalizedCity, "/Ajax/SearchTimetableObjects/")
-        val refererUrl = buildPageUrl(normalizedCity, "/spojenie/")
-        val callbackName = "cb"
-        val req = Request.Builder()
-            .url(
-                "$lookupUrl?callback=$callbackName&count=18" +
-                    "&prefixText=${urlEncode(normalized)}&positionAccuracy=" +
-                    "&searchByPosition=false&onlyStation=false&line=&format=json&bindTtIndex=&date="
-            )
-            .get()
-            .addHeader("User-Agent", "Mozilla/5.0")
-            .addHeader("X-Requested-With", "XMLHttpRequest")
-            .addHeader("Referer", refererUrl)
-            .build()
-
-        client.newCall(req).execute().use { response ->
-            if (!response.isSuccessful) return emptyList()
-            val raw = response.body?.string().orEmpty()
-            val json = unwrapJsonp(raw)
-            val arr = runCatching { gson.fromJson(json, JsonArray::class.java) }.getOrNull() ?: return emptyList()
-            val suggestions = mutableListOf<CpStopSuggestion>()
-            for (element in arr) {
-                val obj = element.asJsonObject
-                if (obj.has("isHint") && obj.get("isHint").asBoolean) {
-                    continue
-                }
-                val text = obj.get("text")?.asString?.trim().orEmpty()
-                val value = obj.get("value")?.asString?.trim().orEmpty()
-                val value2 = obj.get("value2")?.asString?.trim().orEmpty()
-                if (text.isBlank() || value.isBlank() || value2.isBlank()) {
-                    continue
-                }
-                suggestions += CpStopSuggestion(
-                    selectedText = text,
-                    value = value,
-                    value2 = value2,
-                    coorX = obj.get("coorX")?.asString,
-                    coorY = obj.get("coorY")?.asString,
-                    description = obj.get("description")?.asString.orEmpty()
+        val routePrefixes = routePrefixCandidates(normalizedCity)
+        for (routePrefix in routePrefixes) {
+            val lookupUrl = buildPageUrl(routePrefix, "/Ajax/SearchTimetableObjects/")
+            val refererUrl = buildPageUrl(routePrefix, "/spojenie/")
+            val callbackName = "cb"
+            val req = Request.Builder()
+                .url(
+                    "$lookupUrl?callback=$callbackName&count=18" +
+                        "&prefixText=${urlEncode(normalized)}&positionAccuracy=" +
+                        "&searchByPosition=false&onlyStation=false&line=&format=json&bindTtIndex=&date="
                 )
+                .get()
+                .addHeader("User-Agent", "Mozilla/5.0")
+                .addHeader("X-Requested-With", "XMLHttpRequest")
+                .addHeader("Referer", refererUrl)
+                .build()
+
+            val suggestions = client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) {
+                    emptyList()
+                } else {
+                val raw = response.body?.string().orEmpty()
+                val json = unwrapJsonp(raw)
+                    val arr = runCatching { gson.fromJson(json, JsonArray::class.java) }.getOrNull()
+                    if (arr == null) {
+                        emptyList()
+                    } else {
+                        val parsed = mutableListOf<CpStopSuggestion>()
+                        for (element in arr) {
+                            val obj = element.asJsonObject
+                            if (obj.has("isHint") && obj.get("isHint").asBoolean) {
+                                continue
+                            }
+                            val text = obj.get("text")?.asString?.trim().orEmpty()
+                            val value = obj.get("value")?.asString?.trim().orEmpty()
+                            val value2 = obj.get("value2")?.asString?.trim().orEmpty()
+                            if (text.isBlank() || value.isBlank() || value2.isBlank()) {
+                                continue
+                            }
+                            parsed += CpStopSuggestion(
+                                selectedText = text,
+                                value = value,
+                                value2 = value2,
+                                coorX = obj.get("coorX")?.asString,
+                                coorY = obj.get("coorY")?.asString,
+                                description = obj.get("description")?.asString.orEmpty()
+                            )
+                        }
+                        parsed
+                    }
+                }
             }
-            return suggestions
+
+            if (suggestions.isNotEmpty()) {
+                return suggestions
+            }
         }
+
+        return emptyList()
     }
 
     private fun parseConnectionsFromHtml(html: String): List<TimetableConnection> {
         val doc = Jsoup.parse(html)
-        val boxes = doc.select("div[id^=connectionBox-].box.connection")
+        val boxes = doc.select("div[id^=connectionBox-].box.connection, div[id^=connectionBox-].connection")
         if (boxes.isEmpty()) return emptyList()
 
         val parsedConnections = mutableListOf<TimetableConnection>()
@@ -279,18 +309,14 @@ class CpTimetableService(
     private fun extractPagingCursor(
         html: String,
         citySlug: String,
+        routePrefix: String,
         fromText: String,
         toText: String,
         listedIds: List<String>
     ): TimetablePagingCursor? {
         if (listedIds.isEmpty()) return null
 
-        val handle = Regex("""[\"']?handle[\"']?\s*:\s*([0-9]+)""")
-            .find(html)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?.trim()
-            .orEmpty()
+        val handle = extractJsonLikeToken(html, "handle")
         val searchDate = Regex("""[\"']?searchDate[\"']?\s*:\s*[\"']([^\"']+)[\"']""")
             .find(html)
             ?.groupValues
@@ -302,6 +328,7 @@ class CpTimetableService(
 
         return TimetablePagingCursor(
             citySlug = citySlug,
+            routePrefix = routePrefix,
             fromText = fromText,
             toText = toText,
             handle = handle,
@@ -318,10 +345,24 @@ class CpTimetableService(
         }
     }
 
-    private fun buildPageUrl(citySlug: String, suffix: String): String {
-        val normalizedCity = normalizeCitySlug(citySlug)
-        val cityPath = if (normalizedCity == "slovensko") "" else "/$normalizedCity"
-        return "https://cp.sk${cityPath}${suffix}"
+    private fun routePrefixCandidates(normalizedCity: String): List<String> {
+        return if (normalizedCity == "slovensko") {
+            listOf("/slovensko", "")
+        } else {
+            listOf("/$normalizedCity")
+        }
+    }
+
+    private fun buildPageUrl(routePrefix: String, suffix: String): String {
+        return "https://cp.sk${routePrefix}${suffix}"
+    }
+
+    private fun extractJsonLikeToken(html: String, key: String): String {
+        val pattern = Regex(
+            """[\"']?$key[\"']?\s*:\s*(?:[\"']([^\"']+)[\"']|([^,}\s]+))"""
+        )
+        val match = pattern.find(html) ?: return ""
+        return match.groupValues.drop(1).firstOrNull { it.isNotBlank() }?.trim().orEmpty()
     }
 
     private fun unwrapJsonp(content: String): String {
