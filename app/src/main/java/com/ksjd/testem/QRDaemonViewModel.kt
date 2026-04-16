@@ -98,6 +98,7 @@ class QRDaemonViewModel : ViewModel() {
         "qr",
         "nfc",
         "controls",
+        "bus_search",
         "error"
     )
 
@@ -197,7 +198,15 @@ class QRDaemonViewModel : ViewModel() {
     fun loadLayoutSettings(context: Context) {
         val manager = credentialsManager ?: CredentialsManager(context)
         credentialsManager = manager
-        val order = manager.getLayoutOrder(defaultLayoutOrder)
+        val storedOrder = manager.getLayoutOrder(defaultLayoutOrder)
+        val order = buildList {
+            addAll(storedOrder.filter { it in defaultLayoutOrder })
+            defaultLayoutOrder.forEach { id ->
+                if (id !in this) {
+                    add(id)
+                }
+            }
+        }
         val storedHidden = manager.getHiddenSections()
         val hidden = if (storedHidden.isEmpty()) {
             manager.saveHiddenSections(defaultHiddenSections)

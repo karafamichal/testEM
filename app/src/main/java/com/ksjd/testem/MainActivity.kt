@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,6 +65,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ksjd.testem.ui.theme.TestEMTheme
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
@@ -148,7 +150,7 @@ fun QRDaemonApp(viewModel: QRDaemonViewModel, context: FragmentActivity) {
             context,
             onOpenTimetables = { showTimetables = true }
         )
-        appState.isLoggedIn -> QRDaemonScreen(viewModel, qrState, appState, context)
+        appState.isLoggedIn -> QRDaemonScreen(viewModel, qrState, appState, context, onOpenTimetables = { showTimetables = true })
         else -> LoginScreen(viewModel, appState, context, onOpenTimetables = { showTimetables = true })
     }
 }
@@ -216,10 +218,13 @@ fun PinSetupScreen(
                     imeAction = ImeAction.Next
                 ),
                 visualTransformation = PasswordVisualTransformation(),
-                colors = TextFieldDefaults.outlinedTextFieldColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                     focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent
+                    unfocusedBorderColor = Color.Transparent,
+                    disabledBorderColor = Color.Transparent
                 ),
                 keyboardActions = KeyboardActions(
                     onNext = { focusManager.moveFocus(FocusDirection.Down) }
@@ -239,10 +244,13 @@ fun PinSetupScreen(
                     imeAction = ImeAction.Done
                 ),
                 visualTransformation = PasswordVisualTransformation(),
-                colors = TextFieldDefaults.outlinedTextFieldColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                     focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent
+                    unfocusedBorderColor = Color.Transparent,
+                    disabledBorderColor = Color.Transparent
                 ),
                 keyboardActions = KeyboardActions(
                     onDone = {
@@ -360,10 +368,13 @@ fun PinUnlockScreen(
                     imeAction = ImeAction.Done
                 ),
                 visualTransformation = PasswordVisualTransformation(),
-                colors = TextFieldDefaults.outlinedTextFieldColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                     focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent
+                    unfocusedBorderColor = Color.Transparent,
+                    disabledBorderColor = Color.Transparent
                 ),
                 keyboardActions = KeyboardActions(
                     onDone = { submit() }
@@ -376,29 +387,41 @@ fun PinUnlockScreen(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = submit,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text(stringResource(R.string.unlock_button))
-            }
-
             if (biometricsAvailable && appState.biometricEnabled) {
+                Button(
+                    onClick = { prompt.authenticate(promptInfo) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(stringResource(R.string.use_biometrics))
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedButton(
-                    onClick = { prompt.authenticate(promptInfo) },
+                    onClick = submit,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurface
                     ),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text(stringResource(R.string.use_biometrics))
+                    Text(stringResource(R.string.unlock_button))
+                }
+            } else {
+                Button(
+                    onClick = submit,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(stringResource(R.string.unlock_button))
                 }
             }
 
@@ -577,10 +600,13 @@ fun LoginScreen(
                             autoCorrect = false,
                             imeAction = ImeAction.Next
                         ),
-                        colors = TextFieldDefaults.outlinedTextFieldColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                             focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent
+                            unfocusedBorderColor = Color.Transparent,
+                            disabledBorderColor = Color.Transparent
                         ),
                         keyboardActions = KeyboardActions(
                             onNext = { focusManager.moveFocus(FocusDirection.Down) }
@@ -609,10 +635,13 @@ fun LoginScreen(
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        colors = TextFieldDefaults.outlinedTextFieldColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                             focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent
+                            unfocusedBorderColor = Color.Transparent,
+                            disabledBorderColor = Color.Transparent
                         ),
                         keyboardActions = KeyboardActions(
                             onDone = { submit() }
@@ -694,7 +723,8 @@ fun QRDaemonScreen(
     viewModel: QRDaemonViewModel,
     qrState: QRState,
     appState: AppState,
-    context: FragmentActivity
+    context: FragmentActivity,
+    onOpenTimetables: () -> Unit
 ) {
     var showAccountDialog by remember { mutableStateOf(false) }
     var showNfcDialog by remember { mutableStateOf(false) }
@@ -719,6 +749,7 @@ fun QRDaemonScreen(
     if (showHistoryScreen) {
         HistoryScreen(
             historyState = qrState.historyState,
+            onOpenTimetables = onOpenTimetables,
             onBack = { showHistoryScreen = false },
             onRefresh = { viewModel.loadCardHistory() }
         )
@@ -791,6 +822,7 @@ fun QRDaemonScreen(
                         viewModel.startPolling()
                     }
                 },
+                onOpenTimetables = onOpenTimetables,
                 onShowHistory = {
                     showHistoryScreen = true
                     viewModel.loadCardHistory()
@@ -807,6 +839,7 @@ fun LayoutContent(
     onShowFullscreenQr: () -> Unit,
     onToggleNfc: () -> Unit,
     onTogglePolling: (Boolean) -> Unit,
+    onOpenTimetables: () -> Unit,
     onShowHistory: () -> Unit
 ) {
     val order = if (appState.layoutOrder.isNotEmpty()) {
@@ -838,6 +871,9 @@ fun LayoutContent(
             }
             "controls" -> LayoutSectionContent {
                 ControlButtonsRow(qrState, onTogglePolling, onShowHistory)
+            }
+            "bus_search" -> if (hidden.contains(id)) null else LayoutSectionContent {
+                TimetableShortcutCard(onOpenTimetables)
             }
             "error" -> {
                 if (hidden.contains(id)) {
@@ -1260,9 +1296,10 @@ fun LayoutSettingsContent(
             "qr" to stringResource(R.string.section_qr_code),
             "nfc" to stringResource(R.string.section_nfc_button),
             "controls" to stringResource(R.string.section_controls),
+            "bus_search" to stringResource(R.string.section_bus_search),
             "error" to stringResource(R.string.section_errors)
         )
-        val hideable = setOf("status", "low_credit", "nfc", "error")
+        val hideable = setOf("status", "low_credit", "nfc", "bus_search", "error")
         val hidden = appState.hiddenSections
         order.forEachIndexed { index, id ->
             SettingsItemCard {
@@ -1471,11 +1508,14 @@ fun ChangePinDialog(
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
-                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                         focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent
-                    )
+                        unfocusedBorderColor = Color.Transparent,
+                        disabledBorderColor = Color.Transparent
+                    ),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -1493,11 +1533,14 @@ fun ChangePinDialog(
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
-                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                         focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent
-                    )
+                        unfocusedBorderColor = Color.Transparent,
+                        disabledBorderColor = Color.Transparent
+                    ),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -1515,11 +1558,14 @@ fun ChangePinDialog(
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
-                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                         focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent
-                    )
+                        unfocusedBorderColor = Color.Transparent,
+                        disabledBorderColor = Color.Transparent
+                    ),
                 )
                 if (error.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1871,8 +1917,39 @@ private fun defaultLayoutOrderIds(): List<String> {
         "qr",
         "nfc",
         "controls",
+        "bus_search",
         "error"
     )
+}
+
+@Composable
+fun TimetableShortcutCard(onOpenTimetables: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.section_bus_search),
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.timetables_shortcut_description),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onOpenTimetables,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text(stringResource(R.string.timetables_open_button))
+            }
+        }
+    }
 }
 
 @Composable
@@ -2098,6 +2175,7 @@ fun TimetablesScreen(
 ) {
     val context = LocalContext.current
     val state = qrState.timetableState
+    val listState = rememberLazyListState()
     var citySlug by remember(state.citySlug) { mutableStateOf(state.citySlug) }
     var fromInput by remember(state.fromInput) { mutableStateOf(state.fromInput) }
     var toInput by remember(state.toInput) { mutableStateOf(state.toInput) }
@@ -2135,6 +2213,19 @@ fun TimetablesScreen(
         "banskabystrica" to stringResource(R.string.timetables_city_banska_bystrica)
     )
 
+    LaunchedEffect(state.connections.size, state.canLoadMore, state.isLoading, state.isLoadingMore) {
+        snapshotFlow {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            lastVisible >= state.connections.lastIndex - 1 && state.connections.isNotEmpty()
+        }
+            .distinctUntilChanged()
+            .collect { shouldLoadMore ->
+                if (shouldLoadMore && state.canLoadMore && !state.isLoading && !state.isLoadingMore) {
+                    viewModel.loadMoreTimetables()
+                }
+            }
+    }
+
     AppBackground(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             TopAppBar(
@@ -2160,6 +2251,7 @@ fun TimetablesScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(16.dp),
+                state = listState,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
@@ -2388,13 +2480,7 @@ fun TimetablesScreen(
                         )
                     }
 
-                    itemsIndexed(state.connections, key = { _, item -> item.id }) { index, connection ->
-                        if (index == state.connections.lastIndex && state.canLoadMore && !state.isLoading && !state.isLoadingMore) {
-                            LaunchedEffect(connection.id, state.connections.size, state.canLoadMore) {
-                                viewModel.loadMoreTimetables()
-                            }
-                        }
-
+                    itemsIndexed(state.connections, key = { _, item -> item.id }) { _, connection ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp),
@@ -2412,11 +2498,24 @@ fun TimetablesScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        "${connection.departureTime} -> ${connection.arrivalTime}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
-                                    )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                "${connection.departureTime} -> ${connection.arrivalTime}",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp
+                                            )
+                                            if (connection.segments.size > 1) {
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    stringResource(
+                                                        R.string.timetables_legs_label,
+                                                        connection.segments.size
+                                                    ),
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
                                     Text(
                                         connection.totalDuration,
                                         fontSize = 12.sp,
@@ -2424,26 +2523,63 @@ fun TimetablesScreen(
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(8.dp))
-                                connection.segments.forEach { segment ->
-                                    Text(
-                                        segment.line.ifBlank { "-" },
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        "${segment.departureStop} (${segment.departureTime}) -> ${segment.arrivalStop} (${segment.arrivalTime})",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    if (segment.operatorName.isNotBlank()) {
-                                        Text(
-                                            segment.operatorName,
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
+                                    connection.segments.forEachIndexed { segmentIndex, segment ->
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.surface
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        stringResource(
+                                                            R.string.timetables_leg_label,
+                                                            segmentIndex + 1
+                                                        ),
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    Text(
+                                                        segment.line.ifBlank { "-" },
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(6.dp))
+                                                Text(
+                                                    "${segment.departureTime} ${segment.departureStop}",
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Text(
+                                                    "${segment.arrivalTime} ${segment.arrivalStop}",
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                if (segment.operatorName.isNotBlank()) {
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        segment.operatorName,
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if (segmentIndex < connection.segments.lastIndex) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                stringResource(R.string.timetables_transfer_label),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                        }
                                 }
                             }
                         }
@@ -2470,6 +2606,7 @@ fun TimetablesScreen(
 @Composable
 fun HistoryScreen(
     historyState: CardHistoryState,
+    onOpenTimetables: () -> Unit,
     onBack: () -> Unit,
     onRefresh: () -> Unit
 ) {
@@ -2501,113 +2638,117 @@ fun HistoryScreen(
                 }
             )
 
-            Card(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                when {
-                    historyState.isLoading && historyState.items.isEmpty() -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator()
+                Card(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    when {
+                        historyState.isLoading && historyState.items.isEmpty() -> {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator()
+                            }
                         }
-                    }
-                    historyState.errorMessage.isNotBlank() && historyState.items.isEmpty() -> {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                historyState.errorMessage,
-                                color = MaterialTheme.colorScheme.error,
-                                fontSize = 13.sp
-                            )
+                        historyState.errorMessage.isNotBlank() && historyState.items.isEmpty() -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    historyState.errorMessage,
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
-                    }
-                    historyState.items.isEmpty() -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                stringResource(R.string.history_empty),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 13.sp
-                            )
+                        historyState.items.isEmpty() -> {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    stringResource(R.string.history_empty),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
-                    }
-                    else -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp)
-                                .verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            historyState.items.forEach { item ->
-                                val isPositive = item.amountText.trim().startsWith("+")
-                                val isNegative = item.amountText.trim().startsWith("-")
-                                val cardContainerColor = when {
-                                    item.sourceType == HistorySourceType.TRANSACTION -> MaterialTheme.colorScheme.secondaryContainer
-                                    isPositive -> MaterialTheme.colorScheme.tertiaryContainer
-                                    isNegative -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
-                                    else -> MaterialTheme.colorScheme.surfaceVariant
-                                }
-                                val amountColor = when {
-                                    isPositive -> Color(0xFF1B7F3B)
-                                    isNegative -> MaterialTheme.colorScheme.error
-                                    else -> MaterialTheme.colorScheme.primary
-                                }
-                                val titleColor = when {
-                                    item.sourceType == HistorySourceType.TRANSACTION -> MaterialTheme.colorScheme.onSecondaryContainer
-                                    isPositive -> MaterialTheme.colorScheme.onTertiaryContainer
-                                    isNegative -> MaterialTheme.colorScheme.onErrorContainer
-                                    else -> MaterialTheme.colorScheme.onSurface
-                                }
+                        else -> {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp)
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                historyState.items.forEach { item ->
+                                    val isPositive = item.amountText.trim().startsWith("+")
+                                    val isNegative = item.amountText.trim().startsWith("-")
+                                    val cardContainerColor = when {
+                                        item.sourceType == HistorySourceType.TRANSACTION -> MaterialTheme.colorScheme.secondaryContainer
+                                        isPositive -> MaterialTheme.colorScheme.tertiaryContainer
+                                        isNegative -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    }
+                                    val amountColor = when {
+                                        isPositive -> Color(0xFF1B7F3B)
+                                        isNegative -> MaterialTheme.colorScheme.error
+                                        else -> MaterialTheme.colorScheme.primary
+                                    }
+                                    val titleColor = when {
+                                        item.sourceType == HistorySourceType.TRANSACTION -> MaterialTheme.colorScheme.onSecondaryContainer
+                                        isPositive -> MaterialTheme.colorScheme.onTertiaryContainer
+                                        isNegative -> MaterialTheme.colorScheme.onErrorContainer
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    }
 
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = cardContainerColor
-                                    )
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Text(
-                                            formatDateTime(item.timestampMs, stringResource(R.string.date_unknown)),
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = cardContainerColor
                                         )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            item.title,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 15.sp,
-                                            color = titleColor
-                                        )
-                                        if (item.subtitle.isNotBlank()) {
-                                            Spacer(modifier = Modifier.height(2.dp))
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
                                             Text(
-                                                item.subtitle,
-                                                fontSize = 13.sp,
+                                                formatDateTime(item.timestampMs, stringResource(R.string.date_unknown)),
+                                                fontSize = 11.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
-                                        }
-                                        if (item.amountText.isNotBlank()) {
-                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Spacer(modifier = Modifier.height(2.dp))
                                             Text(
-                                                item.amountText,
-                                                fontSize = 13.sp,
-                                                color = amountColor,
-                                                fontWeight = FontWeight.SemiBold
+                                                item.title,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 15.sp,
+                                                color = titleColor
                                             )
+                                            if (item.subtitle.isNotBlank()) {
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    item.subtitle,
+                                                    fontSize = 13.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            if (item.amountText.isNotBlank()) {
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    item.amountText,
+                                                    fontSize = 13.sp,
+                                                    color = amountColor,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -2615,6 +2756,10 @@ fun HistoryScreen(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                TimetableShortcutCard(onOpenTimetables)
             }
         }
     }

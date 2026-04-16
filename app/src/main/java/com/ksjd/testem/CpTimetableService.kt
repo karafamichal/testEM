@@ -29,7 +29,7 @@ class CpTimetableService(
     )
 
     suspend fun searchConnections(request: SearchRequest): Result<TimetableSearchResult> {
-        return runCatching {
+        return try {
             val city = normalizeCitySlug(request.citySlug)
             val fromResolved = request.fromSuggestion ?: resolveStop(city, request.fromInput)
                 ?: throw IllegalStateException("Unable to resolve departure stop")
@@ -54,7 +54,7 @@ class CpTimetableService(
                 .add("DefaultMaxArcLengthFrom", "true")
                 .build()
 
-            val searchUrl = "https://cp.sk/$city/spojenie/"
+            val searchUrl = buildPageUrl(city, "/spojenie/")
             val searchReq = Request.Builder()
                 .url(searchUrl)
                 .post(form)
@@ -62,7 +62,7 @@ class CpTimetableService(
                 .addHeader("Referer", searchUrl)
                 .build()
 
-            client.newCall(searchReq).execute().use { response ->
+            val searchResult = client.newCall(searchReq).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw IllegalStateException("CP search failed: HTTP ${response.code}")
                 }
@@ -80,6 +80,9 @@ class CpTimetableService(
                     pagingCursor = pagingCursor
                 )
             }
+            Result.success(searchResult)
+        } catch (error: Exception) {
+            Result.failure(error)
         }
     }
 
@@ -91,7 +94,6 @@ class CpTimetableService(
         return try {
             val city = normalizeCitySlug(cursor.citySlug)
 
-            val callbackName = "cb"
             val formBuilder = FormBody.Builder()
             cursor.listedIds.forEach { id ->
                 formBuilder.add("listedIds[]", id)
@@ -106,19 +108,21 @@ class CpTimetableService(
                 .add("to", cursor.toText)
                 .build()
 
-            val pagingUrl = "https://cp.sk/$city/Ajax/ConnPaging/?callback=$callbackName"
+            val pagingUrl = buildPageUrl(city, "/Ajax/ConnPaging/?callback=cb")
+            val refererUrl = buildPageUrl(city, "/spojenie/")
             val pagingReq = Request.Builder()
                 .url(pagingUrl)
                 .post(form)
                 .addHeader("User-Agent", "Mozilla/5.0")
                 .addHeader("X-Requested-With", "XMLHttpRequest")
-                .addHeader("Referer", "https://cp.sk/$city/spojenie/")
+                .addHeader("Referer", refererUrl)
                 .build()
 
-            val searchResult = client.newCall(pagingReq).execute().use { response ->
+            val pagingResult = client.newCall(pagingReq).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw IllegalStateException("CP paging failed: HTTP ${response.code}")
                 }
+
                 val raw = response.body?.string().orEmpty()
                 val json = unwrapJsonp(raw)
                 val payload = try {
@@ -131,32 +135,33 @@ class CpTimetableService(
                     ?.mapNotNull { it?.asString }
                     .orEmpty()
 
-                if (chunks.isEmpty()) {
-                    TimetableSearchResult(emptyList(), null)
-                } else {
+                if (chunks.isNotEmpty()) {
                     val combinedHtml = chunks.joinToString("\n")
                     val newConnections = parseConnectionsFromHtml(combinedHtml)
-                    if (newConnections.isEmpty()) {
-                        TimetableSearchResult(emptyList(), null)
-                    } else {
+                    if (newConnections.isNotEmpty()) {
                         val updatedIds = (cursor.listedIds + newConnections.map { it.id }).distinct()
                         TimetableSearchResult(
                             connections = newConnections,
                             pagingCursor = cursor.copy(listedIds = updatedIds)
                         )
+                    } else {
+                        TimetableSearchResult(emptyList(), null)
                     }
+                } else {
+                    TimetableSearchResult(emptyList(), null)
                 }
             }
-
-            Result.success(searchResult)
+            Result.success(pagingResult)
         } catch (error: Exception) {
             Result.failure(error)
         }
     }
 
     suspend fun suggestStops(citySlug: String, input: String): Result<List<CpStopSuggestion>> {
-        return runCatching {
-            fetchSuggestions(citySlug, input)
+        return try {
+            Result.success(fetchSuggestions(citySlug, input))
+        } catch (error: Exception) {
+            Result.failure(error)
         }
     }
 
@@ -177,7 +182,8 @@ class CpTimetableService(
         val normalized = input.trim()
         if (normalized.isBlank()) return emptyList()
 
-        val lookupUrl = "https://cp.sk/$normalizedCity/Ajax/SearchTimetableObjects/"
+        val lookupUrl = buildPageUrl(normalizedCity, "/Ajax/SearchTimetableObjects/")
+        val refererUrl = buildPageUrl(normalizedCity, "/spojenie/")
         val callbackName = "cb"
         val req = Request.Builder()
             .url(
@@ -188,7 +194,7 @@ class CpTimetableService(
             .get()
             .addHeader("User-Agent", "Mozilla/5.0")
             .addHeader("X-Requested-With", "XMLHttpRequest")
-            .addHeader("Referer", "https://cp.sk/$normalizedCity/spojenie/")
+            .addHeader("Referer", refererUrl)
             .build()
 
         client.newCall(req).execute().use { response ->
@@ -197,13 +203,17 @@ class CpTimetableService(
             val json = unwrapJsonp(raw)
             val arr = runCatching { gson.fromJson(json, JsonArray::class.java) }.getOrNull() ?: return emptyList()
             val suggestions = mutableListOf<CpStopSuggestion>()
-            arr.forEach { element ->
+            for (element in arr) {
                 val obj = element.asJsonObject
-                if (obj.has("isHint") && obj.get("isHint").asBoolean) return@forEach
+                if (obj.has("isHint") && obj.get("isHint").asBoolean) {
+                    continue
+                }
                 val text = obj.get("text")?.asString?.trim().orEmpty()
                 val value = obj.get("value")?.asString?.trim().orEmpty()
                 val value2 = obj.get("value2")?.asString?.trim().orEmpty()
-                if (text.isBlank() || value.isBlank() || value2.isBlank()) return@forEach
+                if (text.isBlank() || value.isBlank() || value2.isBlank()) {
+                    continue
+                }
                 suggestions += CpStopSuggestion(
                     selectedText = text,
                     value = value,
@@ -223,25 +233,25 @@ class CpTimetableService(
         if (boxes.isEmpty()) return emptyList()
 
         val parsedConnections = mutableListOf<TimetableConnection>()
-        boxes.forEach boxLoop@ { box ->
+        for (box in boxes) {
             val id = box.id().removePrefix("connectionBox-")
             val departureTime = box.selectFirst("div.connection-head h2.date")?.ownText()?.trim().orEmpty()
             val totalDuration = box.selectFirst("div.connection-head p.total strong")?.text()?.trim().orEmpty()
 
             val segments = mutableListOf<TimetableSegment>()
-            box.select("div.connection-details div.line-item > div.outside-of-popup").forEach segmentLoop@ { segment ->
+            for (segment in box.select("div.connection-details div.line-item > div.outside-of-popup")) {
                 val line = segment.selectFirst("h3 span")?.text()?.trim().orEmpty()
                 val operator = segment.selectFirst("p.line-right-part span.owner span")?.text()?.trim().orEmpty()
                 val stationItems = segment.select("ul.stations li.item")
-                if (stationItems.isEmpty()) return@segmentLoop
-                val first = stationItems.first() ?: return@segmentLoop
-                val last = stationItems.last() ?: return@segmentLoop
+                if (stationItems.isEmpty()) continue
+                val first = stationItems.first()
+                val last = stationItems.last()
                 val depTime = first.selectFirst("p.time")?.text()?.trim().orEmpty()
                 val depStop = first.selectFirst("p.station strong.name")?.text()?.trim().orEmpty()
                 val arrTime = last.selectFirst("p.time")?.text()?.trim().orEmpty()
                 val arrStop = last.selectFirst("p.station strong.name")?.text()?.trim().orEmpty()
                 if (depTime.isBlank() || depStop.isBlank() || arrTime.isBlank() || arrStop.isBlank()) {
-                    return@segmentLoop
+                    continue
                 }
                 segments += TimetableSegment(
                     line = line,
@@ -253,7 +263,7 @@ class CpTimetableService(
                 )
             }
 
-            if (segments.isEmpty()) return@boxLoop
+            if (segments.isEmpty()) continue
 
             parsedConnections += TimetableConnection(
                 id = id,
@@ -306,6 +316,12 @@ class CpTimetableService(
             "banska-bystrica", "banská-bystrica", "banska bystrica", "banská bystrica" -> "banskabystrica"
             else -> citySlug.trim().lowercase()
         }
+    }
+
+    private fun buildPageUrl(citySlug: String, suffix: String): String {
+        val normalizedCity = normalizeCitySlug(citySlug)
+        val cityPath = if (normalizedCity == "slovensko") "" else "/$normalizedCity"
+        return "https://cp.sk${cityPath}${suffix}"
     }
 
     private fun unwrapJsonp(content: String): String {

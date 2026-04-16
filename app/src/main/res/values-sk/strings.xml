@@ -25,6 +25,7 @@
     <string name="section_qr_code">QR kód</string>
     <string name="section_nfc_button">Tlačidlo NFC</string>
     <string name="section_controls">Ovládanie</string>
+    <string name="section_bus_search">Vyhľadávanie autobusov</string>
     <string name="section_errors">Chyby</string>
     <string name="visible_label">Viditeľné</string>
     <string name="hidden_label">Skryté</string>
@@ -160,9 +161,13 @@
     <string name="timetables_time_now_hint">Pouzije sa aktualny cas</string>
     <string name="timetables_time_pick_button">Vybrat cas</string>
     <string name="timetables_direct_only_label">Iba priame spojenia</string>
-    <string name="timetables_open_button">Otvorit autobusove cestovne poriadky</string>
+    <string name="timetables_shortcut_description">Prejdite do vyhľadávania autobusových spojov bez opustenia aplikácie.</string>
+    <string name="timetables_open_button">Otvoriť autobusové cestovné poriadky</string>
     <string name="timetables_search_button">Vyhľadať spojenia</string>
     <string name="timetables_results_title">Spojenia</string>
+    <string name="timetables_leg_label">Úsek %1$d</string>
+    <string name="timetables_transfer_label">Prestup</string>
+    <string name="timetables_legs_label">%1$d úseky</string>
     <string name="timetables_result_header">%1$s → %2$s  •  %3$s</string>
     <string name="timetables_segment_line">%1$s: %2$s (%3$s) → %4$s (%5$s)</string>
 </resources>

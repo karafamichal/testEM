@@ -25,6 +25,7 @@
     <string name="section_qr_code">QR code</string>
     <string name="section_nfc_button">NFC button</string>
     <string name="section_controls">Controls</string>
+    <string name="section_bus_search">Bus search</string>
     <string name="section_errors">Errors</string>
     <string name="visible_label">Visible</string>
     <string name="hidden_label">Hidden</string>
@@ -160,9 +161,13 @@
     <string name="timetables_time_now_hint">Current time will be used</string>
     <string name="timetables_time_pick_button">Select time</string>
     <string name="timetables_direct_only_label">Direct connections only</string>
+    <string name="timetables_shortcut_description">Jump to the bus timetable search without leaving the app.</string>
     <string name="timetables_open_button">Open bus timetables</string>
     <string name="timetables_search_button">Search timetables</string>
     <string name="timetables_results_title">Connections</string>
+    <string name="timetables_leg_label">Leg %1$d</string>
+    <string name="timetables_transfer_label">Transfer</string>
+    <string name="timetables_legs_label">%1$d legs</string>
     <string name="timetables_result_header">%1$s → %2$s  •  %3$s</string>
     <string name="timetables_segment_line">%1$s: %2$s (%3$s) → %4$s (%5$s)</string>
 </resources>
