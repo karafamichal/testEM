@@ -36,6 +36,20 @@ data class TimetableConnection(
         get() = segments.size <= 1
 }
 
+data class TimetablePagingCursor(
+    val citySlug: String,
+    val fromText: String,
+    val toText: String,
+    val handle: String,
+    val searchDate: String,
+    val listedIds: List<String>
+)
+
+data class TimetableSearchResult(
+    val connections: List<TimetableConnection>,
+    val pagingCursor: TimetablePagingCursor?
+)
+
 data class TimetableState(
     val isLoading: Boolean = false,
     val citySlug: String = "slovensko",
@@ -45,8 +59,13 @@ data class TimetableState(
     val directOnly: Boolean = false,
     val fromSuggestions: List<CpStopSuggestion> = emptyList(),
     val toSuggestions: List<CpStopSuggestion> = emptyList(),
+    val selectedFromSuggestion: CpStopSuggestion? = null,
+    val selectedToSuggestion: CpStopSuggestion? = null,
     val isLoadingFromSuggestions: Boolean = false,
     val isLoadingToSuggestions: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val canLoadMore: Boolean = false,
+    val pagingCursor: TimetablePagingCursor? = null,
     val connections: List<TimetableConnection> = emptyList(),
     val errorMessage: String = ""
 )

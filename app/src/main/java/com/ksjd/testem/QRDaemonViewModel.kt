@@ -716,10 +716,11 @@ class QRDaemonViewModel : ViewModel() {
         timeInput: String,
         directOnly: Boolean
     ) {
+        val normalizedCity = normalizeTimetableCitySlug(citySlug)
         val current = _qrState.value.timetableState
         _qrState.value = _qrState.value.copy(
             timetableState = current.copy(
-                citySlug = citySlug,
+                citySlug = normalizedCity,
                 fromInput = fromInput,
                 toInput = toInput,
                 timeInput = timeInput,
@@ -729,25 +730,37 @@ class QRDaemonViewModel : ViewModel() {
     }
 
     fun updateTimetableFromInput(citySlug: String, fromInput: String) {
+        val normalizedCity = normalizeTimetableCitySlug(citySlug)
         val current = _qrState.value.timetableState
         _qrState.value = _qrState.value.copy(
             timetableState = current.copy(
-                citySlug = citySlug,
-                fromInput = fromInput
+                citySlug = normalizedCity,
+                fromInput = fromInput,
+                selectedFromSuggestion = if (current.selectedFromSuggestion?.selectedText == fromInput) {
+                    current.selectedFromSuggestion
+                } else {
+                    null
+                }
             )
         )
-        requestTimetableSuggestions(citySlug, fromInput, isFrom = true)
+        requestTimetableSuggestions(normalizedCity, fromInput, isFrom = true)
     }
 
     fun updateTimetableToInput(citySlug: String, toInput: String) {
+        val normalizedCity = normalizeTimetableCitySlug(citySlug)
         val current = _qrState.value.timetableState
         _qrState.value = _qrState.value.copy(
             timetableState = current.copy(
-                citySlug = citySlug,
-                toInput = toInput
+                citySlug = normalizedCity,
+                toInput = toInput,
+                selectedToSuggestion = if (current.selectedToSuggestion?.selectedText == toInput) {
+                    current.selectedToSuggestion
+                } else {
+                    null
+                }
             )
         )
-        requestTimetableSuggestions(citySlug, toInput, isFrom = false)
+        requestTimetableSuggestions(normalizedCity, toInput, isFrom = false)
     }
 
     fun selectTimetableFromSuggestion(suggestion: CpStopSuggestion) {
@@ -755,6 +768,7 @@ class QRDaemonViewModel : ViewModel() {
         _qrState.value = _qrState.value.copy(
             timetableState = current.copy(
                 fromInput = suggestion.selectedText,
+                selectedFromSuggestion = suggestion,
                 fromSuggestions = emptyList(),
                 isLoadingFromSuggestions = false
             )
@@ -766,6 +780,7 @@ class QRDaemonViewModel : ViewModel() {
         _qrState.value = _qrState.value.copy(
             timetableState = current.copy(
                 toInput = suggestion.selectedText,
+                selectedToSuggestion = suggestion,
                 toSuggestions = emptyList(),
                 isLoadingToSuggestions = false
             )
@@ -852,36 +867,52 @@ class QRDaemonViewModel : ViewModel() {
         timeInput: String,
         directOnly: Boolean
     ) {
-        updateTimetableSearchInputs(citySlug, fromInput, toInput, timeInput, directOnly)
+        val normalizedCity = normalizeTimetableCitySlug(citySlug)
+        updateTimetableSearchInputs(normalizedCity, fromInput, toInput, timeInput, directOnly)
         viewModelScope.launch {
+            val current = _qrState.value.timetableState
             _qrState.emit(
                 _qrState.value.copy(
-                    timetableState = _qrState.value.timetableState.copy(
+                    timetableState = current.copy(
                         isLoading = true,
+                        isLoadingMore = false,
+                        canLoadMore = false,
+                        pagingCursor = null,
+                        connections = emptyList(),
                         errorMessage = ""
                     )
                 )
             )
 
+            val fromSelected = current.selectedFromSuggestion
+                ?.takeIf { it.selectedText.equals(fromInput.trim(), ignoreCase = true) }
+            val toSelected = current.selectedToSuggestion
+                ?.takeIf { it.selectedText.equals(toInput.trim(), ignoreCase = true) }
+
             val result = withContext(Dispatchers.IO) {
                 cpTimetableService.searchConnections(
                     CpTimetableService.SearchRequest(
-                        citySlug = citySlug,
+                        citySlug = normalizedCity,
                         fromInput = fromInput,
                         toInput = toInput,
                         timeInput = timeInput,
-                        directOnly = directOnly
+                        directOnly = directOnly,
+                        fromSuggestion = fromSelected,
+                        toSuggestion = toSelected
                     )
                 )
             }
 
             result.fold(
-                onSuccess = { connections ->
+                onSuccess = { searchResult ->
+                    val connections = searchResult.connections
                     _qrState.emit(
                         _qrState.value.copy(
                             timetableState = _qrState.value.timetableState.copy(
                                 isLoading = false,
                                 connections = connections,
+                                pagingCursor = searchResult.pagingCursor,
+                                canLoadMore = searchResult.pagingCursor != null,
                                 errorMessage = if (connections.isEmpty()) {
                                     "No connections found"
                                 } else {
@@ -902,6 +933,76 @@ class QRDaemonViewModel : ViewModel() {
                     )
                 }
             )
+        }
+    }
+
+    fun loadMoreTimetables() {
+        val current = _qrState.value.timetableState
+        val cursor = current.pagingCursor ?: return
+        if (current.isLoading || current.isLoadingMore || !current.canLoadMore) return
+
+        viewModelScope.launch {
+            _qrState.emit(
+                _qrState.value.copy(
+                    timetableState = _qrState.value.timetableState.copy(
+                        isLoadingMore = true
+                    )
+                )
+            )
+
+            val result = withContext(Dispatchers.IO) {
+                cpTimetableService.loadMoreConnections(cursor)
+            }
+
+            result.fold(
+                onSuccess = { searchResult ->
+                    val state = _qrState.value.timetableState
+                    val newItems = searchResult.connections
+                    val merged = (state.connections + newItems)
+                        .distinctBy { it.id }
+                    _qrState.emit(
+                        _qrState.value.copy(
+                            timetableState = state.copy(
+                                isLoadingMore = false,
+                                connections = merged,
+                                pagingCursor = searchResult.pagingCursor,
+                                canLoadMore = searchResult.pagingCursor != null && newItems.isNotEmpty()
+                            )
+                        )
+                    )
+                },
+                onFailure = {
+                    val state = _qrState.value.timetableState
+                    _qrState.emit(
+                        _qrState.value.copy(
+                            timetableState = state.copy(
+                                isLoadingMore = false,
+                                canLoadMore = false
+                            )
+                        )
+                    )
+                }
+            )
+        }
+    }
+
+    fun hasSavedCredentials(): Boolean {
+        val state = _appState.value
+        return state.email.isNotBlank() && state.password.isNotBlank()
+    }
+
+    fun loginWithSavedCredentials(context: Context) {
+        val state = _appState.value
+        if (state.email.isBlank() || state.password.isBlank()) return
+        if (state.isLoading || state.isLoggedIn) return
+        loginAndRemember(context, state.email, state.password)
+    }
+
+    private fun normalizeTimetableCitySlug(citySlug: String): String {
+        return when (citySlug.trim().lowercase()) {
+            "", "slovakia" -> "slovensko"
+            "banska-bystrica", "banská-bystrica", "banska bystrica", "banská bystrica" -> "banskabystrica"
+            else -> citySlug.trim().lowercase()
         }
     }
 
