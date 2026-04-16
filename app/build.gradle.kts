@@ -96,6 +96,9 @@ dependencies {
     
     // JSON parsing
     implementation("com.google.code.gson:gson:2.10")
+
+    // HTML parsing
+    implementation("org.jsoup:jsoup:1.17.2")
     
     // QR Code generation
     implementation("com.google.zxing:core:3.5.1")

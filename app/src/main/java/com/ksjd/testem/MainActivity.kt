@@ -1,5 +1,6 @@
 package com.ksjd.testem
 
+import android.app.TimePickerDialog
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
@@ -37,6 +38,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalAutofill
 import androidx.compose.ui.platform.LocalAutofillTree
 import androidx.compose.ui.platform.LocalFocusManager
@@ -93,6 +95,7 @@ fun QRDaemonApp(viewModel: QRDaemonViewModel, context: FragmentActivity) {
     val appState by viewModel.appState.collectAsState()
     val qrState by viewModel.qrState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
+    var showTimetables by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.loadSavedCredentials(context.applicationContext)
@@ -114,17 +117,35 @@ fun QRDaemonApp(viewModel: QRDaemonViewModel, context: FragmentActivity) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    if (showTimetables) {
+        TimetablesScreen(
+            qrState = qrState,
+            viewModel = viewModel,
+            onBack = { showTimetables = false }
+        )
+        return
+    }
+
     when {
-        !appState.isPinSet -> PinSetupScreen(viewModel, context)
-        !appState.isAppUnlocked -> PinUnlockScreen(viewModel, appState, context)
+        !appState.isPinSet -> PinSetupScreen(viewModel, context, onOpenTimetables = { showTimetables = true })
+        !appState.isAppUnlocked -> PinUnlockScreen(
+            viewModel,
+            appState,
+            context,
+            onOpenTimetables = { showTimetables = true }
+        )
         appState.isLoggedIn -> QRDaemonScreen(viewModel, qrState, appState, context)
-        else -> LoginScreen(viewModel, appState, context)
+        else -> LoginScreen(viewModel, appState, context, onOpenTimetables = { showTimetables = true })
     }
 }
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
+fun PinSetupScreen(
+    viewModel: QRDaemonViewModel,
+    context: FragmentActivity,
+    onOpenTimetables: () -> Unit = {}
+) {
     var pin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
@@ -233,16 +254,29 @@ fun PinSetupScreen(viewModel: QRDaemonViewModel, context: FragmentActivity) {
             ) {
                 Text(stringResource(R.string.pin_save_button))
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onOpenTimetables,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text(stringResource(R.string.timetables_open_button))
+            }
         }
     }
 }
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: FragmentActivity) {
+fun PinUnlockScreen(
+    viewModel: QRDaemonViewModel,
+    appState: AppState,
+    context: FragmentActivity,
+    onOpenTimetables: () -> Unit = {}
+) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
-    var hasPrompted by remember { mutableStateOf(false) }
     val incorrectPinMessage = stringResource(R.string.pin_error_incorrect)
     val submit = {
         val ok = viewModel.verifyPin(context.applicationContext, pin)
@@ -275,13 +309,6 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
             .setSubtitle(promptSubtitle)
             .setNegativeButtonText(promptNegative)
             .build()
-    }
-
-    LaunchedEffect(biometricsAvailable, appState.biometricEnabled) {
-        if (biometricsAvailable && appState.biometricEnabled && !hasPrompted) {
-            hasPrompted = true
-            prompt.authenticate(promptInfo)
-        }
     }
 
     AppBackground(modifier = Modifier.fillMaxSize()) {
@@ -360,6 +387,15 @@ fun PinUnlockScreen(viewModel: QRDaemonViewModel, appState: AppState, context: F
                     Text(stringResource(R.string.use_biometrics))
                 }
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onOpenTimetables,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text(stringResource(R.string.timetables_open_button))
+            }
         }
     }
 }
@@ -398,7 +434,12 @@ fun rememberBiometricPrompt(
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
-fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: FragmentActivity) {
+fun LoginScreen(
+    viewModel: QRDaemonViewModel,
+    appState: AppState,
+    context: FragmentActivity,
+    onOpenTimetables: () -> Unit = {}
+) {
     var email by remember(appState.email) { mutableStateOf(appState.email) }
     var password by remember(appState.password) { mutableStateOf(appState.password) }
     val focusManager = LocalFocusManager.current
@@ -564,6 +605,17 @@ fun LoginScreen(viewModel: QRDaemonViewModel, appState: AppState, context: Fragm
                 } else {
                     Text(stringResource(R.string.login_button))
                 }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onOpenTimetables,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(18.dp)
+            ) {
+                Text(stringResource(R.string.timetables_open_button))
             }
         }
     }
@@ -1965,6 +2017,335 @@ fun ControlButtonsRow(
                 )
             } else {
                 Text(stringResource(R.string.history_button))
+            }
+        }
+    }
+}
+
+@Composable
+fun TimetablesScreen(
+    qrState: QRState,
+    viewModel: QRDaemonViewModel,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val state = qrState.timetableState
+    var citySlug by remember(state.citySlug) { mutableStateOf(state.citySlug) }
+    var fromInput by remember(state.fromInput) { mutableStateOf(state.fromInput) }
+    var toInput by remember(state.toInput) { mutableStateOf(state.toInput) }
+    var timeInput by remember(state.timeInput) { mutableStateOf(state.timeInput) }
+    var directOnly by remember(state.directOnly) { mutableStateOf(state.directOnly) }
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    if (showTimePicker) {
+        LaunchedEffect(showTimePicker) {
+            val now = Calendar.getInstance()
+            val parsed = Regex("^(\\d{1,2}):(\\d{2})$")
+                .find(timeInput)
+                ?.groupValues
+                ?.drop(1)
+                ?.mapNotNull { it.toIntOrNull() }
+            val initialHour = parsed?.getOrNull(0)?.coerceIn(0, 23) ?: now.get(Calendar.HOUR_OF_DAY)
+            val initialMinute = parsed?.getOrNull(1)?.coerceIn(0, 59) ?: now.get(Calendar.MINUTE)
+            val dialog = TimePickerDialog(
+                context,
+                { _, hour, minute ->
+                    timeInput = String.format(Locale.getDefault(), "%02d:%02d", hour, minute)
+                },
+                initialHour,
+                initialMinute,
+                true
+            )
+            dialog.setOnDismissListener { showTimePicker = false }
+            dialog.show()
+        }
+    }
+
+    val cityOptions = listOf(
+        "slovensko" to stringResource(R.string.timetables_city_slovakia),
+        "zvolen" to stringResource(R.string.timetables_city_zvolen),
+        "banska-bystrica" to stringResource(R.string.timetables_city_banska_bystrica)
+    )
+
+    AppBackground(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            TopAppBar(
+                navigation = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                },
+                title = {
+                    Text(
+                        stringResource(R.string.timetables_title),
+                        color = MaterialTheme.colorScheme.onBackground,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SettingsSectionCard(
+                    title = stringResource(R.string.timetables_search_title),
+                    subtitle = stringResource(R.string.timetables_search_subtitle)
+                ) {
+                    cityOptions.forEach { (slug, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    citySlug = slug
+                                    viewModel.updateTimetableFromInput(slug, fromInput)
+                                    viewModel.updateTimetableToInput(slug, toInput)
+                                },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = citySlug == slug,
+                                onClick = {
+                                    citySlug = slug
+                                    viewModel.updateTimetableFromInput(slug, fromInput)
+                                    viewModel.updateTimetableToInput(slug, toInput)
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(label)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = fromInput,
+                        onValueChange = {
+                            fromInput = it
+                            viewModel.updateTimetableFromInput(citySlug, it)
+                        },
+                        label = { Text(stringResource(R.string.timetables_from_label)) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (state.isLoadingFromSuggestions) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+
+                    if (state.fromSuggestions.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Column {
+                                state.fromSuggestions.take(6).forEach { suggestion ->
+                                    Text(
+                                        text = suggestion.selectedText,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                fromInput = suggestion.selectedText
+                                                viewModel.selectTimetableFromSuggestion(suggestion)
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = toInput,
+                        onValueChange = {
+                            toInput = it
+                            viewModel.updateTimetableToInput(citySlug, it)
+                        },
+                        label = { Text(stringResource(R.string.timetables_to_label)) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (state.isLoadingToSuggestions) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+
+                    if (state.toSuggestions.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Column {
+                                state.toSuggestions.take(6).forEach { suggestion ->
+                                    Text(
+                                        text = suggestion.selectedText,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                toInput = suggestion.selectedText
+                                                viewModel.selectTimetableToSuggestion(suggestion)
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = timeInput,
+                        onValueChange = {},
+                        label = { Text(stringResource(R.string.timetables_time_label)) },
+                        placeholder = { Text(stringResource(R.string.timetables_time_now_hint)) },
+                        readOnly = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showTimePicker = true }
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(stringResource(R.string.timetables_time_pick_button))
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            stringResource(R.string.timetables_direct_only_label),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = directOnly,
+                            onCheckedChange = { directOnly = it }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = {
+                            val effectiveTime = timeInput.ifBlank {
+                                val now = Calendar.getInstance()
+                                String.format(
+                                    Locale.getDefault(),
+                                    "%02d:%02d",
+                                    now.get(Calendar.HOUR_OF_DAY),
+                                    now.get(Calendar.MINUTE)
+                                )
+                            }
+                            timeInput = effectiveTime
+                            viewModel.loadTimetables(
+                                citySlug = citySlug,
+                                fromInput = fromInput,
+                                toInput = toInput,
+                                timeInput = effectiveTime,
+                                directOnly = directOnly
+                            )
+                        },
+                        enabled = !state.isLoading && fromInput.isNotBlank() && toInput.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        if (state.isLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(stringResource(R.string.timetables_search_button))
+                        }
+                    }
+                }
+
+                if (state.errorMessage.isNotBlank()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text(
+                            state.errorMessage,
+                            modifier = Modifier.padding(12.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+
+                if (state.connections.isNotEmpty()) {
+                    SettingsSectionCard(title = stringResource(R.string.timetables_results_title)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            state.connections.forEach { connection ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (connection.isDirect) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        }
+                                    )
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            stringResource(
+                                                R.string.timetables_result_header,
+                                                connection.departureTime,
+                                                connection.arrivalTime,
+                                                connection.totalDuration
+                                            ),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        connection.segments.forEach { segment ->
+                                            Text(
+                                                stringResource(
+                                                    R.string.timetables_segment_line,
+                                                    segment.line,
+                                                    segment.departureStop,
+                                                    segment.departureTime,
+                                                    segment.arrivalStop,
+                                                    segment.arrivalTime
+                                                ),
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (segment.operatorName.isNotBlank()) {
+                                                Text(
+                                                    segment.operatorName,
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

@@ -9,6 +9,8 @@ import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -22,6 +24,7 @@ data class QRState(
     val tokenBase64: String = "",
     val userName: String = "",
     val accountDetails: AccountDetails = AccountDetails(),
+    val timetableState: TimetableState = TimetableState(),
     val historyState: CardHistoryState = CardHistoryState(),
     val errorMessage: String = "",
     val statusMessage: String = "",
@@ -58,6 +61,9 @@ class QRDaemonViewModel : ViewModel() {
     val appState: StateFlow<AppState> = _appState
     
     private var qrService: QRDaemonService? = null
+    private val cpTimetableService = CpTimetableService()
+    private var fromSuggestionJob: Job? = null
+    private var toSuggestionJob: Job? = null
     private var credentialsManager: CredentialsManager? = null
     private var lastBackgroundTimeMs: Long = 0
     private var appContext: Context? = null
@@ -695,6 +701,202 @@ class QRDaemonViewModel : ViewModel() {
                             historyState = _qrState.value.historyState.copy(
                                 isLoading = false,
                                 errorMessage = error.message ?: "Failed to load history"
+                            )
+                        )
+                    )
+                }
+            )
+        }
+    }
+
+    fun updateTimetableSearchInputs(
+        citySlug: String,
+        fromInput: String,
+        toInput: String,
+        timeInput: String,
+        directOnly: Boolean
+    ) {
+        val current = _qrState.value.timetableState
+        _qrState.value = _qrState.value.copy(
+            timetableState = current.copy(
+                citySlug = citySlug,
+                fromInput = fromInput,
+                toInput = toInput,
+                timeInput = timeInput,
+                directOnly = directOnly
+            )
+        )
+    }
+
+    fun updateTimetableFromInput(citySlug: String, fromInput: String) {
+        val current = _qrState.value.timetableState
+        _qrState.value = _qrState.value.copy(
+            timetableState = current.copy(
+                citySlug = citySlug,
+                fromInput = fromInput
+            )
+        )
+        requestTimetableSuggestions(citySlug, fromInput, isFrom = true)
+    }
+
+    fun updateTimetableToInput(citySlug: String, toInput: String) {
+        val current = _qrState.value.timetableState
+        _qrState.value = _qrState.value.copy(
+            timetableState = current.copy(
+                citySlug = citySlug,
+                toInput = toInput
+            )
+        )
+        requestTimetableSuggestions(citySlug, toInput, isFrom = false)
+    }
+
+    fun selectTimetableFromSuggestion(suggestion: CpStopSuggestion) {
+        val current = _qrState.value.timetableState
+        _qrState.value = _qrState.value.copy(
+            timetableState = current.copy(
+                fromInput = suggestion.selectedText,
+                fromSuggestions = emptyList(),
+                isLoadingFromSuggestions = false
+            )
+        )
+    }
+
+    fun selectTimetableToSuggestion(suggestion: CpStopSuggestion) {
+        val current = _qrState.value.timetableState
+        _qrState.value = _qrState.value.copy(
+            timetableState = current.copy(
+                toInput = suggestion.selectedText,
+                toSuggestions = emptyList(),
+                isLoadingToSuggestions = false
+            )
+        )
+    }
+
+    private fun requestTimetableSuggestions(citySlug: String, query: String, isFrom: Boolean) {
+        val trimmed = query.trim()
+        if (isFrom) {
+            fromSuggestionJob?.cancel()
+        } else {
+            toSuggestionJob?.cancel()
+        }
+        if (trimmed.length < 2) {
+            val current = _qrState.value.timetableState
+            _qrState.value = _qrState.value.copy(
+                timetableState = if (isFrom) {
+                    current.copy(fromSuggestions = emptyList(), isLoadingFromSuggestions = false)
+                } else {
+                    current.copy(toSuggestions = emptyList(), isLoadingToSuggestions = false)
+                }
+            )
+            return
+        }
+
+        val launchedJob = viewModelScope.launch {
+            val current = _qrState.value.timetableState
+            _qrState.value = _qrState.value.copy(
+                timetableState = if (isFrom) {
+                    current.copy(isLoadingFromSuggestions = true)
+                } else {
+                    current.copy(isLoadingToSuggestions = true)
+                }
+            )
+            delay(250)
+            val result = withContext(Dispatchers.IO) {
+                cpTimetableService.suggestStops(citySlug, trimmed)
+            }
+            val latest = _qrState.value.timetableState
+            result.fold(
+                onSuccess = { suggestions ->
+                    _qrState.value = _qrState.value.copy(
+                        timetableState = if (isFrom) {
+                            latest.copy(
+                                fromSuggestions = suggestions,
+                                isLoadingFromSuggestions = false
+                            )
+                        } else {
+                            latest.copy(
+                                toSuggestions = suggestions,
+                                isLoadingToSuggestions = false
+                            )
+                        }
+                    )
+                },
+                onFailure = {
+                    _qrState.value = _qrState.value.copy(
+                        timetableState = if (isFrom) {
+                            latest.copy(
+                                fromSuggestions = emptyList(),
+                                isLoadingFromSuggestions = false
+                            )
+                        } else {
+                            latest.copy(
+                                toSuggestions = emptyList(),
+                                isLoadingToSuggestions = false
+                            )
+                        }
+                    )
+                }
+            )
+        }
+        if (isFrom) {
+            fromSuggestionJob = launchedJob
+        } else {
+            toSuggestionJob = launchedJob
+        }
+    }
+
+    fun loadTimetables(
+        citySlug: String,
+        fromInput: String,
+        toInput: String,
+        timeInput: String,
+        directOnly: Boolean
+    ) {
+        updateTimetableSearchInputs(citySlug, fromInput, toInput, timeInput, directOnly)
+        viewModelScope.launch {
+            _qrState.emit(
+                _qrState.value.copy(
+                    timetableState = _qrState.value.timetableState.copy(
+                        isLoading = true,
+                        errorMessage = ""
+                    )
+                )
+            )
+
+            val result = withContext(Dispatchers.IO) {
+                cpTimetableService.searchConnections(
+                    CpTimetableService.SearchRequest(
+                        citySlug = citySlug,
+                        fromInput = fromInput,
+                        toInput = toInput,
+                        timeInput = timeInput,
+                        directOnly = directOnly
+                    )
+                )
+            }
+
+            result.fold(
+                onSuccess = { connections ->
+                    _qrState.emit(
+                        _qrState.value.copy(
+                            timetableState = _qrState.value.timetableState.copy(
+                                isLoading = false,
+                                connections = connections,
+                                errorMessage = if (connections.isEmpty()) {
+                                    "No connections found"
+                                } else {
+                                    ""
+                                }
+                            )
+                        )
+                    )
+                },
+                onFailure = { error ->
+                    _qrState.emit(
+                        _qrState.value.copy(
+                            timetableState = _qrState.value.timetableState.copy(
+                                isLoading = false,
+                                errorMessage = error.message ?: "Failed to load timetables"
                             )
                         )
                     )

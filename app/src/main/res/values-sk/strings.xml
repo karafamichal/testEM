@@ -148,4 +148,21 @@
     <string name="status_session_ready">Relácia pripravená</string>
     <string name="error_login_failed">Prihlásenie zlyhalo: %1$s</string>
     <string name="login_error_fill_fields">Vyplňte všetky polia</string>
+    <string name="timetables_title">Autobusové cestovné poriadky</string>
+    <string name="timetables_search_title">Vyhľadanie spojenia</string>
+    <string name="timetables_search_subtitle">Vyhľadávajte medzimestské trasy pomocou údajov cp.sk.</string>
+    <string name="timetables_city_slovakia">Slovensko (celá krajina)</string>
+    <string name="timetables_city_zvolen">Zvolen</string>
+    <string name="timetables_city_banska_bystrica">Banská Bystrica</string>
+    <string name="timetables_from_label">Odkiaľ</string>
+    <string name="timetables_to_label">Kam</string>
+    <string name="timetables_time_label">Čas (HH:MM)</string>
+    <string name="timetables_time_now_hint">Pouzije sa aktualny cas</string>
+    <string name="timetables_time_pick_button">Vybrat cas</string>
+    <string name="timetables_direct_only_label">Iba priame spojenia</string>
+    <string name="timetables_open_button">Otvorit autobusove cestovne poriadky</string>
+    <string name="timetables_search_button">Vyhľadať spojenia</string>
+    <string name="timetables_results_title">Spojenia</string>
+    <string name="timetables_result_header">%1$s → %2$s  •  %3$s</string>
+    <string name="timetables_segment_line">%1$s: %2$s (%3$s) → %4$s (%5$s)</string>
 </resources>
