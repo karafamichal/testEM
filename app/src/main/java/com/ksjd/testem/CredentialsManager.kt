@@ -164,6 +164,15 @@ class CredentialsManager(context: Context) {
         return prefs.getInt("lock_timeout_seconds", 0)
     }
 
+    fun saveLowCreditWarningThreshold(threshold: Double) {
+        prefs.edit().putString("low_credit_warning_threshold", threshold.toString()).apply()
+    }
+
+    fun getLowCreditWarningThreshold(): Double {
+        val stored = prefs.getString("low_credit_warning_threshold", null)
+        return stored?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: 1.0
+    }
+
     fun saveLanguageCode(code: String) {
         prefs.edit().putString("language_code", code).apply()
     }

@@ -702,7 +702,7 @@ fun LayoutContent(
                 null
             } else {
                 val credit = qrState.accountDetails.creditLastBalance
-                if (credit != null && credit < 1.0) {
+                if (credit != null && credit < appState.lowCreditWarningThreshold) {
                     LayoutSectionContent { LowCreditWarningCard(qrState.accountDetails) }
                 } else {
                     null
@@ -1016,6 +1016,47 @@ fun SettingsRootContent(
                     Text(label)
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        var lowCreditThresholdInput by remember { mutableStateOf("") }
+        var lastAppliedLowCreditThreshold by remember { mutableStateOf<Double?>(null) }
+
+        LaunchedEffect(appState.lowCreditWarningThreshold) {
+            val threshold = appState.lowCreditWarningThreshold.coerceAtLeast(0.0)
+            lowCreditThresholdInput = threshold.toString()
+            lastAppliedLowCreditThreshold = threshold
+        }
+
+        SettingsSectionCard(title = stringResource(R.string.low_credit_threshold_title)) {
+            Text(
+                text = stringResource(R.string.low_credit_threshold_description),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = lowCreditThresholdInput,
+                onValueChange = {
+                    val normalized = it.replace(',', '.')
+                    val isValidInput = normalized.matches(Regex("^[0-9]*([.][0-9]{0,2})?$"))
+                    if (it.length <= 8 && isValidInput) {
+                        lowCreditThresholdInput = it
+                        val value = normalized.toDoubleOrNull()
+                        if (value != null && value >= 0.0 && value != lastAppliedLowCreditThreshold) {
+                            viewModel.setLowCreditWarningThreshold(
+                                context.applicationContext,
+                                value
+                            )
+                            lastAppliedLowCreditThreshold = value
+                        }
+                    }
+                },
+                label = { Text(stringResource(R.string.low_credit_threshold_label)) },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -1957,14 +1998,6 @@ fun HistoryScreen(
                     )
                 },
                 actions = {
-                    if (historyState.isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .size(18.dp)
-                                .padding(end = 8.dp),
-                            strokeWidth = 2.dp
-                        )
-                    }
                     TextButton(onClick = onRefresh, enabled = !historyState.isLoading) {
                         Text(stringResource(R.string.refresh_button))
                     }

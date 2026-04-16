@@ -46,6 +46,7 @@ data class AppState(
     val isAppUnlocked: Boolean = false,
     val biometricEnabled: Boolean = true,
     val lockTimeoutSeconds: Int = 0,
+    val lowCreditWarningThreshold: Double = 1.0,
     val languageCode: String = "sk"
 )
 
@@ -219,11 +220,13 @@ class QRDaemonViewModel : ViewModel() {
         val pinSet = manager.isPinSet()
         val biometricEnabled = manager.getBiometricEnabled()
         val lockTimeout = manager.getLockTimeoutSeconds()
+        val lowCreditThreshold = manager.getLowCreditWarningThreshold()
         _appState.value = _appState.value.copy(
             isPinSet = pinSet,
             isAppUnlocked = !pinSet,
             biometricEnabled = biometricEnabled,
-            lockTimeoutSeconds = lockTimeout
+            lockTimeoutSeconds = lockTimeout,
+            lowCreditWarningThreshold = lowCreditThreshold
         )
     }
 
@@ -365,6 +368,14 @@ class QRDaemonViewModel : ViewModel() {
         credentialsManager = manager
         manager.saveLockTimeoutSeconds(seconds)
         _appState.value = _appState.value.copy(lockTimeoutSeconds = seconds)
+    }
+
+    fun setLowCreditWarningThreshold(context: Context, threshold: Double) {
+        val normalized = threshold.coerceAtLeast(0.0)
+        val manager = credentialsManager ?: CredentialsManager(context)
+        credentialsManager = manager
+        manager.saveLowCreditWarningThreshold(normalized)
+        _appState.value = _appState.value.copy(lowCreditWarningThreshold = normalized)
     }
 
     fun setLanguageCode(context: Context, languageCode: String) {
