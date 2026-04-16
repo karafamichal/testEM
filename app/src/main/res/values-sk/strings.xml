@@ -61,7 +61,7 @@
     <string name="qr_code_fullscreen_content_desc">QR kód na celú obrazovku</string>
     <string name="status_label">Stav:</string>
     <string name="low_credit_title">Upozornenie: Nízky kredit</string>
-    <string name="low_credit_message">Váš kredit je nízky (%1$.2f %2$s). Dobite si kredit, aby ste predišli prerušeniu služby.</string>
+    <string name="low_credit_message">Dobite si kredit, inak si už čoskoro nebudete môcť kúpiť lístok (%1$.2f %2$s).</string>
     <string name="low_credit_threshold_title">Limit upozornenia na nízky kredit</string>
     <string name="low_credit_threshold_description">Zobraz upozornenie, keď kredit klesne pod túto hodnotu.</string>
     <string name="low_credit_threshold_label">Limit kreditu (EUR)</string>
@@ -149,7 +149,7 @@
     <string name="status_session_ready">Relácia pripravená</string>
     <string name="error_login_failed">Prihlásenie zlyhalo: %1$s</string>
     <string name="login_error_fill_fields">Vyplňte všetky polia</string>
-    <string name="timetables_title">Autobusové cestovné poriadky</string>
+    <string name="timetables_title">Cestovné poriadky</string>
     <string name="timetables_search_title">Vyhľadanie spojenia</string>
     <string name="timetables_search_subtitle">Vyhľadávajte medzimestské trasy pomocou údajov cp.sk.</string>
     <string name="timetables_city_slovakia">Slovensko (celá krajina)</string>
@@ -162,7 +162,7 @@
     <string name="timetables_time_pick_button">Vybrat cas</string>
     <string name="timetables_direct_only_label">Iba priame spojenia</string>
     <string name="timetables_shortcut_description">Prejdite do vyhľadávania autobusových spojov bez opustenia aplikácie.</string>
-    <string name="timetables_open_button">Otvoriť autobusové cestovné poriadky</string>
+    <string name="timetables_open_button">Cestovné poriadky</string>
     <string name="timetables_search_button">Vyhľadať</string>
     <string name="timetables_results_title">Spojenia</string>
     <string name="timetables_leg_label">Úsek %1$d</string>

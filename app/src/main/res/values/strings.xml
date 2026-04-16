@@ -61,7 +61,7 @@
     <string name="qr_code_fullscreen_content_desc">QR Code Fullscreen</string>
     <string name="status_label">Status:</string>
     <string name="low_credit_title">Warning: Low Credit</string>
-    <string name="low_credit_message">Your credit is low (%1$.2f %2$s). Please top up to avoid service interruption.</string>
+    <string name="low_credit_message">Top up your credit or you soon won't be able to buy a ticket (%1$.2f %2$s).</string>
     <string name="low_credit_threshold_title">Low credit warning threshold</string>
     <string name="low_credit_threshold_description">Show warning when credit drops below this value.</string>
     <string name="low_credit_threshold_label">Credit threshold (EUR)</string>
@@ -149,7 +149,7 @@
     <string name="status_session_ready">Session ready</string>
     <string name="error_login_failed">Login failed: %1$s</string>
     <string name="login_error_fill_fields">Please fill in all fields</string>
-    <string name="timetables_title">Bus Timetables</string>
+    <string name="timetables_title">Timetables</string>
     <string name="timetables_search_title">Find connection</string>
     <string name="timetables_search_subtitle">Search intercity routes using cp.sk data.</string>
     <string name="timetables_city_slovakia">Slovakia (nationwide)</string>
@@ -162,7 +162,7 @@
     <string name="timetables_time_pick_button">Select time</string>
     <string name="timetables_direct_only_label">Direct connections only</string>
     <string name="timetables_shortcut_description">Jump to the bus timetable search without leaving the app.</string>
-    <string name="timetables_open_button">Open bus timetables</string>
+    <string name="timetables_open_button">Timetables</string>
     <string name="timetables_search_button">Search</string>
     <string name="timetables_results_title">Connections</string>
     <string name="timetables_leg_label">Leg %1$d</string>
