@@ -948,7 +948,7 @@ class QRDaemonViewModel : ViewModel() {
     fun loadMoreTimetables() {
         val current = _qrState.value.timetableState
         val cursor = current.pagingCursor ?: return
-        if (current.isLoading || current.isLoadingMore || !current.canLoadMore) return
+        if (current.isLoading || current.isLoadingMore) return
 
         viewModelScope.launch {
             _qrState.emit(
@@ -975,7 +975,9 @@ class QRDaemonViewModel : ViewModel() {
                                 isLoadingMore = false,
                                 connections = merged,
                                 pagingCursor = searchResult.pagingCursor,
-                                canLoadMore = searchResult.pagingCursor != null && newItems.isNotEmpty()
+                                canLoadMore = searchResult.pagingCursor != null && 
+                                    newItems.isNotEmpty() && 
+                                    searchResult.pagingCursor.allowNext
                             )
                         )
                     )

@@ -32,61 +32,71 @@ class CpTimetableService(
         return try {
             val city = normalizeCitySlug(request.citySlug)
             val routePrefixes = routePrefixCandidates(city)
-            val fromResolved = request.fromSuggestion ?: resolveStop(city, request.fromInput)
-                ?: throw IllegalStateException("Unable to resolve departure stop")
-            val toResolved = request.toSuggestion ?: resolveStop(city, request.toInput)
-                ?: throw IllegalStateException("Unable to resolve destination stop")
-
-            val form = FormBody.Builder()
-                .add("From", fromResolved.selectedText)
-                .add("FromHidden", fromResolved.toHiddenFieldValue())
-                .add("PositionFromHidden", fromResolved.toPositionFieldValue())
-                .add("To", toResolved.selectedText)
-                .add("ToHidden", toResolved.toHiddenFieldValue())
-                .add("PositionToHidden", toResolved.toPositionFieldValue())
-                .add("AdvancedForm.Via[0]", "")
-                .add("AdvancedForm.ViaHidden[0]", "")
-                .add("AdvancedForm_ViaHiddenCoor_0_", "")
-                .add("Date", "")
-                .add("Time", request.timeInput.trim())
-                .add("IsArr", "False")
-                .add("OnlyDirect", if (request.directOnly) "True" else "False")
-                .add("ViaReverse", "False")
-                .add("DefaultMaxArcLengthFrom", "true")
-                .build()
 
             var searchResult = TimetableSearchResult(emptyList(), null)
             for (routePrefix in routePrefixes) {
-                val searchUrl = buildPageUrl(routePrefix, "/spojenie/")
-                val searchReq = Request.Builder()
-                    .url(searchUrl)
-                    .post(form)
-                    .addHeader("User-Agent", "Mozilla/5.0")
-                    .addHeader("Referer", searchUrl)
-                    .build()
+                try {
+                    val fromResolved = request.fromSuggestion ?: resolveStop(city, request.fromInput)
+                        ?: CpStopSuggestion(request.fromInput, request.fromInput, request.fromInput)
+                    val toResolved = request.toSuggestion ?: resolveStop(city, request.toInput)
+                        ?: CpStopSuggestion(request.toInput, request.toInput, request.toInput)
 
-                val candidate = client.newCall(searchReq).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        throw IllegalStateException("CP search failed: HTTP ${response.code}")
+                    val form = FormBody.Builder()
+                        .add("From", fromResolved.selectedText)
+                        .add("FromHidden", fromResolved.toHiddenFieldValue())
+                        .add("PositionFromHidden", fromResolved.toPositionFieldValue())
+                        .add("To", toResolved.selectedText)
+                        .add("ToHidden", toResolved.toHiddenFieldValue())
+                        .add("PositionToHidden", toResolved.toPositionFieldValue())
+                        .add("AdvancedForm.Via[0]", "")
+                        .add("AdvancedForm.ViaHidden[0]", "")
+                        .add("AdvancedForm_ViaHiddenCoor_0_", "")
+                        .add("Date", "")
+                        .add("Time", request.timeInput.trim())
+                        .add("IsArr", "False")
+                        .add("OnlyDirect", if (request.directOnly) "True" else "False")
+                        .add("ViaReverse", "False")
+                        .add("DefaultMaxArcLengthFrom", "true")
+                        .build()
+
+                    val searchUrl = buildPageUrl(routePrefix, "/spojenie/")
+                    val searchReq = Request.Builder()
+                        .url(searchUrl)
+                        .post(form)
+                        .addHeader("User-Agent", "Mozilla/5.0")
+                        .addHeader("Referer", searchUrl)
+                        .build()
+
+                    val httpResponse = client.newCall(searchReq).execute()
+                    val candidate = try {
+                        if (!httpResponse.isSuccessful) {
+                            TimetableSearchResult(emptyList(), null)
+                        } else {
+                            val html = httpResponse.body?.string().orEmpty()
+                            val connections = parseConnectionsFromHtml(html)
+                            val pagingCursor = extractPagingCursor(
+                                html = html,
+                                citySlug = city,
+                                routePrefix = routePrefix,
+                                fromText = fromResolved.selectedText,
+                                toText = toResolved.selectedText,
+                                listedIds = connections.map { it.id }
+                            )
+                            TimetableSearchResult(
+                                connections = connections,
+                                pagingCursor = pagingCursor
+                            )
+                        }
+                    } finally {
+                        httpResponse.close()
                     }
-                    val html = response.body?.string().orEmpty()
-                    val connections = parseConnectionsFromHtml(html)
-                    val pagingCursor = extractPagingCursor(
-                        html = html,
-                        citySlug = city,
-                        routePrefix = routePrefix,
-                        fromText = fromResolved.selectedText,
-                        toText = toResolved.selectedText,
-                        listedIds = connections.map { it.id }
-                    )
-                    TimetableSearchResult(
-                        connections = connections,
-                        pagingCursor = pagingCursor
-                    )
-                }
-                searchResult = candidate
-                if (candidate.connections.isNotEmpty()) {
-                    break
+                    searchResult = candidate
+                    if (candidate.connections.isNotEmpty()) {
+                        break
+                    }
+                } catch (e: Exception) {
+                    // Continue to next route prefix on error
+                    continue
                 }
             }
             Result.success(searchResult)
@@ -132,22 +142,18 @@ class CpTimetableService(
                 .addHeader("Referer", refererUrl)
                 .build()
 
-            val pagingResult = client.newCall(pagingReq).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw IllegalStateException("CP paging failed: HTTP ${response.code}")
-                }
-
-                val raw = response.body?.string().orEmpty()
+            val httpResponse = client.newCall(pagingReq).execute()
+            val pagingResult = if (!httpResponse.isSuccessful) {
+                throw IllegalStateException("CP paging failed: HTTP ${httpResponse.code}")
+            } else {
+                val raw = httpResponse.body?.string().orEmpty()
                 val json = unwrapJsonp(raw)
-                val payload = try {
-                    gson.fromJson(json, JsonObject::class.java)
-                } catch (_: Exception) {
-                    null
-                }
+                val payload = runCatching { gson.fromJson(json, JsonObject::class.java) }.getOrNull()
                 val chunks = payload
                     ?.getAsJsonArray("newConnections")
                     ?.mapNotNull { it?.asString }
                     .orEmpty()
+                val allowNext = payload?.get("allowNext")?.asBoolean ?: false
 
                 if (chunks.isNotEmpty()) {
                     val combinedHtml = chunks.joinToString("\n")
@@ -156,7 +162,7 @@ class CpTimetableService(
                         val updatedIds = (cursor.listedIds + newConnections.map { it.id }).distinct()
                         TimetableSearchResult(
                             connections = newConnections,
-                            pagingCursor = cursor.copy(listedIds = updatedIds)
+                            pagingCursor = cursor.copy(listedIds = updatedIds, allowNext = allowNext)
                         )
                     } else {
                         TimetableSearchResult(emptyList(), null)
@@ -165,6 +171,7 @@ class CpTimetableService(
                     TimetableSearchResult(emptyList(), null)
                 }
             }
+            httpResponse.close()
             Result.success(pagingResult)
         } catch (error: Exception) {
             Result.failure(error)
@@ -213,12 +220,13 @@ class CpTimetableService(
                 .addHeader("Referer", refererUrl)
                 .build()
 
-            val suggestions = client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) {
+            val httpResponse = client.newCall(req).execute()
+            val suggestions = try {
+                if (!httpResponse.isSuccessful) {
                     emptyList()
                 } else {
-                val raw = response.body?.string().orEmpty()
-                val json = unwrapJsonp(raw)
+                    val raw = httpResponse.body?.string().orEmpty()
+                    val json = unwrapJsonp(raw)
                     val arr = runCatching { gson.fromJson(json, JsonArray::class.java) }.getOrNull()
                     if (arr == null) {
                         emptyList()
@@ -247,6 +255,8 @@ class CpTimetableService(
                         parsed
                     }
                 }
+            } finally {
+                httpResponse.close()
             }
 
             if (suggestions.isNotEmpty()) {
@@ -316,12 +326,24 @@ class CpTimetableService(
     ): TimetablePagingCursor? {
         if (listedIds.isEmpty()) return null
 
-        val handle = extractJsonLikeToken(html, "handle")
-        val searchDate = Regex("""[\"']?searchDate[\"']?\s*:\s*[\"']([^\"']+)[\"']""")
-            .find(html)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?.trim()
+        val handle = listOf("handle", "handleconnthere")
+            .asSequence()
+            .map { extractJsonLikeToken(html, it) }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
+        val searchDate = listOf(
+            Regex("""[\"']?searchDate[\"']?\s*:\s*[\"']([^\"']+)[\"']"""),
+            Regex("""[\"']?dtSearchDate[\"']?\s*:\s*[\"']([^\"']+)[\"']""")
+        )
+            .asSequence()
+            .mapNotNull { pattern ->
+                pattern.find(html)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+            }
+            .firstOrNull()
             .orEmpty()
 
         if (handle.isBlank() || searchDate.isBlank()) return null
@@ -347,7 +369,7 @@ class CpTimetableService(
 
     private fun routePrefixCandidates(normalizedCity: String): List<String> {
         return if (normalizedCity == "slovensko") {
-            listOf("/slovensko", "")
+            listOf("/bus")
         } else {
             listOf("/$normalizedCity")
         }

@@ -2226,14 +2226,16 @@ fun TimetablesScreen(
         "banskabystrica" to stringResource(R.string.timetables_city_banska_bystrica)
     )
 
-    LaunchedEffect(state.connections.size, state.canLoadMore, state.isLoading, state.isLoadingMore) {
+    LaunchedEffect(state.canLoadMore, state.isLoading, state.isLoadingMore) {
         snapshotFlow {
-            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-            lastVisible >= state.connections.lastIndex - 1 && state.connections.isNotEmpty()
+            val layoutInfo = listState.layoutInfo
+            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val totalItems = layoutInfo.totalItemsCount
+            totalItems > 0 && lastVisible >= totalItems - 2
         }
             .distinctUntilChanged()
-            .collect { shouldLoadMore ->
-                if (shouldLoadMore && state.canLoadMore && !state.isLoading && !state.isLoadingMore) {
+            .collect { nearEnd ->
+                if (nearEnd && state.canLoadMore && !state.isLoading && !state.isLoadingMore) {
                     viewModel.loadMoreTimetables()
                 }
             }
@@ -2607,6 +2609,30 @@ fun TimetablesScreen(
                                 horizontalArrangement = Arrangement.Center
                             ) {
                                 CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                            }
+                        }
+                    }
+
+                    if (state.connections.isNotEmpty()) {
+                        item {
+                            Button(
+                                onClick = { viewModel.loadMoreTimetables() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp)
+                            ) {
+                                if (state.isLoadingMore) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Loading more connections")
+                                    }
+                                } else {
+                                    Text("Load More Connections")
+                                }
                             }
                         }
                     }

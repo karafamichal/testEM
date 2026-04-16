@@ -43,7 +43,8 @@ data class TimetablePagingCursor(
     val toText: String,
     val handle: String,
     val searchDate: String,
-    val listedIds: List<String>
+    val listedIds: List<String>,
+    val allowNext: Boolean = true
 )
 
 data class TimetableSearchResult(
