@@ -1,21 +1,56 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Keep line numbers for useful stack traces in production.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Compose / Kotlin metadata
+-keepattributes *Annotation*, InnerClasses, Signature, Exceptions, EnclosingMethod
+-dontwarn kotlin.**
+-dontwarn kotlinx.coroutines.**
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Kotlinx coroutines: avoid stripping internal state
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory { *; }
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# OkHttp / Okio — R8 already handles but silence warnings.
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+
+# Gson — keep serialized fields, generic signatures, and model classes reflective access needs.
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class com.google.gson.reflect.TypeToken
+-keep class * extends com.google.gson.reflect.TypeToken
+-keep class com.google.gson.stream.** { *; }
+-keepclassmembers,allowobfuscation class * {
+    @com.google.gson.annotations.SerializedName <fields>;
+}
+
+# App models parsed via Gson reflection — keep their fields.
+-keep class com.ksjd.testem.AccountDetails { *; }
+-keep class com.ksjd.testem.AccountDetails$* { *; }
+-keep class com.ksjd.testem.CardHistory { *; }
+-keep class com.ksjd.testem.CardHistory$* { *; }
+-keep class com.ksjd.testem.TimetableModels { *; }
+-keep class com.ksjd.testem.TimetableModels$* { *; }
+-keep class com.ksjd.testem.ThemePreset { *; }
+-keep class com.ksjd.testem.api.QrTokenResponse { *; }
+
+# ZXing
+-dontwarn com.google.zxing.**
+-keep class com.google.zxing.** { *; }
+
+# Jsoup
+-dontwarn org.jsoup.**
+-keep class org.jsoup.** { *; }
+
+# Compose runtime reflection (lambda classes used by compose)
+-keep class androidx.compose.runtime.** { *; }
+-keepclassmembers class androidx.compose.runtime.** { *; }
+
+# Keep ViewModel default constructors
+-keepclassmembers class * extends androidx.lifecycle.ViewModel {
+    <init>(...);
+}

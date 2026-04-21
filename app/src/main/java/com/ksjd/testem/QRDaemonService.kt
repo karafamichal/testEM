@@ -4,7 +4,15 @@ import android.util.Log
 import android.util.Base64
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.FormBody
@@ -16,7 +24,6 @@ import kotlin.coroutines.coroutineContext
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import kotlin.math.abs
-import java.util.concurrent.TimeUnit
 import java.util.Locale
 import java.util.TimeZone
 
@@ -47,135 +54,86 @@ class QRDaemonService(
     private val userAgent = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
     private var sessionBaseUrl: String = baseUrl
     private val cookieJar = object : CookieJar {
-        private val cookieStore = mutableListOf<Cookie>()
+        private val cookieStore = ArrayList<Cookie>(16)
+        private val consentDomain = "sadzv.qrbus.me"
+        private var consentSeeded = false
 
+        @Synchronized
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-            Log.d(TAG, "saveFromResponse: url=$url, incoming cookies=${cookies.size}")
-            cookies.forEach { cookie ->
-                Log.d(TAG, "  Incoming cookie: ${cookie.name}=${cookie.value} (domain=${cookie.domain}, path=${cookie.path})")
-            }
-            
-            cookieStore.removeAll { existing ->
-                cookies.any { incoming ->
-                    incoming.name == existing.name &&
-                        incoming.domain == existing.domain &&
-                        incoming.path == existing.path
+            if (cookies.isEmpty()) return
+            val iter = cookieStore.iterator()
+            while (iter.hasNext()) {
+                val existing = iter.next()
+                if (cookies.any { it.name == existing.name && it.domain == existing.domain && it.path == existing.path }) {
+                    iter.remove()
                 }
             }
             cookieStore.addAll(cookies)
-            
-            // Add cookie consent cookies that are normally set by JavaScript
-            // These are required for the session to work properly
-            if (url.host == "sadzv.qrbus.me" && cookies.isNotEmpty()) {
-                val consentCookies = listOf(
-                    Cookie.Builder()
-                        .name("pisnotshowhint")
-                        .value("true")
-                        .domain("sadzv.qrbus.me")
-                        .path("/")
-                        .expiresAt(System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000) // 1 year
-                        .build(),
-                    Cookie.Builder()
-                        .name("piscookiewindow")
-                        .value("{%22requiredCookies%22:true%2C%22analyticsCookies%22:true}")
-                        .domain("sadzv.qrbus.me")
-                        .path("/")
-                        .expiresAt(System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000) // 1 year
-                        .build()
-                )
-                
-                // Only add consent cookies if they don't already exist
-                consentCookies.forEach { consentCookie ->
-                    if (cookieStore.none { it.name == consentCookie.name }) {
-                        cookieStore.add(consentCookie)
-                        Log.d(TAG, "  Added consent cookie: ${consentCookie.name}")
-                    }
+
+            if (!consentSeeded && url.host == consentDomain) {
+                val expiry = System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000
+                if (cookieStore.none { it.name == "pisnotshowhint" }) {
+                    cookieStore.add(
+                        Cookie.Builder()
+                            .name("pisnotshowhint").value("true")
+                            .domain(consentDomain).path("/").expiresAt(expiry).build()
+                    )
                 }
-            }
-            
-            Log.d(TAG, "Total cookies in store: ${cookieStore.size}")
-            cookieStore.forEach { cookie ->
-                Log.d(TAG, "  Stored: ${cookie.name} (domain=${cookie.domain}, path=${cookie.path})")
+                if (cookieStore.none { it.name == "piscookiewindow" }) {
+                    cookieStore.add(
+                        Cookie.Builder()
+                            .name("piscookiewindow")
+                            .value("{%22requiredCookies%22:true%2C%22analyticsCookies%22:true}")
+                            .domain(consentDomain).path("/").expiresAt(expiry).build()
+                    )
+                }
+                consentSeeded = true
             }
         }
 
+        @Synchronized
         override fun loadForRequest(url: HttpUrl): List<Cookie> {
-            val matching = cookieStore.filter { cookie ->
-                val matches = cookie.matches(url)
-                if (!matches) {
-                    Log.d(TAG, "  Cookie REJECTED: ${cookie.name}=${cookie.value.take(20)} | domain=${cookie.domain} vs ${url.host} | path=${cookie.path} vs ${url.encodedPath}")
+            val now = System.currentTimeMillis()
+            val iter = cookieStore.iterator()
+            val matching = ArrayList<Cookie>(cookieStore.size)
+            while (iter.hasNext()) {
+                val cookie = iter.next()
+                if (cookie.expiresAt in 1..now - 1) {
+                    iter.remove()
+                    continue
                 }
-                matches
-            }
-            Log.d(TAG, "loadForRequest: url=$url, matched ${matching.size}/${cookieStore.size} cookies")
-            if (matching.isNotEmpty()) {
-                matching.forEach { cookie ->
-                    Log.d(TAG, "  SENT: ${cookie.name}=${cookie.value.take(20)}")
-                }
+                if (cookie.matches(url)) matching.add(cookie)
             }
             return matching
         }
     }
 
-    private val client = OkHttpClient.Builder()
+    private val client: OkHttpClient = NetworkClient.base.newBuilder()
         .cookieJar(cookieJar)
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
-        .addNetworkInterceptor { chain ->
-            val request = chain.request()
-            Log.d(TAG, ">>> REQUEST: ${request.method} ${request.url}")
-            Log.d(TAG, "    Headers:")
-            request.headers.forEach { (name, value) ->
-                if (name.lowercase() == "cookie") {
-                    val hasWpis = value.contains("WPIS=")
-                    Log.d(TAG, "    $name: len=${value.length}, hasWPIS=$hasWpis, head=${value.take(80)}...")
-                } else {
-                    Log.d(TAG, "    $name: ${value.take(60)}")
-                }
-            }
-            
-            val response = chain.proceed(request)
-            Log.d(TAG, "<<< RESPONSE: ${response.code} for ${request.url}")
-            response
-        }
         .build()
 
-    private fun cookieHeader(url: String): String {
-        val httpUrl = url.toHttpUrlOrNull() ?: return ""
-        val cookies = cookieJar.loadForRequest(httpUrl)
-        val sorted = cookies.sortedWith(
-            compareBy<Cookie> { if (it.name.equals("WPIS", ignoreCase = true)) 0 else 1 }
-                .thenBy { it.name }
-        )
-        return sorted.joinToString("; ") { "${it.name}=${it.value}" }
-    }
-    
-    private fun getCookieValue(url: String, name: String): String? {
-        val httpUrl = url.toHttpUrlOrNull() ?: return null
-        return cookieJar.loadForRequest(httpUrl)
-            .firstOrNull { it.name.equals(name, ignoreCase = true) }
-            ?.value
-    }
-    
     private fun getCsrfToken(url: String): String? {
-        val raw = getCookieValue(url, "XSRF-TOKEN")
-            ?: getCookieValue(url, "CSRF-TOKEN")
-            ?: getCookieValue(url, "csrftoken")
-        return raw?.let { URLDecoder.decode(it, StandardCharsets.UTF_8.name()) }
+        val httpUrl = url.toHttpUrlOrNull() ?: return null
+        val cookies = cookieJar.loadForRequest(httpUrl)
+        val raw = cookies.firstOrNull { it.name.equals("XSRF-TOKEN", ignoreCase = true) }?.value
+            ?: cookies.firstOrNull { it.name.equals("CSRF-TOKEN", ignoreCase = true) }?.value
+            ?: cookies.firstOrNull { it.name.equals("csrftoken", ignoreCase = true) }?.value
+            ?: return null
+        return URLDecoder.decode(raw, StandardCharsets.UTF_8.name())
     }
     private val gson = Gson()
     private val TAG = "QRDaemon"
     
     private var lastTokenHex: String? = null
     private var lastTokenBase64: String? = null
-    private var serialNumber: String = initialSerialNumber
-    private var nfcUid: String = initialNfcUid
-    private var nfcEnabled: Boolean = initialNfcEnabled
+    @Volatile private var serialNumber: String = initialSerialNumber
+    @Volatile private var nfcUid: String = initialNfcUid
+    @Volatile private var nfcEnabled: Boolean = initialNfcEnabled
     private var pollingJob: Job? = null
-    private var isAuthenticated = false
+    private val pollingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var isAuthenticated = false
     private var authFailures = 0
-    private var isPolling = false
+    @Volatile private var isPolling = false
 
     fun setNfcMode(enabled: Boolean, uid: String) {
         nfcEnabled = enabled
@@ -189,49 +147,39 @@ class QRDaemonService(
 
     fun startPolling() {
         if (isPolling && pollingJob?.isActive == true) {
-            onStatus("[WARNING] Polling already running - ignoring duplicate call")
-            Log.w(TAG, "startPolling() called while already polling - ignoring")
             return
         }
-        isPolling = false
-        isPolling = true
-        // Cancel any existing polling job first
         pollingJob?.cancel()
-        
-        pollingJob = CoroutineScope(Dispatchers.IO).launch {
+        isPolling = true
+
+        pollingJob = pollingScope.launch {
             try {
                 onStatus("Starting polling…")
-                Log.d(TAG, "startPolling: isAuthenticated=$isAuthenticated")
-                // Check if already authenticated
-                if (!isAuthenticated) {
-                    performLogin()
-                }
-                
-                // Start token polling
-                Log.d(TAG, "Starting pollTokens()")
+                if (!isAuthenticated) performLogin()
                 pollTokens()
-                Log.d(TAG, "pollTokens() completed (should never happen)")
-                onStatus("Polling stopped unexpectedly")
-            } catch (e: CancellationException) {
+            } catch (_: CancellationException) {
                 onStatus("Polling stopped")
-                Log.d(TAG, "Polling cancelled")
             } catch (e: Exception) {
-                Log.e(TAG, "startPolling caught exception: ${e.javaClass.simpleName}: ${e.message}", e)
+                Log.e(TAG, "startPolling error", e)
                 onError("Polling error: ${e.message}")
                 onStatus("Polling error - restarting in 5s: ${e.message}")
                 delay(5000)
-                startPolling()
+                if (isPolling) startPolling()
             } finally {
                 isPolling = false
             }
         }
-        pollingJob?.invokeOnCompletion { isPolling = false }
     }
 
     fun stopPolling() {
         isPolling = false
         pollingJob?.cancel()
         pollingJob = null
+    }
+
+    fun shutdown() {
+        stopPolling()
+        pollingScope.cancel()
     }
 
     private suspend fun performLogin() {
@@ -305,82 +253,34 @@ class QRDaemonService(
                 .build()
             
             client.newCall(loginRequest).execute().use { response ->
-                Log.d(TAG, "Login response: ${response.code}")
-                
-                // Log Set-Cookie headers from login response
-                val setCookieHeaders = response.headers("Set-Cookie")
-                Log.d(TAG, "Login response Set-Cookie headers: ${setCookieHeaders.size}")
-                setCookieHeaders.forEach { header ->
-                    Log.d(TAG, "  Set-Cookie: ${header.take(100)}")
-                }
-                
-                // Manually parse and add WPIS cookie since OkHttp isn't capturing it automatically
-                // The cookie domain might not match, so we manually create it for sadzv.qrbus.me
                 val loginUrl = response.request.url
-                Log.d(TAG, "Attempting to manually parse ${setCookieHeaders.size} Set-Cookie headers")
-                setCookieHeaders.forEach { setCookieHeader ->
-                    try {
-                        // Extract WPIS value using regex
-                        val wpisMatch = Regex("WPIS=([^;]+)").find(setCookieHeader)
-                        if (wpisMatch != null) {
-                            val wpisValue = wpisMatch.groupValues[1]
-                            Log.d(TAG, "Found WPIS value: ${wpisValue.take(30)}")
-                            
-                            // Manually create the cookie for sadzv.qrbu    s.me domain
-                            // IMPORTANT: Must set secure(true) for HTTPS so OkHttp will actually send it
-                            val wpisCookie = Cookie.Builder()
-                                .name("WPIS")
-                                .value(wpisValue)
-                                .domain("sadzv.qrbus.me")
-                                .path("/")
-                                    .secure()  // Required for HTTPS cookies
-                                .expiresAt(System.currentTimeMillis() + 2592000 * 1000L) // 30 days
-                                .build()
-                            
-                                Log.d(TAG, "Manually saving WPIS cookie to sadzv.qrbus.me")
-                            cookieJar.saveFromResponse(loginUrl, listOf(wpisCookie))
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to parse WPIS cookie: ${e.javaClass.simpleName}: ${e.message}")
-                    }
+                response.headers("Set-Cookie").forEach { setCookieHeader ->
+                    val wpisMatch = Regex("WPIS=([^;]+)").find(setCookieHeader) ?: return@forEach
+                    val wpisValue = wpisMatch.groupValues[1]
+                    val wpisCookie = Cookie.Builder()
+                        .name("WPIS")
+                        .value(wpisValue)
+                        .domain("sadzv.qrbus.me")
+                        .path("/")
+                        .secure()
+                        .expiresAt(System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000)
+                        .build()
+                    cookieJar.saveFromResponse(loginUrl, listOf(wpisCookie))
                 }
-                
+
                 if (response.code != 200) {
                     throw Exception("Login failed: ${response.code}")
                 }
-                
-                // Parse JSON response to check success
                 val responseBody = response.body?.string() ?: ""
-                Log.d(TAG, "Login response body: $responseBody")
-                
-                try {
-                    val jsonResponse = gson.fromJson(responseBody, JsonObject::class.java)
-                    val success = jsonResponse.get("success")?.asBoolean ?: false
-                    
-                    if (!success) {
-                        throw Exception("Login failed: API returned success=false")
-                    }
-                    
-                    // Check if WPIS cookie was saved
-                    val tokenUrl = "$sessionBaseUrl/cardapi/getQrToken".toHttpUrlOrNull() ?: return@use
-                    val allCookies = cookieJar.loadForRequest(tokenUrl)
-                    Log.d(TAG, "After login, total cookies in store: ${allCookies.size}")
-                    allCookies.forEach { cookie ->
-                        Log.d(TAG, "  After login cookie: ${cookie.name}=${cookie.value.take(20)} (domain=${cookie.domain}, path=${cookie.path})")
-                    }
-                    
-                    Log.d(TAG, "Login successful. Cookies for token endpoint: ${allCookies.size}")
-                    allCookies.forEach { cookie ->
-                        Log.d(TAG, "  Cookie: ${cookie.name}=${cookie.value} (domain=${cookie.domain}, path=${cookie.path})")
-                    }
-                    
-                    authFailures = 0
-                    onStatus("Login successful (cookies: ${allCookies.size})")
-                    isAuthenticated = true
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to parse login response: ${e.message}")
-                    throw Exception("Login response parsing failed: ${e.message}")
-                }
+                val jsonResponse = gson.fromJson(responseBody, JsonObject::class.java)
+                val success = jsonResponse.get("success")?.asBoolean ?: false
+                if (!success) throw Exception("Login failed: API returned success=false")
+
+                val tokenUrl = "$sessionBaseUrl/cardapi/getQrToken".toHttpUrlOrNull() ?: return@use
+                val allCookies = cookieJar.loadForRequest(tokenUrl)
+                authFailures = 0
+                onStatus("Login successful (cookies: ${allCookies.size})")
+                isAuthenticated = true
             }
 
             // Run post-login requests in parallel
@@ -404,7 +304,6 @@ class QRDaemonService(
                     .addHeader("Sec-Fetch-Site", "same-origin")
                     .addHeader("User-Agent", userAgent)
                     .addHeader("X-Requested-With", "XMLHttpRequest")
-                    .addHeader("Cookie", cookieHeader("$sessionBaseUrl/accountapi/getUId"))
                     .build()
 
                 client.newCall(uidRequest).execute().use { response ->
@@ -435,7 +334,6 @@ class QRDaemonService(
                     .addHeader("Sec-Fetch-Site", "same-origin")
                     .addHeader("User-Agent", userAgent)
                     .addHeader("X-Requested-With", "XMLHttpRequest")
-                    .addHeader("Cookie", cookieHeader("$sessionBaseUrl/userapi/getAccountDetail"))
                     .build()
 
                 client.newCall(detailRequest).execute().use { response ->
@@ -636,62 +534,42 @@ class QRDaemonService(
     }
 
     private suspend fun pollTokens() {
-        Log.d(TAG, "Starting token polling…")
-        onStatus("Polling for token…")
-        
+        var consecutiveEmpty = 0
         while (coroutineContext.isActive) {
             try {
-                onStatus("[POLL] Loop iteration starting…")
-                onStatus("Fetching token…")
                 val payload = fetchQRToken()
-                if (payload == null) {
-                    Log.w(TAG, "Empty token payload - will retry")
-                    onStatus("No token yet - retrying in 1.5s")
-                    delay(1500)
+                if (payload == null || payload.decodedBytes.isEmpty() || payload.rawBase64.isBlank()) {
+                    consecutiveEmpty += 1
+                    val backoff = (1500L * consecutiveEmpty).coerceAtMost(10_000L)
+                    delay(backoff)
                     continue
                 }
-                Log.d(TAG, "fetchQRToken returned ${payload.decodedBytes.size} bytes")
-                
-                if (payload.decodedBytes.isEmpty() || payload.rawBase64.isBlank()) {
-                    Log.w(TAG, "Empty token payload - will retry")
-                    onStatus("No token yet - retrying in 1.5s")
-                    delay(1500)
-                    continue
-                }
-                
+                consecutiveEmpty = 0
+
                 val hex = bytesToHex(payload.decodedBytes)
-                
-                // Only update if token changed
                 if (hex != lastTokenHex || payload.rawBase64 != lastTokenBase64) {
                     lastTokenHex = hex
                     lastTokenBase64 = payload.rawBase64
-                    
-                    Log.d(TAG, "New token: $hex")
                     onTokenUpdate(hex, payload.rawBase64)
-                    onStatus("Token updated")
                 }
-                
-                // Poll every 25 seconds (observed rotation interval)
-                delay(25000)
-                
+
+                // Token rotates every ~25s; nudge slightly early to avoid missing the edge.
+                delay(24_500)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                Log.e(TAG, "pollTokens caught exception: ${e.javaClass.simpleName}: ${e.message}", e)
-                
-                // If 401, re-authenticate
+                Log.e(TAG, "pollTokens error: ${e.message}", e)
+
                 if (e.message?.contains("401") == true) {
                     isAuthenticated = false
                     authFailures += 1
                     if (authFailures >= 3) {
                         onError("Authentication failed repeatedly")
-                        onStatus("Authentication failed repeatedly")
                         return
                     }
                     onStatus("Session expired, re-authenticating…")
                     performLogin()
                 } else {
                     onError("Unexpected error: ${e.message}")
-                    onStatus("Error in poll loop: ${e.message}")
                     delay(5000)
                 }
             }
@@ -701,150 +579,89 @@ class QRDaemonService(
     private suspend fun fetchQRToken(): QrTokenPayload? {
         val identifier = if (nfcEnabled && nfcUid.isNotBlank()) nfcUid else serialNumber
         if (identifier.isBlank()) {
-            onStatus("No SNR yet - waiting")
+            onStatus("Waiting for serial number…")
             return null
         }
-        onStatus("[FETCH] Building token request…")
         val body = FormBody.Builder()
             .add("post[serialnumber]", identifier)
             .build()
-        Log.d(TAG, "[TOKEN] identifier='${identifier}' len=${identifier.length} (nfc=$nfcEnabled)")
-        if (body.size > 0) {
-            Log.d(TAG, "[TOKEN] form body: ${body.name(0)}=${body.value(0)}")
-        }
-        
+
         val tokenUrl = "$sessionBaseUrl/cardapi/getQrToken"
-        val httpUrl = tokenUrl.toHttpUrlOrNull()
-        val matchedCookies = if (httpUrl != null) cookieJar.loadForRequest(httpUrl).size else 0
-        onStatus("[TOKEN] URL=$tokenUrl, matched cookies=$matchedCookies/4")
-        val cookieHeaderValue = cookieHeader(tokenUrl)
-        val hasWpis = cookieHeaderValue.contains("WPIS=")
-        onStatus("[TOKEN] Cookie header ${if (hasWpis) "contains" else "missing"} WPIS")
-        Log.d(TAG, "[TOKEN] Cookie header contains WPIS=$hasWpis, len=${cookieHeaderValue.length}")
-        
-        val request = Request.Builder()
+        val builder = Request.Builder()
             .url(tokenUrl)
             .post(body)
             .addHeader("Accept", "*/*")
             .addHeader("Accept-Language", "en-US,en;q=0.9")
-            .addHeader("Cache-Control", "no-cache")
-            .addHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
             .addHeader("X-Requested-With", "XMLHttpRequest")
             .addHeader("Origin", sessionBaseUrl)
-            .addHeader("Pragma", "no-cache")
             .addHeader("Referer", "$sessionBaseUrl/account")
-            .addHeader("Sec-CH-UA", "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"Google Chrome\";v=\"144\"")
-            .addHeader("Sec-CH-UA-Mobile", "?1")
-            .addHeader("Sec-CH-UA-Platform", "\"Android\"")
-            .addHeader("Sec-Fetch-Dest", "empty")
-            .addHeader("Sec-Fetch-Mode", "cors")
-            .addHeader("Sec-Fetch-Site", "same-origin")
             .addHeader("User-Agent", userAgent)
-            .addHeader("Cookie", cookieHeaderValue)
-            .apply {
-                val csrf = getCsrfToken(tokenUrl)
-                if (!csrf.isNullOrEmpty()) {
-                    addHeader("X-XSRF-TOKEN", csrf)
-                    addHeader("X-CSRF-TOKEN", csrf)
-                }
-            }
-            .build()
-        
-        return try {
-            onStatus("[TOKEN] Making HTTP request…")
-            val response = try {
-                client.newCall(request).execute()
-            } catch (e: CancellationException) {
-                onStatus("[TOKEN] Coroutine cancelled!")
-                throw e
-            } catch (e: Exception) {
-                onStatus("[TOKEN] HTTP call failed: ${e.javaClass.simpleName}: ${e.message}")
-                Log.e(TAG, "HTTP execute failed", e)
-                throw e
-            }
-            
-            onStatus("[TOKEN] HTTP call succeeded")
-            response.use {
-                onStatus("[TOKEN] Response received")
-                val responseBody = try {
-                    response.body?.string() ?: ""
-                } catch (e: Exception) {
-                    onStatus("[TOKEN] Body read failed: ${e.message}")
-                    throw e
-                }
-                onStatus("[TOKEN] Body read: ${responseBody.length} chars")
-                val finalUrl = response.request.url.toString()
-                onStatus("[TOKEN] Got HTTP ${response.code}")
-                
-                // Handle 401 as a special error that needs re-authentication
-                if (response.code == 401) {
-                    Log.e(TAG, "Token 401 response body: $responseBody")
-                    Log.e(TAG, "Token 401 response headers: ${response.headers}")
-                    onStatus("Token 401 body: ${responseBody.take(200)}")
-                    throw Exception("401 Unauthorized - Session expired")
-                }
-                
-                if (finalUrl.contains("/account/login")) {
-                    onStatus("Token redirect to login")
-                    throw Exception("401 Unauthorized - Session expired")
-                }
-                
-                if (response.code != 200) {
-                    val snippet = responseBody.take(120).replace("\n", " ").replace("\r", " ")
-                    onStatus("Token HTTP ${response.code}: $snippet")
-                    return null
-                }
-                
-                try {
-                    val json = gson.fromJson(responseBody, JsonObject::class.java)
-                    val success = json.get("success")?.asBoolean ?: false
-                    val data = json.get("data")?.asString ?: ""
-                    val base64Field = json.get("base64")?.asString ?: ""
-                    
-                    Log.d(TAG, "Token response JSON: success=$success, data length=${data.length}")
-                    onStatus("Token response: success=$success")
-                    
-                    if (!success || (data.isEmpty() && base64Field.isEmpty())) {
-                        Log.w(TAG, "No token available: $responseBody")
-                        onStatus("No token available - waiting")
-                        return null
-                    }
+        val csrf = getCsrfToken(tokenUrl)
+        if (!csrf.isNullOrEmpty()) {
+            builder.addHeader("X-XSRF-TOKEN", csrf).addHeader("X-CSRF-TOKEN", csrf)
+        }
+        val request = builder.build()
 
-                    val rawToken = if (base64Field.isNotBlank()) base64Field else data
-                    val normalized = rawToken.replace(' ', '+')
-                    val stripped = normalized.replace(Regex("[^A-Za-z0-9+/=_-]"), "")
-                    val needsUrlSafe = stripped.contains('-') || stripped.contains('_')
-                    val base = stripped.trim()
-                    val padLen = (4 - (base.length % 4)) % 4
-                    val padded = base + "=".repeat(padLen)
-                    val flags = if (needsUrlSafe) Base64.URL_SAFE or Base64.NO_WRAP else Base64.NO_WRAP
-                    val decoded = Base64.decode(padded, flags)
-                    authFailures = 0
-                    QrTokenPayload(
-                        rawBase64 = rawToken,
-                        decodedBytes = decoded
-                    )
-                    
-                } catch (e: IllegalArgumentException) {
-                    Log.e(TAG, "Invalid base64: $responseBody")
-                    onStatus("Invalid token format")
-                    return null
-                } catch (e: Exception) {
-                    Log.e(TAG, "Token parse error: ${e.message}", e)
-                    onStatus("Token parse error: ${e.message}")
+        return try {
+            client.newCall(request).execute().use { response ->
+                val code = response.code
+                val finalUrl = response.request.url.toString()
+                if (code == 401 || finalUrl.contains("/account/login")) {
+                    throw Exception("401 Unauthorized - Session expired")
+                }
+                if (code != 200) {
+                    onStatus("Token HTTP $code")
                     return null
                 }
+                val responseBody = response.body?.string().orEmpty()
+                if (responseBody.isEmpty()) return null
+
+                val json = try {
+                    gson.fromJson(responseBody, JsonObject::class.java)
+                } catch (_: Exception) {
+                    return null
+                }
+                val success = json.get("success")?.asBoolean ?: false
+                val data = json.get("data")?.asString ?: ""
+                val base64Field = json.get("base64")?.asString ?: ""
+                if (!success || (data.isEmpty() && base64Field.isEmpty())) {
+                    return null
+                }
+
+                val rawToken = if (base64Field.isNotBlank()) base64Field else data
+                val decoded = decodeBase64Token(rawToken) ?: return null
+                authFailures = 0
+                QrTokenPayload(rawBase64 = rawToken, decodedBytes = decoded)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Token request failed: ${e.message}", e)
-            // Only re-throw for 401 errors to trigger re-authentication
             if (e.message?.contains("401") == true || e.message?.contains("Unauthorized") == true) {
-                onStatus("Session expired: ${e.message}")
                 throw e
-            } else {
-                // For other errors, log and return empty to continue polling
-                onStatus("Token request error: ${e.message}")
-                return null
+            }
+            Log.w(TAG, "Token request failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun decodeBase64Token(raw: String): ByteArray? {
+        return try {
+            // Fast-path: most tokens are plain standard base64 already.
+            Base64.decode(raw, Base64.NO_WRAP)
+        } catch (_: IllegalArgumentException) {
+            val normalized = raw.replace(' ', '+')
+            var clean = StringBuilder(normalized.length)
+            for (c in normalized) {
+                if (c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' ||
+                    c == '+' || c == '/' || c == '=' || c == '-' || c == '_'
+                ) clean.append(c)
+            }
+            val needsUrlSafe = clean.contains('-') || clean.contains('_')
+            val padLen = (4 - (clean.length % 4)) % 4
+            repeat(padLen) { clean.append('=') }
+            val flags = if (needsUrlSafe) Base64.URL_SAFE or Base64.NO_WRAP else Base64.NO_WRAP
+            try {
+                Base64.decode(clean.toString(), flags)
+            } catch (_: Exception) {
+                null
             }
         }
     }
@@ -985,6 +802,18 @@ class QRDaemonService(
     }
 
     private fun bytesToHex(bytes: ByteArray): String {
-        return bytes.joinToString("") { "%02x".format(it) }
+        val hex = HEX_CHARS
+        val out = CharArray(bytes.size * 2)
+        var i = 0
+        for (b in bytes) {
+            val v = b.toInt() and 0xFF
+            out[i++] = hex[v ushr 4]
+            out[i++] = hex[v and 0x0F]
+        }
+        return String(out)
+    }
+
+    private companion object {
+        private val HEX_CHARS = "0123456789abcdef".toCharArray()
     }
 }

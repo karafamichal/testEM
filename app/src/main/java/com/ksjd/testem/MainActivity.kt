@@ -2857,30 +2857,23 @@ fun LogoutDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     )
 }
 
+private val timeFormatter = ThreadLocal.withInitial { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+private val dateFormatter = ThreadLocal.withInitial { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+private val dateTimeFormatter = ThreadLocal.withInitial { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
+
 private fun formatTime(timestampMs: Long, neverLabel: String): String {
-    return if (timestampMs == 0L) {
-        neverLabel
-    } else {
-        val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-        sdf.format(Date(timestampMs))
-    }
+    return if (timestampMs == 0L) neverLabel else timeFormatter.get()!!.format(Date(timestampMs))
 }
 
 private fun formatDate(timestampSeconds: Long, unknownLabel: String): String {
     if (timestampSeconds <= 0L) return unknownLabel
-    val timestampMs = if (timestampSeconds < 10_000_000_000L) {
-        timestampSeconds * 1000L
-    } else {
-        timestampSeconds
-    }
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    return sdf.format(Date(timestampMs))
+    val timestampMs = if (timestampSeconds < 10_000_000_000L) timestampSeconds * 1000L else timestampSeconds
+    return dateFormatter.get()!!.format(Date(timestampMs))
 }
 
 private fun formatDateTime(timestampMs: Long, unknownLabel: String): String {
     if (timestampMs <= 0L) return unknownLabel
-    val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-    return sdf.format(Date(timestampMs))
+    return dateTimeFormatter.get()!!.format(Date(timestampMs))
 }
 
 @Composable
@@ -3002,21 +2995,16 @@ fun StatusChip(text: String, isActive: Boolean) {
 @Composable
 fun AppBackground(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val gradient = Brush.verticalGradient(
-        listOf(
-            scheme.background,
-            scheme.surface,
-            scheme.background
-        )
-    )
-    val backgroundBrush = if (scheme.background == Color(0xFF000000)) {
-        Brush.verticalGradient(listOf(Color(0xFF000000), Color(0xFF000000)))
-    } else {
-        gradient
+    val bg = scheme.background
+    val surface = scheme.surface
+    val backgroundBrush = remember(bg, surface) {
+        if (bg == Color(0xFF000000)) {
+            Brush.verticalGradient(listOf(Color(0xFF000000), Color(0xFF000000)))
+        } else {
+            Brush.verticalGradient(listOf(bg, surface, bg))
+        }
     }
-    Box(
-        modifier = modifier.background(backgroundBrush)
-    ) {
+    Box(modifier = modifier.background(backgroundBrush)) {
         content()
     }
 }

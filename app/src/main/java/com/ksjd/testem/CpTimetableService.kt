@@ -9,13 +9,9 @@ import okhttp3.Request
 import org.jsoup.Jsoup
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.TimeUnit
 
 class CpTimetableService(
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .build(),
+    private val client: OkHttpClient = NetworkClient.base,
     private val gson: Gson = Gson()
 ) {
     data class SearchRequest(
