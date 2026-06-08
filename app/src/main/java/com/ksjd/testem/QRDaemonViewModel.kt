@@ -580,7 +580,9 @@ class QRDaemonViewModel : ViewModel() {
                         )
                     } else {
                         val size = QRDaemonConfig.QR_CODE_SIZE
-                        val bitmap = QRCodeGenerator.generateQRCode(base64, size, size)
+                        val bitmap = withContext(Dispatchers.Default) {
+                            QRCodeGenerator.generateQRCode(base64, size, size)
+                        }
                         val shortHex = hex.take(16)
                         current.copy(
                             qrBitmap = bitmap,
@@ -1037,29 +1039,28 @@ class QRDaemonViewModel : ViewModel() {
         )
         if (enabling && uid.isNotBlank()) {
             val template = _qrState.value.accountDetails.cardTemplateBase64
-            val bitmap = if (template.isNotBlank()) {
-                decodeTemplateBitmap(template)
-            } else {
-                val vcard = buildNfcVCard(uid)
-                QRCodeGenerator.generateQRCode(vcard, QRDaemonConfig.QR_CODE_SIZE, QRDaemonConfig.QR_CODE_SIZE)
+            val statusMsg = getString(R.string.status_nfc_uid_active, "NFC UID active")
+            viewModelScope.launch {
+                val bitmap = if (template.isNotBlank()) {
+                    withContext(Dispatchers.Default) { decodeTemplateBitmap(template) }
+                } else {
+                    val vcard = buildNfcVCard(uid)
+                    withContext(Dispatchers.Default) {
+                        QRCodeGenerator.generateQRCode(vcard, QRDaemonConfig.QR_CODE_SIZE, QRDaemonConfig.QR_CODE_SIZE)
+                    }
+                }
+                _qrState.value = _qrState.value.copy(qrBitmap = bitmap, statusMessage = statusMsg)
             }
-            _qrState.value = _qrState.value.copy(
-                qrBitmap = bitmap,
-                statusMessage = getString(
-                    R.string.status_nfc_uid_active,
-                    "NFC UID active"
-                )
-            )
         } else if (!enabling && _qrState.value.tokenBase64.isNotBlank()) {
             val size = QRDaemonConfig.QR_CODE_SIZE
-            val bitmap = QRCodeGenerator.generateQRCode(_qrState.value.tokenBase64, size, size)
-            _qrState.value = _qrState.value.copy(
-                qrBitmap = bitmap,
-                statusMessage = getString(
-                    R.string.status_token_updated,
-                    "Token updated"
-                )
-            )
+            val token = _qrState.value.tokenBase64
+            val statusMsg = getString(R.string.status_token_updated, "Token updated")
+            viewModelScope.launch {
+                val bitmap = withContext(Dispatchers.Default) {
+                    QRCodeGenerator.generateQRCode(token, size, size)
+                }
+                _qrState.value = _qrState.value.copy(qrBitmap = bitmap, statusMessage = statusMsg)
+            }
         }
         return if (enabling && current.nfcUid.isBlank() && storedUid.isBlank()) uid else null
     }
@@ -1073,5 +1074,6 @@ class QRDaemonViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         qrService?.stopPolling()
+        qrService?.shutdown()
     }
 }
