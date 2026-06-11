@@ -895,39 +895,78 @@ class QRDaemonService(
                 val root = gson.fromJson(body, JsonObject::class.java)
                 val tickets = root.getAsJsonArray("tickets")
                 val transactions = root.getAsJsonArray("transactions")
-                val currency = tickets?.firstOrNull()?.asJsonObject?.get("currencySymbol")?.asString.orEmpty()
+                // The current qrbus API has no currency field; balances are EUR cents.
+                val currency = "€"
                 val result = mutableListOf<CardHistoryItem>()
+
+                fun JsonObject?.obj(key: String): JsonObject? =
+                    this?.get(key)?.takeIf { it.isJsonObject }?.asJsonObject
+
+                fun JsonObject?.longOrNull(key: String): Long? =
+                    this?.get(key)?.takeIf { it.isJsonPrimitive }?.let {
+                        runCatching { it.asLong }.getOrNull()
+                    }
+
+                fun JsonObject?.str(key: String): String =
+                    this?.get(key)?.takeIf { it.isJsonPrimitive }?.asString?.trim().orEmpty()
 
                 tickets?.forEachIndexed { index, element ->
                     val obj = element.asJsonObject
-                    val ticketId = obj.get("ticketSNR")?.asString?.trim().orEmpty().ifBlank {
-                        "ticket-${obj.get("saleTime")?.asLong ?: 0L}-$index"
+                    // Current API nests data under payment/tariff/place; fall back to
+                    // the older flat field names for safety.
+                    val payment = obj.obj("payment")
+                    val balance = payment.obj("balance")
+                    val tariff = obj.obj("tariff")
+                    val tariffType = tariff.obj("type")
+                    val stop = obj.obj("place").obj("stop")
+
+                    val saleTimeSec = payment.longOrNull("saleTime") ?: obj.longOrNull("saleTime") ?: 0L
+                    val saleTime = normalizeHistoryTimestamp(saleTimeSec * 1000L)
+
+                    val oldBalance = balance.longOrNull("oldValue") ?: obj.longOrNull("oldBalance")
+                    val newBalance = balance.longOrNull("newValue") ?: obj.longOrNull("newBalance")
+                    val priceCents = payment.longOrNull("price") ?: obj.longOrNull("price") ?: 0L
+                    val operationType = obj.longOrNull("operationType") ?: 0L
+                    val tariffTypeId = tariffType.longOrNull("id") ?: obj.longOrNull("ticketTypeId") ?: 0L
+
+                    val ticketId = obj.str("ticketSnr").ifBlank { obj.str("ticketSNR") }
+                        .ifBlank { "ticket-$saleTimeSec-$index" }
+
+                    val title = tariff.str("name")
+                        .ifBlank { tariffType.str("name") }
+                        .ifBlank { obj.str("ticketTypeName") }
+                        .ifBlank { "Ticket" }
+
+                    // Sign from balance movement; magnitude from price. A top-up is
+                    // operationType 6 / tariff type 3 ("Vklad na kartu").
+                    val deltaCents = if (oldBalance != null && newBalance != null) {
+                        newBalance - oldBalance
+                    } else {
+                        val isDeposit = operationType == 6L || tariffTypeId == 3L || priceCents < 0
+                        if (isDeposit) abs(priceCents) else -abs(priceCents)
                     }
-                    val saleTime = normalizeHistoryTimestamp((obj.get("saleTime")?.asLong ?: 0L) * 1000L)
-                    val tariffName = obj.get("tariffName")?.asString?.trim().orEmpty()
-                    val ticketTypeName = obj.get("ticketTypeName")?.asString?.trim().orEmpty()
-                    val ticketTypeId = obj.get("ticketTypeId")?.asInt ?: 0
-                    val priceCents = obj.get("price")?.asLong ?: 0L
-                    val oldBalance = obj.get("oldBalance")?.asLong
-                    val newBalance = obj.get("newBalance")?.asLong
-                    val title = if (ticketTypeName.isNotBlank()) ticketTypeName else "Ticket"
-                    val detailLabel = if (tariffName.isNotBlank()) tariffName else "Card event"
+                    val amount = if (deltaCents >= 0) {
+                        "+${formatAmount(abs(deltaCents), currency)}"
+                    } else {
+                        "-${formatAmount(abs(deltaCents), currency)}"
+                    }
+
+                    val stopName = stop.str("name")
                     val balancePart = if (oldBalance != null && newBalance != null) {
-                        " | ${formatAmount(oldBalance, currency)} -> ${formatAmount(newBalance, currency)}"
+                        "${formatAmount(oldBalance, currency)} -> ${formatAmount(newBalance, currency)}"
                     } else {
                         ""
                     }
-                    val amount = when {
-                        ticketTypeId == 3 -> "+${formatAmount(abs(priceCents), currency)}"
-                        priceCents < 0 -> "+${formatAmount(abs(priceCents), currency)}"
-                        else -> "-${formatAmount(abs(priceCents), currency)}"
-                    }
+                    val subtitle = listOf(stopName, balancePart)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" • ")
+
                     result += CardHistoryItem(
                         id = ticketId,
                         sourceType = HistorySourceType.TICKET,
                         timestampMs = saleTime,
                         title = title,
-                        subtitle = detailLabel + balancePart,
+                        subtitle = subtitle,
                         amountText = amount
                     )
                 }

@@ -61,7 +61,7 @@
     <string name="qr_code_fullscreen_content_desc">QR Code Fullscreen</string>
     <string name="status_label">Status:</string>
     <string name="low_credit_title">Warning: Low Credit</string>
-    <string name="low_credit_message">Top up your credit or you soon won't be able to buy a ticket (%1$.2f %2$s).</string>
+    <string name="low_credit_message">Top up your credit or you will soon not be able to buy a ticket (%1$.2f %2$s).</string>
     <string name="low_credit_threshold_title">Low credit warning threshold</string>
     <string name="low_credit_threshold_description">Show warning when credit drops below this value.</string>
     <string name="low_credit_threshold_label">Credit threshold (EUR)</string>
