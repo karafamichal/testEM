@@ -973,34 +973,77 @@ class QRDaemonService(
 
                 transactions?.forEachIndexed { index, element ->
                     val obj = element.asJsonObject
-                    val createdAt = normalizeHistoryTimestamp((obj.get("createdAt")?.asLong ?: 0L) * 1000L)
+                    val createdAtSec = obj.longOrNull("createdAt")
+                        ?: obj.longOrNull("createTime")
+                        ?: 0L
+                    val createdAt = normalizeHistoryTimestamp(createdAtSec * 1000L)
                     val type = obj.get("transactionType")?.asInt ?: 0
                     val changes = obj.getAsJsonArray("changes")
-                    val subtitle = if (changes != null && changes.size() > 0) {
-                        buildString {
-                            changes.forEach { change ->
-                                val changeObj = change.asJsonObject
-                                val value = changeObj.get("value")?.asString
-                                    ?: changeObj.get("valueAfter")?.asString
-                                    ?: changeObj.get("valueBefore")?.asString
-                                    ?: ""
-                                if (value.isNotBlank()) {
-                                    if (isNotEmpty()) append(" | ")
-                                    append(value)
-                                }
+                    val title = obj.str("desc")
+                        .ifBlank { obj.str("description") }
+                        .ifBlank { "Transaction #$type" }
+                    val detailParts = mutableListOf<String>()
+                    val payment = obj.obj("payment")
+                    val balance = payment.obj("balance")
+                    val oldBalance = balance.longOrNull("oldValue")
+                    val newBalance = balance.longOrNull("newValue")
+                    if (oldBalance != null && newBalance != null) {
+                        detailParts += "Balance ${formatAmount(oldBalance, currency)} -> ${formatAmount(newBalance, currency)}"
+                    }
+                    val price = payment.longOrNull("price")
+                    if (price != null && price != 0L) {
+                        detailParts += "Price ${formatAmount(abs(price), currency)}"
+                    }
+                    changes?.forEach { change ->
+                        val changeObj = change.asJsonObject
+                        val editTypeId = changeObj.get("editTypeId")?.asInt
+                        val fieldName = when (editTypeId) {
+                            7 -> "Identification"
+                            13 -> "Validity"
+                            else -> "Change ${editTypeId ?: 0}"
+                        }
+                        val before = changeObj.get("valueBefore")?.asString?.trim().orEmpty()
+                        val after = changeObj.get("valueAfter")?.asString?.trim().orEmpty()
+                        val value = changeObj.get("value")?.asString?.trim().orEmpty()
+                        val detail = when {
+                            before.isNotBlank() && after.isNotBlank() -> "$fieldName: $before -> $after"
+                            after.isNotBlank() -> "$fieldName: $after"
+                            before.isNotBlank() -> "$fieldName: $before"
+                            value.isNotBlank() -> "$fieldName: $value"
+                            else -> ""
+                        }
+                        if (detail.isNotBlank()) {
+                            detailParts += detail
+                        }
+                    }
+                    val subtitle = detailParts.distinct().joinToString(" • ").ifBlank { "Transaction details" }
+
+                    val amountText = when {
+                        oldBalance != null && newBalance != null -> {
+                            val delta = newBalance - oldBalance
+                            if (delta >= 0) {
+                                "+${formatAmount(abs(delta), currency)}"
+                            } else {
+                                "-${formatAmount(abs(delta), currency)}"
                             }
-                        }.ifBlank { "Transaction details" }
-                    } else {
-                        "Transaction details"
+                        }
+                        price != null && price != 0L -> {
+                            if (price > 0) {
+                                "-${formatAmount(abs(price), currency)}"
+                            } else {
+                                "+${formatAmount(abs(price), currency)}"
+                            }
+                        }
+                        else -> ""
                     }
 
                     result += CardHistoryItem(
                         id = "transaction-${createdAt}-$index",
                         sourceType = HistorySourceType.TRANSACTION,
                         timestampMs = createdAt,
-                        title = "Transaction #$type",
+                        title = title,
                         subtitle = subtitle,
-                        amountText = ""
+                        amountText = amountText
                     )
                 }
 
@@ -1019,8 +1062,8 @@ class QRDaemonService(
 
     private fun normalizeHistoryTimestamp(rawTimestampMs: Long): Long {
         if (rawTimestampMs <= 0L) return rawTimestampMs
-        // History API uses local wall-clock values; remove local offset to avoid +1h/+2h shift.
-        return rawTimestampMs - TimeZone.getDefault().getOffset(rawTimestampMs)
+        // The API already returns epoch-based timestamps; keep them as-is for display.
+        return rawTimestampMs
     }
 
     private fun bytesToHex(bytes: ByteArray): String {
