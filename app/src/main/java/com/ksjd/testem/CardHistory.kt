@@ -11,7 +11,12 @@ data class CardHistoryItem(
     val timestampMs: Long,
     val title: String,
     val subtitle: String,
-    val amountText: String
+    val amountText: String,
+    /** Signed balance change in cents (negative = spent), null if unknown. */
+    val amountCents: Long? = null,
+    /** Stop where a ticket was bought, if known. */
+    val stopName: String = "",
+    val isTopUp: Boolean = false
 )
 
 data class CardHistoryState(

@@ -22,7 +22,9 @@ data class TimetableSegment(
     val departureTime: String,
     val departureStop: String,
     val arrivalTime: String,
-    val arrivalStop: String
+    val arrivalStop: String,
+    val departurePlatform: String = "",
+    val arrivalPlatform: String = ""
 )
 
 data class TimetableConnection(
@@ -69,5 +71,19 @@ data class TimetableState(
     val canLoadMore: Boolean = false,
     val pagingCursor: TimetablePagingCursor? = null,
     val connections: List<TimetableConnection> = emptyList(),
-    val errorMessage: String = ""
+    val errorMessage: String = "",
+    val savedRoutes: List<SavedRoute> = emptyList(),
+    val recentRoutes: List<SavedRoute> = emptyList()
 )
+
+/** A from/to pair the user saved or searched recently. */
+data class SavedRoute(
+    val citySlug: String,
+    val fromText: String,
+    val toText: String,
+    val from: CpStopSuggestion? = null,
+    val to: CpStopSuggestion? = null
+) {
+    fun sameAs(other: SavedRoute): Boolean =
+        fromText.equals(other.fromText, ignoreCase = true) && toText.equals(other.toText, ignoreCase = true)
+}

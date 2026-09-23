@@ -290,6 +290,12 @@ class CpTimetableService(
                 val depStop = first.selectFirst("p.station strong.name")?.text()?.trim().orEmpty()
                 val arrTime = last.selectFirst("p.time")?.text()?.trim().orEmpty()
                 val arrStop = last.selectFirst("p.station strong.name")?.text()?.trim().orEmpty()
+                // Platform (nástupište) or track (koľaj) follows the stop name.
+                fun platformOf(item: org.jsoup.nodes.Element): String =
+                    item.select("p.station span[title]").firstOrNull {
+                        val title = it.attr("title").lowercase()
+                        title.startsWith("nást") || title.startsWith("koľ") || title.startsWith("kol")
+                    }?.text()?.trim().orEmpty()
                 if (depTime.isBlank() || depStop.isBlank() || arrTime.isBlank() || arrStop.isBlank()) {
                     continue
                 }
@@ -299,7 +305,9 @@ class CpTimetableService(
                     departureTime = depTime,
                     departureStop = depStop,
                     arrivalTime = arrTime,
-                    arrivalStop = arrStop
+                    arrivalStop = arrStop,
+                    departurePlatform = platformOf(first),
+                    arrivalPlatform = platformOf(last)
                 )
             }
 

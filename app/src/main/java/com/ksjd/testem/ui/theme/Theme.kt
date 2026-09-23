@@ -1,106 +1,116 @@
 package com.ksjd.testem.ui.theme
 
-import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import com.ksjd.testem.DefaultThemePresets
 import com.ksjd.testem.ThemePreset
 
-private val BaseDarkColorScheme = darkColorScheme(
-    primary = DarkPrimary,
-    secondary = DarkSecondary,
-    tertiary = DarkTertiary,
-    background = DarkBackground,
-    surface = DarkSurface,
-    surfaceVariant = DarkSurfaceVariant,
-    outline = DarkOutline,
-    primaryContainer = DarkPrimaryContainer,
-    secondaryContainer = DarkSecondaryContainer,
-    error = DarkError,
-    errorContainer = DarkErrorContainer,
-    onPrimary = DarkOnPrimary,
-    onSecondary = DarkOnSecondaryContainer,
-    onTertiary = DarkOnSurface,
-    onBackground = DarkOnBackground,
-    onSurface = DarkOnSurface,
-    onSurfaceVariant = DarkOnSurfaceVariant,
-    onPrimaryContainer = DarkOnPrimaryContainer,
-    onSecondaryContainer = DarkOnSecondaryContainer,
-    onError = DarkOnError,
-    onErrorContainer = DarkOnErrorContainer
-)
+private fun onColorFor(color: Color): Color = if (color.luminance() > 0.45f) Ink else Color.White
 
-private val BaseLightColorScheme = lightColorScheme(
-    primary = LightPrimary,
-    secondary = LightSecondary,
-    tertiary = LightTertiary,
-    background = LightBackground,
-    surface = LightSurface,
-    surfaceVariant = LightSurfaceVariant,
-    outline = LightOutline,
-    primaryContainer = LightPrimaryContainer,
-    secondaryContainer = LightSecondaryContainer,
-    error = LightError,
-    errorContainer = LightErrorContainer,
-    onPrimary = LightOnPrimary,
-    onSecondary = LightOnSecondaryContainer,
-    onTertiary = LightOnSurface,
-    onBackground = LightOnBackground,
-    onSurface = LightOnSurface,
-    onSurfaceVariant = LightOnSurfaceVariant,
-    onPrimaryContainer = LightOnPrimaryContainer,
-    onSecondaryContainer = LightOnSecondaryContainer,
-    onError = LightOnError,
-    onErrorContainer = LightOnErrorContainer
-)
+private fun lightScheme(preset: ThemePreset): ColorScheme {
+    val primary = Color(preset.primary)
+    val secondary = Color(preset.secondary)
+    val tertiary = Color(preset.tertiary)
+    return lightColorScheme(
+        primary = primary,
+        onPrimary = onColorFor(primary),
+        primaryContainer = lerp(primary, Color.White, 0.86f),
+        onPrimaryContainer = lerp(primary, Color.Black, 0.55f),
+        secondary = secondary,
+        onSecondary = onColorFor(secondary),
+        secondaryContainer = lerp(secondary, Color.White, 0.86f),
+        onSecondaryContainer = lerp(secondary, Color.Black, 0.55f),
+        tertiary = tertiary,
+        onTertiary = onColorFor(tertiary),
+        tertiaryContainer = lerp(tertiary, Color.White, 0.8f),
+        onTertiaryContainer = lerp(tertiary, Color.Black, 0.6f),
+        background = Paper,
+        onBackground = Ink,
+        surface = PaperRaised,
+        onSurface = Ink,
+        surfaceVariant = PaperSunken,
+        onSurfaceVariant = InkMuted,
+        surfaceContainerLowest = PaperRaised,
+        surfaceContainerLow = PaperRaised,
+        surfaceContainer = PaperRaised,
+        surfaceContainerHigh = PaperRaised,
+        surfaceContainerHighest = PaperSunken,
+        outline = PaperLine,
+        outlineVariant = PaperSunken,
+        error = ErrorLight,
+        errorContainer = ErrorContainerLight,
+        onErrorContainer = OnErrorContainerLight
+    )
+}
 
-private fun presetColorScheme(preset: ThemePreset, darkTheme: Boolean): androidx.compose.material3.ColorScheme {
-    val base = if (darkTheme) BaseDarkColorScheme else BaseLightColorScheme
-    return base.copy(
-        primary = Color(preset.primary),
-        secondary = Color(preset.secondary),
-        tertiary = Color(preset.tertiary)
+private fun darkScheme(preset: ThemePreset, amoled: Boolean): ColorScheme {
+    // Lift the brand colour so it keeps contrast on dark surfaces.
+    val primary = lerp(Color(preset.primary), Color.White, 0.35f)
+    val secondary = lerp(Color(preset.secondary), Color.White, 0.35f)
+    val tertiary = lerp(Color(preset.tertiary), Color.White, 0.2f)
+    val background = if (amoled) Color.Black else Night
+    val surface = if (amoled) Color.Black else NightRaised
+    val sunken = if (amoled) Color(0xFF0E0E0E) else NightSunken
+    return darkColorScheme(
+        primary = primary,
+        onPrimary = onColorFor(primary),
+        primaryContainer = lerp(Color(preset.primary), Color.Black, 0.55f),
+        onPrimaryContainer = lerp(primary, Color.White, 0.6f),
+        secondary = secondary,
+        onSecondary = onColorFor(secondary),
+        secondaryContainer = lerp(Color(preset.secondary), Color.Black, 0.55f),
+        onSecondaryContainer = lerp(secondary, Color.White, 0.6f),
+        tertiary = tertiary,
+        onTertiary = onColorFor(tertiary),
+        tertiaryContainer = lerp(Color(preset.tertiary), Color.Black, 0.6f),
+        onTertiaryContainer = lerp(tertiary, Color.White, 0.6f),
+        background = background,
+        onBackground = NightInk,
+        surface = surface,
+        onSurface = NightInk,
+        surfaceVariant = sunken,
+        onSurfaceVariant = NightInkMuted,
+        surfaceContainerLowest = background,
+        surfaceContainerLow = surface,
+        surfaceContainer = surface,
+        surfaceContainerHigh = sunken,
+        surfaceContainerHighest = sunken,
+        outline = if (amoled) Color(0xFF2A2A2A) else NightLine,
+        outlineVariant = sunken,
+        error = ErrorDark,
+        errorContainer = ErrorContainerDark,
+        onErrorContainer = OnErrorContainerDark
     )
 }
 
 @Composable
 fun TestEMTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = false,
     themePreset: ThemePreset? = null,
     amoledMode: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val baseScheme = when {
-        themePreset != null -> presetColorScheme(themePreset, darkTheme)
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> BaseDarkColorScheme
-        else -> BaseLightColorScheme
-    }
-    val colorScheme = if (darkTheme && amoledMode) {
-        baseScheme.copy(
-            background = Color(0xFF000000),
-            surface = Color(0xFF000000),
-            surfaceVariant = Color(0xFF0A0A0A)
-        )
+    val preset = themePreset ?: DefaultThemePresets.all.first()
+    val colorScheme = if (darkTheme) darkScheme(preset, amoledMode) else lightScheme(preset)
+    val transit = if (darkTheme) {
+        if (amoledMode) DarkTransitColors.copy(board = Color.Black, boardRow = Color(0xFF0E0E0E)) else DarkTransitColors
     } else {
-        baseScheme
+        LightTransitColors
     }
+    CompositionLocalProvider(LocalTransitColors provides transit) {
+        MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+    }
+}
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+object TransitTheme {
+    val colors: TransitColors
+        @Composable get() = LocalTransitColors.current
 }

@@ -3,8 +3,8 @@ package com.ksjd.testem
 import android.graphics.Bitmap
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import java.util.EnumMap
 
 object QRCodeGenerator {
@@ -14,19 +14,17 @@ object QRCodeGenerator {
             hints[EncodeHintType.MARGIN] = 1
             // Higher error correction yields a denser QR with more alignment patterns.
             hints[EncodeHintType.ERROR_CORRECTION] = ErrorCorrectionLevel.H
-            
-            val writer = QRCodeWriter()
-            val bitMatrix = writer.encode(data, BarcodeFormat.QR_CODE, width, height, hints)
-            
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
-            for (x in 0 until width) {
-                for (y in 0 until height) {
-                    bitmap.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+
+            val matrix = QRCodeWriter().encode(data, BarcodeFormat.QR_CODE, width, height, hints)
+            val pixels = IntArray(width * height)
+            for (y in 0 until height) {
+                val row = y * width
+                for (x in 0 until width) {
+                    pixels[row + x] = if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
                 }
             }
-            bitmap
+            Bitmap.createBitmap(pixels, width, height, Bitmap.Config.RGB_565)
         } catch (e: Exception) {
-            e.printStackTrace()
             null
         }
     }

@@ -1,43 +1,71 @@
 package com.ksjd.testem.ui.theme
 
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
-val DarkBackground = Color(0xFF0B0D10)
-val DarkSurface = Color(0xFF12151A)
-val DarkSurfaceVariant = Color(0xFF1B2027)
-val DarkOutline = Color(0xFF2A313A)
-val DarkPrimary = Color(0xFF29D3C6)
-val DarkSecondary = Color(0xFF6B7C93)
-val DarkTertiary = Color(0xFF3E4C5C)
-val DarkOnBackground = Color(0xFFE9EDF2)
-val DarkOnSurface = Color(0xFFE9EDF2)
-val DarkOnSurfaceVariant = Color(0xFFB0BBC7)
-val DarkPrimaryContainer = Color(0xFF103B39)
-val DarkOnPrimary = Color(0xFF001D1C)
-val DarkOnPrimaryContainer = Color(0xFFB8FFF8)
-val DarkSecondaryContainer = Color(0xFF1B2733)
-val DarkOnSecondaryContainer = Color(0xFFD7E2F0)
-val DarkError = Color(0xFFE34D59)
-val DarkErrorContainer = Color(0xFF3A1015)
-val DarkOnError = Color(0xFFFFF5F6)
-val DarkOnErrorContainer = Color(0xFFFFDAD9)
+// Base neutrals. Cool paper and ink rather than warm tones: this app lives
+// next to bus-stop signage, not on a menu.
+val Paper = Color(0xFFF4F6F8)
+val PaperRaised = Color(0xFFFFFFFF)
+val PaperSunken = Color(0xFFE7EBF0)
+val PaperLine = Color(0xFFCBD3DD)
+val Ink = Color(0xFF14181D)
+val InkMuted = Color(0xFF56606C)
 
-val LightBackground = Color(0xFFF4F6F9)
-val LightSurface = Color(0xFFFFFFFF)
-val LightSurfaceVariant = Color(0xFFE9EDF2)
-val LightOutline = Color(0xFFD0D7E2)
-val LightPrimary = Color(0xFF0EA5A2)
-val LightSecondary = Color(0xFF4D5A6A)
-val LightTertiary = Color(0xFF7A8797)
-val LightOnBackground = Color(0xFF0B0D10)
-val LightOnSurface = Color(0xFF0B0D10)
-val LightOnSurfaceVariant = Color(0xFF5B6674)
-val LightPrimaryContainer = Color(0xFFBFF3EF)
-val LightOnPrimary = Color(0xFFFFFFFF)
-val LightOnPrimaryContainer = Color(0xFF003A38)
-val LightSecondaryContainer = Color(0xFFE1E7F0)
-val LightOnSecondaryContainer = Color(0xFF1B2733)
-val LightError = Color(0xFFE5484D)
-val LightErrorContainer = Color(0xFFFBD7D9)
-val LightOnError = Color(0xFFFFFFFF)
-val LightOnErrorContainer = Color(0xFF410006)
+val Night = Color(0xFF101317)
+val NightRaised = Color(0xFF171B21)
+val NightSunken = Color(0xFF222831)
+val NightLine = Color(0xFF37404B)
+val NightInk = Color(0xFFE8ECF1)
+val NightInkMuted = Color(0xFFA8B2BE)
+
+val ErrorLight = Color(0xFFC8372D)
+val ErrorContainerLight = Color(0xFFFCE3E0)
+val OnErrorContainerLight = Color(0xFF5C120C)
+val ErrorDark = Color(0xFFFF8A80)
+val ErrorContainerDark = Color(0xFF45160F)
+val OnErrorContainerDark = Color(0xFFFFDAD5)
+
+/** Colours specific to transit UI that Material's scheme has no slot for. */
+@Immutable
+data class TransitColors(
+    /** Departure board background ("asphalt"). */
+    val board: Color,
+    val boardRow: Color,
+    val boardText: Color,
+    val boardDim: Color,
+    /** Live countdowns only. */
+    val amber: Color,
+    val onTime: Color,
+    val late: Color,
+    /** Line-number plate on light surfaces. */
+    val plate: Color,
+    val onPlate: Color
+)
+
+val LightTransitColors = TransitColors(
+    board = Color(0xFF1C2127),
+    boardRow = Color(0xFF262C34),
+    boardText = Color(0xFFF3F5F7),
+    boardDim = Color(0xFF8D97A3),
+    amber = Color(0xFFFFB21E),
+    onTime = Color(0xFF1F8A55),
+    late = Color(0xFFC8372D),
+    plate = Ink,
+    onPlate = Color.White
+)
+
+val DarkTransitColors = TransitColors(
+    board = Color(0xFF0B0E12),
+    boardRow = Color(0xFF161B21),
+    boardText = Color(0xFFF3F5F7),
+    boardDim = Color(0xFF8D97A3),
+    amber = Color(0xFFFFB21E),
+    onTime = Color(0xFF4CC38A),
+    late = Color(0xFFFF6B61),
+    plate = Color(0xFFE8ECF1),
+    onPlate = Ink
+)
+
+val LocalTransitColors = staticCompositionLocalOf { LightTransitColors }

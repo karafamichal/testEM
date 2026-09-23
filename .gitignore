@@ -37,3 +37,6 @@ VERIFICATION_CHECKLIST.md
 # Legacy code folder (if not already ignored)
 testEM-old/
 google-services.json
+# Build output
+.kotlin/
+**/build/
