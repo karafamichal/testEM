@@ -305,8 +305,8 @@
     <string name="catch_alert_miss_title">You\'ll probably miss line %1$s</string>
     <string name="catch_alert_miss_body">It\'s about %1$d min on foot and the bus leaves sooner. Check the next departure.</string>
     <string name="privacy_title">Two optional features</string>
-    <string name="privacy_community_title">Community delays for intercity buses</string>
-    <string name="privacy_community_body">Intercity buses have no live position. When you follow one, tap where the bus really is and see what other riders reported. Only the bus, the stop and the time are sent, with a random id that changes for every bus. No account, no location.</string>
+    <string name="privacy_community_title">Help with bus positions</string>
+    <string name="privacy_community_body">Many buses don\'t report where they are. Riders can: with buttons on the follow notification, or automatically from their phone while riding. Only the bus, the stop and the time are sent, with a random ID that changes for every bus. Never your location.</string>
     <string name="privacy_catch_title">Will I catch it?</string>
     <string name="privacy_catch_body">While you wait for a bus you follow, the app uses your location to work out the walk to the stop and tells you when to leave. Your location stays on this phone.</string>
     <string name="privacy_hint">You can change both later in Account > Community and location.</string>
@@ -365,4 +365,11 @@
     <string name="support_body">testEM is free and open source, built in spare time. If it makes your trips easier, you can support further work on the project with a small contribution. It is completely voluntary and changes nothing in the app.</string>
     <string name="support_open">Open support page</string>
     <string name="support_later">Not now</string>
+    <string name="community_mode_off">Off</string>
+    <string name="community_mode_off_hint">Only the operator\'s data and the timetable are used.</string>
+    <string name="community_mode_buttons">Buttons</string>
+    <string name="community_mode_buttons_hint">Tap Bus is here, Bus is leaving and At (stop) on the follow notification, on buses without a live position.</string>
+    <string name="community_mode_auto">Automatic</string>
+    <string name="community_mode_auto_hint">While you ride a bus you follow, your phone\'s position marks where the bus is. Only the stop it\'s between is sent, never your location. Needs precise location.</string>
+    <string name="community_your_phone">(from your phone)</string>
 </resources>

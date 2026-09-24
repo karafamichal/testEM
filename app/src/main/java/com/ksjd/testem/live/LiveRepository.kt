@@ -138,15 +138,78 @@ class LiveRepository(context: Context) {
                 lineId = lineId,
                 routeNumber = a.strAt(4),
                 tripNumber = a.longAt(5)?.toInt() ?: 0,
-                delaySeconds = a.longAt(7)?.toInt()
+                delaySeconds = a.longAt(7)?.toInt(),
+                reportedAtMs = localTimestamp(a.strAt(6))
             )
         }
     }
 
     private val cp = com.ksjd.testem.CpTimetableService()
 
+    /**
+     * The trip with the best known position. Sources, best first: a rider's phone on the
+     * bus (community "gps"), the bus's own GPS (fresh and on the route), riders' taps,
+     * sadzv's delay, the timetable.
+     */
     suspend fun getTrip(ref: TripRef): TripDetail = withContext(Dispatchers.IO) {
-        if (ref.isScheduleOnly) return@withContext getScheduledTrip(ref)
+        val base = if (ref.isScheduleOnly) timetableTrip(ref) else liveTrip(ref)
+        positioned(ref, base.copy(communityKey = communityKey(ref, base)))
+    }
+
+    private suspend fun positioned(ref: TripRef, trip: TripDetail): TripDetail {
+        var detail = trip
+        val bus = detail.busPosition
+        if (bus != null && detail.stops.size >= 2) {
+            detail = withCoordinates(ref, detail)
+            val expected = TripProgress.from(detail, TrackedTrip(ref, emptyList()), System.currentTimeMillis()).position
+            RoutePosition.snap(bus.first, bus.second, detail.stops.map { s -> s.lat?.let { it to s.lon!! } }, RoutePosition.BUS_GPS_MAX_M, expected)
+                ?.let { (index, _) ->
+                    val delay = RoutePosition.delayAt(index, detail.stops.map { it.scheduledMs }, System.currentTimeMillis())
+                    detail = detail.copy(delaySeconds = delay, positionSource = PositionSource.BusGps)
+                }
+        }
+        val key = detail.communityKey
+        if (key == null || !prefs.getCommunityEnabled() || !com.ksjd.testem.hub.HubClient.isConfigured) return detail
+        val community = runCatching { com.ksjd.testem.hub.HubClient.communityDelay(key) }.getOrNull()
+            ?: return detail
+        return when {
+            community.isFreshGps -> detail.copy(delaySeconds = community.delaySeconds, community = community, positionSource = PositionSource.RiderGps)
+            // Taps correct the timetable or sadzv's delay, but not a live GPS position.
+            detail.positionSource.isLive -> detail.copy(community = community)
+            else -> detail.copy(delaySeconds = community.delaySeconds, community = community, positionSource = PositionSource.Riders)
+        }
+    }
+
+    /**
+     * Same bus, same key on every phone and on the web. Buses from sadzv's board: line and
+     * trip ids and the date; timetable trips from the planner: line, first stop and time.
+     */
+    private fun communityKey(ref: TripRef, detail: TripDetail): String? {
+        val first = detail.stops.firstOrNull() ?: return null
+        if (!ref.isScheduleOnly && ref.lineId != 0L) {
+            val day = java.time.Instant.ofEpochMilli(first.scheduledMs).atZone(zone).toLocalDate()
+            return "sadzv|${ref.lineId}|${ref.tripNumber}|$day|${ref.line}"
+        }
+        return "${detail.line}|${first.name}|${first.scheduledMs}"
+    }
+
+    /** Stop coordinates: sadzv platforms for sadzv trips, cp.sk for timetable stops (cached by name). */
+    private val coordinateCache = mutableMapOf<String, Pair<Double, Double>?>()
+
+    suspend fun withCoordinates(ref: TripRef, detail: TripDetail): TripDetail {
+        if (detail.stops.all { it.lat != null }) return detail
+        val platforms = if (ref.isScheduleOnly || detail.fromTimetable) emptyMap()
+        else runCatching { getStops() }.getOrDefault(emptyList()).flatMap { it.platforms }.associateBy { it.id }
+        val stops = detail.stops.map { stop ->
+            val c = platforms[stop.platformId]?.let { it.lat to it.lon }
+                ?: synchronized(coordinateCache) { coordinateCache[stop.name] }
+                ?: cp.coordinatesOf(stop.name).also { found -> synchronized(coordinateCache) { coordinateCache[stop.name] = found } }
+            stop.copy(lat = c?.first, lon = c?.second)
+        }
+        return detail.copy(stops = stops)
+    }
+
+    private suspend fun liveTrip(ref: TripRef): TripDetail {
         val body = JsonObject().apply {
             addProperty("lineId", ref.lineId)
             addProperty("lineNumber", ref.line)
@@ -169,31 +232,45 @@ class LiveRepository(context: Context) {
             )
         }.sortedBy { it.order }
 
-        val vehicleDelay = runCatching {
+        val vehicle = runCatching {
             getVehicles().firstOrNull { it.lineId == ref.lineId && it.tripNumber == ref.tripNumber }
-        }.getOrNull()?.delaySeconds
+        }.getOrNull()
+        val vehicleDelay = vehicle?.delaySeconds
+        // sadzv keeps some positions for months: only a recent one says where the bus is.
+        val busPosition = vehicle?.takeIf {
+            it.lat != 0.0 && System.currentTimeMillis() - it.reportedAtMs in -60_000L..RoutePosition.FRESH_MS
+        }?.let { it.lat to it.lon }
         val lastPassed = stops.lastOrNull { it.isPassed }
         val passedDelay = lastPassed?.let { ((it.actualMs!! - it.scheduledMs) / 1000L).toInt() }
         if (stops.isEmpty()) {
             // sadzv often has no stop list (its own site too). Quietly use cp.sk's timetable
             // for this trip, keeping sadzv's live delay when the bus reports one.
             timetableFallback(ref)?.let { timetable ->
-                return@withContext timetable.copy(
+                return timetable.copy(
                     line = ref.line,
                     destination = ref.destination.ifBlank { timetable.destination },
                     delaySeconds = vehicleDelay,
                     alightOrder = null, // the user hasn't chosen where to get off
-                    fromTimetable = true
+                    fromTimetable = true,
+                    positionSource = if (vehicleDelay != null) PositionSource.BusDelay else PositionSource.Timetable,
+                    busPosition = busPosition
                 )
             }
         }
-        TripDetail(
+        return TripDetail(
             line = ref.line,
             destination = ref.destination.ifBlank { stops.lastOrNull()?.name.orEmpty() },
             stops = stops,
-            delaySeconds = vehicleDelay ?: passedDelay
+            delaySeconds = vehicleDelay ?: passedDelay,
+            positionSource = if (vehicleDelay ?: passedDelay != null) PositionSource.BusDelay else PositionSource.Timetable,
+            busPosition = busPosition
         )
     }
+
+    /** "2026-09-24T20:31:40Z" from sadzv is Slovak local time despite the Z. */
+    private fun localTimestamp(text: String): Long = runCatching {
+        java.time.LocalDateTime.parse(text.removeSuffix("Z").take(19)).atZone(zone).toInstant().toEpochMilli()
+    }.getOrDefault(0L)
 
     /** Timetable is fixed, so one download per trip is enough (the tracker asks every 15 s). */
     private val scheduleCache = mutableMapOf<String, TripDetail>()
@@ -232,14 +309,6 @@ class LiveRepository(context: Context) {
         return detail
     }
 
-    private suspend fun getScheduledTrip(ref: TripRef): TripDetail {
-        val detail = timetableTrip(ref)
-        // Community delay only for riders who opted in; the request itself reveals which bus they follow.
-        val key = detail.communityKey
-        if (key == null || !prefs.getCommunityEnabled() || !com.ksjd.testem.hub.HubClient.isConfigured) return detail
-        val community = runCatching { com.ksjd.testem.hub.HubClient.communityDelay(key) }.getOrNull() ?: return detail
-        return detail.copy(delaySeconds = community.delaySeconds, community = community)
-    }
 
     /** Stop coordinates by platform id (live trips) or by name (timetable trips), for the catch estimate. */
     suspend fun stopLocation(platformIds: List<Int>, name: String): Pair<Double, Double>? {

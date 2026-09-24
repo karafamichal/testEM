@@ -9,6 +9,9 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 const val MAX_ARRIVAL_ALERT_MINUTES = 60
+const val COMMUNITY_OFF = "off"
+const val COMMUNITY_BUTTONS = "buttons"
+const val COMMUNITY_AUTO = "auto"
 
 /** App preferences: login, security, appearance, reminders and saved places. */
 class CredentialsManager(context: Context) {
@@ -170,9 +173,16 @@ class CredentialsManager(context: Context) {
     fun wasPrivacyAsked(): Boolean = prefs.getBoolean("privacy_asked", false)
     fun markPrivacyAsked() = prefs.edit().putBoolean("privacy_asked", true).apply()
 
-    /** Share and receive community delays for intercity buses. */
-    fun getCommunityEnabled(): Boolean = prefs.getBoolean("community_enabled", false)
-    fun saveCommunityEnabled(enabled: Boolean) = prefs.edit().putBoolean("community_enabled", enabled).apply()
+    /**
+     * Helping with bus positions: [COMMUNITY_OFF], [COMMUNITY_BUTTONS] (tap where the bus is)
+     * or [COMMUNITY_AUTO] (the phone's position marks it while riding; nothing but the stop is sent).
+     */
+    fun getCommunityMode(): String = prefs.getString("community_mode", null)
+        ?: if (prefs.getBoolean("community_enabled", false)) COMMUNITY_BUTTONS else COMMUNITY_OFF
+    fun saveCommunityMode(mode: String) = prefs.edit().putString("community_mode", mode).apply()
+
+    /** Community data is fetched in either mode (the request reveals which bus is followed). */
+    fun getCommunityEnabled(): Boolean = getCommunityMode() != COMMUNITY_OFF
 
     /** Use the phone's location (on the phone only) to say whether the user will catch the bus. */
     fun getCatchEnabled(): Boolean = prefs.getBoolean("catch_enabled", false)

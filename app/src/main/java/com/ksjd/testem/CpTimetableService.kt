@@ -211,6 +211,15 @@ class CpTimetableService(
         return null
     }
 
+    /** Coordinates of a stop named as on cp.sk route pages ("Detva, aut.st."). */
+    fun coordinatesOf(name: String): Pair<Double, Double>? =
+        runCatching { fetchSuggestions("slovensko", name) }.getOrDefault(emptyList())
+            .firstNotNullOfOrNull { s ->
+                val x = s.coorX?.toDoubleOrNull()
+                val y = s.coorY?.toDoubleOrNull()
+                if (x != null && y != null) x to y else null
+            }
+
     private fun nearestStop(citySlug: String, name: String, lat: Double, lon: Double): CpStopSuggestion? {
         fun meters(s: CpStopSuggestion): Int? {
             val x = s.coorX?.toDoubleOrNull() ?: return null

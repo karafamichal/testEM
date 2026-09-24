@@ -14,6 +14,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.ksjd.testem.COMMUNITY_AUTO
+import com.ksjd.testem.COMMUNITY_BUTTONS
 import com.ksjd.testem.CredentialsManager
 import com.ksjd.testem.MainActivity
 import com.ksjd.testem.hub.HubClient
@@ -92,6 +94,14 @@ class TripTrackerService : Service() {
     private var lastFix: android.location.Location? = null
     private var lastFixAt = 0L
 
+    // Automatic mode: the rider's phone on the bus marks where it is (only the stop is sent).
+    private var riderListener: android.location.LocationListener? = null
+    private var routeCoords: List<Pair<Double, Double>?>? = null
+    private var routeCoordsLoading = false
+    private var lastRiderIndex = -1f
+    private var lastRiderReportAt = 0L
+    private var localFromGps = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -126,6 +136,11 @@ class TripTrackerService : Service() {
             leavingPressed = false
             stopLatLon = null
             stopLookupDone = false
+            stopRiderTracking()
+            routeCoords = null
+            lastRiderIndex = -1f
+            lastRiderReportAt = 0L
+            localFromGps = false
         }
         trip = requested
         TripTracking.set(requested)
@@ -136,6 +151,7 @@ class TripTrackerService : Service() {
     }
 
     override fun onDestroy() {
+        stopRiderTracking()
         scope.cancel()
         TripTracking.set(null)
         super.onDestroy()
@@ -145,8 +161,9 @@ class TripTrackerService : Service() {
         val special = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else 0
-        // Location type keeps the catch estimate working with the screen off.
-        val location = if (prefs.getCatchEnabled() && Locations.hasPermission(this) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // Location type keeps the catch estimate and automatic mode working with the screen off.
+        val wantsLocation = prefs.getCatchEnabled() || prefs.getCommunityMode() == COMMUNITY_AUTO
+        val location = if (wantsLocation && Locations.hasPermission(this) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         } else 0
         runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, special or location) }
@@ -160,7 +177,73 @@ class TripTrackerService : Service() {
         return if (at >= communityAt) detail.copy(delaySeconds = delay) else detail
     }
 
-    private fun communityOn(ref: TripRef) = ref.isScheduleOnly && prefs.getCommunityEnabled() && HubClient.isConfigured
+    /** Buttons for riders who chose them, on any bus whose position nobody knows live. */
+    private fun buttonsOn(detail: TripDetail) = prefs.getCommunityMode() == COMMUNITY_BUTTONS && HubClient.isConfigured &&
+        detail.communityKey != null && !detail.positionSource.isLive
+
+    // ------------------------------------------------------------ automatic mode (rider GPS)
+
+    private fun updateRiderTracking(current: TrackedTrip, detail: TripDetail) {
+        val wanted = prefs.getCommunityMode() == COMMUNITY_AUTO && HubClient.isConfigured &&
+            detail.communityKey != null && Locations.hasPrecise(this)
+        if (!wanted) return stopRiderTracking()
+        if (routeCoords == null && !routeCoordsLoading) {
+            routeCoordsLoading = true
+            scope.launch {
+                routeCoords = runCatching { repo.withCoordinates(current.ref, detail) }.getOrNull()
+                    ?.stops?.map { s -> s.lat?.let { it to s.lon!! } }
+                routeCoordsLoading = false
+            }
+        }
+        if (riderListener != null) return
+        val manager = getSystemService(android.location.LocationManager::class.java) ?: return
+        val listener = android.location.LocationListener { fix -> onRiderFix(fix) }
+        runCatching {
+            @Suppress("MissingPermission")
+            manager.requestLocationUpdates(android.location.LocationManager.GPS_PROVIDER, 5_000L, 10f, listener, android.os.Looper.getMainLooper())
+            riderListener = listener
+        }
+    }
+
+    private fun stopRiderTracking() {
+        val listener = riderListener ?: return
+        runCatching { getSystemService(android.location.LocationManager::class.java)?.removeUpdates(listener) }
+        riderListener = null
+    }
+
+    /**
+     * A fix from the rider's phone. It says where the bus is only once they are on it:
+     * close to the route, past their boarding stop and moving at vehicle speed.
+     */
+    private fun onRiderFix(fix: android.location.Location) {
+        val current = trip ?: return
+        val detail = lastDetail ?: return
+        val coords = routeCoords ?: return
+        val key = detail.communityKey ?: return
+        if (!fix.hasAccuracy() || fix.accuracy > 50f) return
+        val p = TripProgress.from(withLocalDelay(detail), current)
+        val (index, _) = RoutePosition.snap(fix.latitude, fix.longitude, coords, RoutePosition.RIDER_GPS_MAX_M, p.position) ?: return
+        val boarding = (p.boardingIndex ?: 0).toFloat()
+        val moving = (fix.hasSpeed() && fix.speed >= 3f) || (lastRiderIndex >= 0f && index > lastRiderIndex + 0.05f)
+        val previous = lastRiderIndex
+        lastRiderIndex = maxOf(lastRiderIndex, index)
+        if (index < boarding + 0.05f || !moving) return
+        val now = System.currentTimeMillis()
+        val scheduled = detail.stops.map { it.scheduledMs }
+        localDelay = RoutePosition.delayAt(index, scheduled, now) to now
+        localFromGps = true
+        redraw(current, detail)
+        // Every 30 s, or right away when the bus passes a stop.
+        if (now - lastRiderReportAt < 30_000L && index.toInt() == previous.toInt()) return
+        lastRiderReportAt = now
+        val stopIndex = index.toInt().coerceIn(0, detail.stops.lastIndex)
+        scope.launch {
+            runCatching {
+                HubClient.reportPosition(key, current.ref.line, stopIndex, detail.stops[stopIndex].name,
+                    RoutePosition.scheduledAt(index, scheduled), reporterId, kind = "gps")
+            }.getOrNull()?.let { pooled -> lastDetail = lastDetail?.copy(community = pooled) }
+        }
+    }
 
     /** "The bus is at stop [index] right now" ([leaving]: it is pulling out, the timetable's departure moment). */
     private fun reportPosition(index: Int, leaving: Boolean = false) {
@@ -168,8 +251,9 @@ class TripTrackerService : Service() {
         val detail = lastDetail ?: return
         val stop = detail.stops.getOrNull(index) ?: return
         val key = detail.communityKey ?: return
-        if (!communityOn(current.ref)) return
+        if (prefs.getCommunityMode() != COMMUNITY_BUTTONS || !HubClient.isConfigured) return
         val now = System.currentTimeMillis()
+        localFromGps = false
         if (leaving) leavingPressed = true else herePressed = true
         val arrival = !leaving && index == TripProgress.from(detail, current).boardingIndex
         // A bus that is already at the stop before its departure time waits for it: that's
@@ -180,7 +264,8 @@ class TripTrackerService : Service() {
         redraw(current, detail)
         scope.launch {
             val result = runCatching {
-                HubClient.reportPosition(key, current.ref.line, index, stop.name, stop.scheduledMs, reporterId, arrival)
+                HubClient.reportPosition(key, current.ref.line, index, stop.name, stop.scheduledMs, reporterId,
+                    kind = if (arrival) "arrival" else "position")
             }
             if (result.isFailure) reportNote = getString(R.string.community_send_failed)
             result.getOrNull()?.let { pooled -> lastDetail = lastDetail?.copy(community = pooled) }
@@ -223,8 +308,8 @@ class TripTrackerService : Service() {
     }
 
     /** Is the bus's real position known (live feed, a rider report or the community)? */
-    private fun positionKnown(ref: TripRef, detail: TripDetail): Boolean =
-        if (ref.isScheduleOnly) detail.community != null || localDelay != null else detail.delaySeconds != null
+    private fun positionKnown(@Suppress("UNUSED_PARAMETER") ref: TripRef, detail: TripDetail): Boolean =
+        detail.positionSource != PositionSource.Timetable || localDelay != null
 
     private fun catchLine(current: TrackedTrip, detail: TripDetail, p: TripProgress): String? {
         if (p.onBoard || !prefs.getCatchEnabled()) return null
@@ -282,6 +367,7 @@ class TripTrackerService : Service() {
                     finish()
                     return
                 }
+                updateRiderTracking(current, fetched ?: detail)
                 val estimate = updateCatch(current, progress)
                 NotificationManagerCompat.from(this).notifySafely(
                     NOTIFICATION_ID, liveNotification(current, detail, progress, catchLine(current, detail, progress))
@@ -346,14 +432,15 @@ class TripTrackerService : Service() {
         val builder = baseBuilder(trip)
         val community = detail.community
         val delayText = when {
-            !trip.ref.isScheduleOnly -> delayText(detail.delaySeconds)
-            localDelay != null && detail.delaySeconds == localDelay?.first -> delayText(detail.delaySeconds) + " " + getString(R.string.community_yours)
-            community != null -> delayText(detail.delaySeconds) + " " +
-                resources.getQuantityString(R.plurals.community_riders, community.reporters, community.reporters)
-            else -> "\n" + getString(R.string.track_schedule_only)
+            localDelay != null && detail.delaySeconds == localDelay?.first ->
+                delayText(detail.delaySeconds) + " " + getString(if (localFromGps) R.string.community_your_phone else R.string.community_yours)
+            community != null && (detail.positionSource == PositionSource.RiderGps || detail.positionSource == PositionSource.Riders) ->
+                delayText(detail.delaySeconds) + " " + resources.getQuantityString(R.plurals.community_riders, community.reporters, community.reporters)
+            detail.positionSource == PositionSource.Timetable && trip.ref.isScheduleOnly -> "\n" + getString(R.string.track_schedule_only)
+            else -> delayText(detail.delaySeconds)
         } + (reportNote?.let { "\n" + it } ?: "")
         // Only when the bus can actually be seen: from 30 min before it is due at the user's stop.
-        if (communityOn(trip.ref) && (p.onBoard || p.secondsToBoarding <= REPORT_WINDOW_S)) {
+        if (buttonsOn(detail) && (p.onBoard || p.secondsToBoarding <= REPORT_WINDOW_S)) {
             communityActions(detail, p).forEach { builder.addAction(it) }
         }
         if (!p.onBoard) {
@@ -488,6 +575,7 @@ class TripTrackerService : Service() {
     }
 
     private fun finish() {
+        stopRiderTracking()
         loop?.cancel()
         trip = null
         TripTracking.set(null)

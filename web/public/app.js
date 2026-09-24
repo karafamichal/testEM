@@ -587,14 +587,19 @@ function language(body) {
   };
 }
 
+const MODES = [['off', 'mode_off', 'mode_off_hint'], ['buttons', 'mode_buttons', 'mode_buttons_hint'], ['auto', 'mode_auto', 'mode_auto_hint']];
 function communitySettings(body) {
   const catchOn = store.get('catchOn', false);
+  const mode = live.communityMode();
   body.innerHTML = `<p class="hint">${t('privacy_community_body')}</p>
-    <ul class="list">${switchRow('community-on', t('community_switch'), '', store.get('communityOn', false))}</ul>
+    <ul class="list">${MODES.map(([value, title, hint]) => `<li><label class="row"><span class="row-text"><span class="row-title">${t(title)}</span><span class="row-sub">${t(hint)}</span></span><input type="radio" name="community-mode" value="${value}" ${mode === value ? 'checked' : ''}></label></li>`).join('')}</ul>
     <p class="hint">${t('privacy_catch_body')}</p>
     <ul class="list">${switchRow('catch-on', t('catch_switch'), '', catchOn)}${switchRow('catch-tt', t('catch_timetable'), t('catch_timetable_hint'), store.get('catchTimetable', false), !catchOn)}</ul>`;
   body.onchange = (e) => {
-    if (e.target.id === 'community-on') store.set('communityOn', e.target.checked);
+    if (e.target.name === 'community-mode') {
+      store.set('communityMode', e.target.value);
+      if (e.target.value === 'auto') navigator.geolocation?.getCurrentPosition(() => {}, () => toast(t('catch_location_off')), { enableHighAccuracy: true });
+    }
     if (e.target.id === 'catch-on') {
       store.set('catchOn', e.target.checked);
       $('#catch-tt', body).disabled = !e.target.checked;
@@ -687,17 +692,19 @@ function maybeAskPrivacy() {
   d.innerHTML = `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="privacy-title">
     <h2 id="privacy-title">${t('privacy_title')}</h2>
     <ul class="list">
-      ${switchRow('p-community', t('privacy_community_title'), t('privacy_community_body'), false)}
+      <li class="row" style="flex-direction:column;align-items:stretch"><span class="row-title">${t('privacy_community_title')}</span><span class="row-sub">${t('privacy_community_body')}</span>
+        <div class="chips" style="margin:8px 0 0">${MODES.map(([value, title], i) => `<label class="chip"><input type="radio" name="p-mode" value="${value}" ${i === 0 ? 'checked' : ''}>${t(title)}</label>`).join('')}</div></li>
       ${switchRow('p-catch', t('privacy_catch_title'), t('privacy_catch_body'), false)}
     </ul>
     <p class="hint small">${t('privacy_hint')}</p>
     <button class="btn wide" data-done>${t('done')}</button></div>`;
   document.body.appendChild(d);
   $('[data-done]', d).onclick = () => {
-    store.set('communityOn', $('#p-community', d).checked);
+    const mode = $('input[name="p-mode"]:checked', d)?.value || 'off';
+    store.set('communityMode', mode);
     store.set('catchOn', $('#p-catch', d).checked);
     store.set('privacyAsked', true);
-    if ($('#p-catch', d).checked) navigator.geolocation?.getCurrentPosition(() => {}, () => {});
+    if ($('#p-catch', d).checked || mode === 'auto') navigator.geolocation?.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: true });
     d.remove();
   };
 }

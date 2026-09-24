@@ -49,7 +49,9 @@ data class LiveVehicle(
     val lineId: Long,
     val routeNumber: String,
     val tripNumber: Int,
-    val delaySeconds: Int?
+    val delaySeconds: Int?,
+    /** When the bus last reported (sadzv sends Slovak local time marked as UTC). */
+    val reportedAtMs: Long = 0L
 )
 
 data class TripStop(
@@ -61,7 +63,10 @@ data class TripStop(
     /** Actual departure in epoch ms, null if the bus has not left this stop yet. */
     val actualMs: Long?,
     /** Platform or track at this stop (timetable trips from cp.sk), "" when unknown. */
-    val platform: String = ""
+    val platform: String = "",
+    /** Stop position, filled in only when a GPS position has to be placed on the route. */
+    val lat: Double? = null,
+    val lon: Double? = null
 ) {
     val isPassed: Boolean get() = actualMs != null
 }
@@ -77,15 +82,21 @@ data class TripDetail(
     val alightOrder: Int? = null,
     /** sadzv had no stop list, so stops and times come from cp.sk (live delay still from sadzv). */
     val fromTimetable: Boolean = false,
-    /** Pooled rider reports for timetable-only trips (when the user opted in). */
-    val community: com.ksjd.testem.hub.CommunityDelay? = null
-) {
-    /**
-     * Same bus, same key on every phone and on the web: line, first stop and its
-     * departure time. Only timetable trips have one.
-     */
-    val communityKey: String?
-        get() = stops.firstOrNull()?.let { "$line|${it.name}|${it.scheduledMs}" }
+    /** Pooled rider reports (when the user opted in). */
+    val community: com.ksjd.testem.hub.CommunityDelay? = null,
+    /** Same bus, same key on every phone and on the web (see LiveRepository.communityKey). */
+    val communityKey: String? = null,
+    /** Where the current position comes from, best first: rider GPS, bus GPS, riders' taps, delay, timetable. */
+    val positionSource: PositionSource = PositionSource.Timetable,
+    /** The bus's own GPS position when it is fresh (to place it on the route). */
+    val busPosition: Pair<Double, Double>? = null
+)
+
+enum class PositionSource {
+    Timetable, BusDelay, Riders, BusGps, RiderGps;
+
+    /** Someone knows exactly where the bus is: no need to ask riders to tap. */
+    val isLive: Boolean get() = this == BusGps || this == RiderGps
 }
 
 /** Minimal description of a trip, enough to query its stop list. */

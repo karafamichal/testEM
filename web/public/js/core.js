@@ -1,7 +1,7 @@
 // Shared helpers for the web client: DOM, storage, API, formatting, sheets, logs.
 import { t, lang } from './i18n.js';
 
-export const VERSION = '2.4.0';
+export const VERSION = '2.5.0';
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

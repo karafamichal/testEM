@@ -35,7 +35,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "1.2.5"
+VERSION = "1.3.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -67,6 +67,8 @@ BUG_CATEGORIES = ["crash", "ticket", "departures", "planner", "tracking", "accou
 
 # Community delay: how far back reports count, and how fast they fade.
 COMMUNITY_WINDOW_S = 45 * 60
+GPS_WINDOW_S = 3 * 60  # riders' phones on the bus: only this recent counts
+REPORT_KINDS = ("arrival", "position", "gps")
 COMMUNITY_HALF_LIFE_S = 10 * 60
 MAX_ABS_DELAY_S = 3 * 60 * 60   # latest a bus can plausibly be
 MAX_EARLY_S = 20 * 60            # earliest: a report further ahead of the timetable is a mistake
@@ -170,6 +172,9 @@ def db():
 def init_db():
     with db() as conn:
         conn.executescript(SCHEMA)
+        # 1.3.0: report kind (tap, arrival, rider phone GPS).
+        if "kind" not in {r[1] for r in conn.execute("PRAGMA table_info(community_reports)")}:
+            conn.execute("ALTER TABLE community_reports ADD COLUMN kind TEXT NOT NULL DEFAULT 'position'")
         # 1.1.0: per-admin "sign in with Authentik only".
         if "oidc_only" not in {r[1] for r in conn.execute("PRAGMA table_info(users)")}:
             conn.execute("ALTER TABLE users ADD COLUMN oidc_only INTEGER NOT NULL DEFAULT 0")
@@ -441,12 +446,17 @@ def aggregate_delay(reports, now_s):
 
 
 def trip_delay(conn, trip_key):
-    rows = conn.execute(
-        """SELECT delay_s, created_at, reporter, stop_index, stop_name FROM community_reports
+    """Riders' phones on the bus (last 3 min) beat everything; otherwise all reports (45 min)."""
+    rows = [dict(r) for r in conn.execute(
+        """SELECT delay_s, created_at, reporter, stop_index, stop_name, kind FROM community_reports
            WHERE trip_key=? AND created_at>=? AND reporter NOT IN (SELECT reporter FROM blocked_reporters)""",
         (trip_key, now() - COMMUNITY_WINDOW_S),
-    ).fetchall()
-    return aggregate_delay([dict(r) for r in rows], now())
+    )]
+    gps = [r for r in rows if r["kind"] == "gps" and now() - r["created_at"] <= GPS_WINDOW_S]
+    result = aggregate_delay(gps or rows, now())
+    if result:
+        result["source"] = "gps" if gps else "riders"
+    return result
 
 
 # ------------------------------------------------------------------ OIDC (Authentik)
@@ -910,14 +920,15 @@ class Handler(BaseHTTPRequestHandler):
             delay = max(0, delay)  # at the stop before departure time: it waits, so on time
         if delay > MAX_ABS_DELAY_S or delay < -MAX_EARLY_S:
             return self.error(400, "That stop time is too far from now", cors=True)
+        kind = data.get("kind") if data.get("kind") in REPORT_KINDS else "position"
         with db() as conn:
             blocked = conn.execute("SELECT 1 FROM blocked_reporters WHERE reporter=?", (reporter,)).fetchone()
             if not blocked:
                 conn.execute(
                     """INSERT INTO community_reports(created_at, trip_key, line, stop_index, stop_name, scheduled_ms,
-                       delay_s, reporter, platform) VALUES (?,?,?,?,?,?,?,?,?)""",
+                       delay_s, reporter, platform, kind) VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (now(), trip_key, clean(data.get("line"), 40), int(data.get("stopIndex") or 0),
-                     clean(data.get("stopName"), 120), scheduled_ms, delay, reporter, clean(data.get("platform"), 20)),
+                     clean(data.get("stopName"), 120), scheduled_ms, delay, reporter, clean(data.get("platform"), 20), kind),
                 )
             # A blocked reporter gets the same answer, so blocking is not obvious to them.
             result = trip_delay(conn, trip_key)

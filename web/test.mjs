@@ -1,6 +1,6 @@
 // Run: node test.mjs
 import assert from 'node:assert/strict';
-import { tripProgress, catchEstimate, communityKey, lineNumber, historyInsights, historyToCsv } from './public/js/logic.js';
+import { tripProgress, catchEstimate, communityKey, lineNumber, historyInsights, historyToCsv, snapToRoute, delayAt, BUS_GPS_MAX_M, RIDER_GPS_MAX_M } from './public/js/logic.js';
 import { parseScheduledTrip, localToEpoch } from './cp.js';
 
 const T0 = Date.UTC(2026, 8, 24, 10, 0);
@@ -26,6 +26,18 @@ assert.deepEqual(catchEstimate(600, 900), { walkSeconds: 600, marginSeconds: 300
 assert.equal(catchEstimate(600, 400).verdict, 'miss');
 assert.equal(catchEstimate(30, 10).verdict, 'atStop');
 assert.equal(communityKey(detail), `507|S0|${T0}`);
+assert.equal(communityKey(detail, { lineId: 910009139, tripNumber: 123, line: '1' }), 'sadzv|910009139|123|2026-09-24|1');
+
+// GPS on the route (same cases as the Android RoutePositionTest)
+const route = [[48.570, 19.125], [48.580, 19.125], [48.590, 19.125], [48.600, 19.125]];
+assert.ok(Math.abs(snapToRoute(48.5825, 19.1252, route, BUS_GPS_MAX_M).index - 1.25) < 0.03);
+assert.equal(snapToRoute(48.73, 19.15, route, BUS_GPS_MAX_M), null, 'far off the route: wrong trip');
+assert.equal(snapToRoute(48.5825, 19.1272, route, RIDER_GPS_MAX_M), null, 'rider beside the road is not on the bus');
+const loop = [[48.570, 19.125], [48.580, 19.125], [48.590, 19.125], [48.580, 19.125], [48.570, 19.125]];
+assert.ok(Math.abs(snapToRoute(48.575, 19.125, loop, 300, 0.4).index - 0.5) < 0.05);
+assert.ok(Math.abs(snapToRoute(48.575, 19.125, loop, 300, 3.6).index - 3.5) < 0.05);
+const sched = [0, 3, 6, 9].map((m) => T0 + m * 60000);
+assert.equal(delayAt(1.5, sched, T0 + 6 * 60000), 90);
 assert.equal(lineNumber('Bus 507105'), '507105');
 
 // cp.sk route page: boarding at the first active stop, day rollover after midnight.

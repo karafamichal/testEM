@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.3.0
+
+### New
+- **Help with bus positions on every bus.** Under *Account → Community and location* choose:
+  - **Off**: only the operator's data and the timetable.
+  - **Buttons**: *Bus is here*, *Bus is leaving* and *At (stop)* on the follow notification, now on every bus without a live position, city or intercity.
+  - **Automatic**: while you ride a bus you follow, your phone's position marks where the bus is, with no buttons. Only the stop the bus is between is sent, never your location. It needs precise location.
+- If you had community delays on, you keep *Buttons*.
+
+### Improved
+- **More accurate bus positions.** The bus's own GPS is used when it's fresh and actually on the route, so the app no longer moves the bus ahead of reality. Positions the operator kept from long ago, or that belong to another trip, are ignored.
+- **Best source first:** a rider's phone on the bus, then the bus's GPS, then riders' taps, then the operator's delay, then the timetable.
+
+## 2.2.0
+
+### Improved
+- **Stop lists for every bus.** The operator often has no stop list for a trip (city buses in Zvolen and Banská Bystrica, like lines 7 and 8 at Zlatý Potok). testEM then takes the stops and times from cp.sk instead. The operator's live data is still used first, and its delay is still shown whenever the bus reports one. You can follow these buses too.
+
 ## 2.1.0
 
 ### New

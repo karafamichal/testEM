@@ -81,10 +81,12 @@ async function tick() {
     try {
       if (!trips.has(key)) {
         trips.set(key, (f.ref.scheduleUrl ? getScheduledTrip(f.ref) : getLiveTrip(f.ref)).then(async (detail) => {
-          const ck = f.ref.scheduleUrl && f.community && hub ? communityKey(detail) : null;
+          const ck = f.community && hub ? communityKey(detail, f.ref) : null;
           if (!ck) return detail;
-          const pooled = await hub('community/delay?trip=' + encodeURIComponent(ck)).catch(() => null);
-          return pooled?.delay ? { ...detail, delaySeconds: pooled.delay.delaySeconds } : detail;
+          const pooled = (await hub('community/delay?trip=' + encodeURIComponent(ck)).catch(() => null))?.delay;
+          // Riders' phones beat the bus feed; taps only correct a bus without live GPS.
+          if (pooled && (pooled.source === 'gps' || detail.positionSource !== 'busGps')) return { ...detail, delaySeconds: pooled.delaySeconds };
+          return detail;
         }));
       }
       const detail = await trips.get(key);

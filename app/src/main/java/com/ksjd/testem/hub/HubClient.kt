@@ -18,8 +18,12 @@ data class CommunityDelay(
     val delaySeconds: Int,
     val reporters: Int,
     val updatedAtMs: Long,
-    val lastStopName: String?
-)
+    val lastStopName: String?,
+    /** "gps" when fresh reports come from riders' phones on the bus, else "riders" (taps). */
+    val source: String = "riders"
+) {
+    val isFreshGps: Boolean get() = source == "gps" && System.currentTimeMillis() - updatedAtMs < 3 * 60_000L
+}
 
 data class BugReport(
     val category: String,
@@ -65,7 +69,7 @@ object HubClient {
         stopName: String,
         scheduledMs: Long,
         reporter: String,
-        arrival: Boolean = false
+        kind: String = "position"
     ): CommunityDelay? = withContext(Dispatchers.IO) {
         val body = JsonObject().apply {
             addProperty("tripKey", tripKey)
@@ -75,8 +79,9 @@ object HubClient {
             addProperty("scheduledMs", scheduledMs)
             addProperty("reporter", reporter)
             addProperty("platform", "android")
-            // "arrival": the bus reached the rider's stop; early counts as on time (it waits).
-            addProperty("kind", if (arrival) "arrival" else "position")
+            // "arrival": the bus reached the rider's stop (early counts as on time, it waits);
+            // "position": a tap; "gps": the rider's phone on the bus (only the stop is sent).
+            addProperty("kind", kind)
         }
         parseDelay(post("community/reports", body))
     }
@@ -93,7 +98,8 @@ object HubClient {
             delaySeconds = d.get("delaySeconds").asInt,
             reporters = d.get("reporters").asInt,
             updatedAtMs = d.get("updatedAt").asLong,
-            lastStopName = d.get("lastStopName")?.takeIf { it.isJsonPrimitive }?.asString
+            lastStopName = d.get("lastStopName")?.takeIf { it.isJsonPrimitive }?.asString,
+            source = d.get("source")?.takeIf { it.isJsonPrimitive }?.asString ?: "riders"
         )
     }
 

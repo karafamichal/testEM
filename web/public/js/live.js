@@ -1,7 +1,10 @@
 // Departures, stop boards, trip sheet and "follow this bus" for the web client.
 import { t, lang } from './i18n.js';
 import { $, $$, esc, api, apiJson, store, config, clock, countdown, delayChip, delayInfo, plate, toast, openSheet, closeOverlay, log } from './core.js';
-import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber } from './logic.js';
+import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, scheduledAt, delayAt, RIDER_GPS_MAX_M } from './logic.js';
+
+/** Helping with bus positions: 'off' | 'buttons' | 'auto' (earlier versions had an on/off switch). */
+export const communityMode = () => store.get('communityMode', store.get('communityOn', false) ? 'buttons' : 'off');
 
 const BOARD_REFRESH_MS = 15000;
 const FOLLOW_REFRESH_MS = 15000;
@@ -228,16 +231,25 @@ export function openScheduledTrip(segment) {
   });
 }
 
-/** Trip + community delay for timetable-only buses (only for riders who opted in). */
-async function loadTrip(ref) {
-  const detail = await apiJson('/api/live/trip', ref);
-  const key = ref.scheduleUrl && store.get('communityOn', false) && config.hub ? communityKey(detail) : null;
-  if (key) {
-    const pooled = await apiJson('/api/hub/delay?trip=' + encodeURIComponent(key)).catch(() => null);
-    if (pooled?.delay) { detail.delaySeconds = pooled.delay.delaySeconds; detail.community = pooled.delay; }
+/**
+ * Trip with the best known position: a rider's phone on the bus, the bus's own GPS
+ * (placed by the server), riders' taps, sadzv's delay, the timetable.
+ */
+async function loadTrip(ref, { withCoordinates = false } = {}) {
+  const detail = await apiJson('/api/live/trip', { ...ref, withCoordinates });
+  detail.communityKey = communityKey(detail, ref);
+  if (communityMode() === 'off' || !config.hub || !detail.communityKey) return detail;
+  const pooled = (await apiJson('/api/hub/delay?trip=' + encodeURIComponent(detail.communityKey)).catch(() => null))?.delay;
+  if (!pooled) return detail;
+  detail.community = pooled;
+  if (pooled.source === 'gps' && Date.now() - pooled.updatedAt < 3 * 60000) {
+    Object.assign(detail, { delaySeconds: pooled.delaySeconds, positionSource: 'riderGps' });
+  } else if (detail.positionSource !== 'busGps') {
+    Object.assign(detail, { delaySeconds: pooled.delaySeconds, positionSource: 'riders' });
   }
   return detail;
 }
+const isLive = (d) => d?.positionSource === 'busGps' || d?.positionSource === 'riderGps';
 
 const sameRef = (a, b) => a && b && JSON.stringify(a) === JSON.stringify(b);
 
@@ -248,7 +260,7 @@ function renderTripSheet(body = $('#sheet .sheet-body')) {
   const detail = following && follow.detail ? effectiveDetail(follow) : s.detail;
   const alight = following ? follow.alightOrder : s.alightOrder;
   const status = s.ref.scheduleUrl
-    ? (detail?.community ? `${delayChip(detail.delaySeconds)} <span class="hint small">${esc(ridersText(detail.community.reporters))}</span>` : `<span class="hint small">${t('schedule_only')}</span>`)
+    ? (detail?.community && detail.positionSource !== 'timetable' ? `${delayChip(detail.delaySeconds)} <span class="hint small">${esc(ridersText(detail.community.reporters))}</span>` : `<span class="hint small">${t('schedule_only')}</span>`)
     : delayChip(detail?.delaySeconds);
   let timeline = '';
   if (s.loading) timeline = '<p class="hint"><span class="spinner"></span></p>';
@@ -294,7 +306,8 @@ let fix = null; // latest position (stays on the phone)
 let geoWatch = null;
 let stopCoords = null;
 
-const communityOn = () => follow?.ref.scheduleUrl && store.get('communityOn', false) && config.hub;
+/** Buttons for riders who chose them, on any bus whose position nobody knows live. */
+const buttonsOn = () => communityMode() === 'buttons' && config.hub && follow?.detail?.communityKey && !isLive(follow.detail);
 const catchOn = () => store.get('catchOn', false);
 
 function saveFollow() {
@@ -348,7 +361,7 @@ async function followTick() {
   if (!follow) return;
   if (Date.now() - follow.startedAt > 3 * 3600 * 1000) return stopFollow();
   try {
-    const detail = await loadTrip(follow.ref);
+    const detail = await loadTrip(follow.ref, { withCoordinates: communityMode() === 'auto' });
     if (follow && detail.stops.length) follow.detail = detail;
   } catch (err) { log('W', 'follow', err.message); }
   if (!follow) return;
@@ -360,6 +373,7 @@ async function followTick() {
       return stopFollow();
     }
     updateGeo(p);
+    updateRiderGps();
   }
   renderAllFollowSlots();
   if (sheetTrip && sameRef(sheetTrip.ref, follow.ref)) renderTripSheet();
@@ -394,6 +408,47 @@ function updateGeo(p) {
 function stopGeo() {
   if (geoWatch != null) navigator.geolocation.clearWatch(geoWatch);
   geoWatch = null;
+  if (riderWatch != null) navigator.geolocation.clearWatch(riderWatch);
+  riderWatch = null;
+}
+
+// ---- automatic mode: the rider's phone on the bus marks where it is (only the stop is sent).
+// A web app can use location only while it is open.
+
+let riderWatch = null, lastRiderIndex = -1, lastRiderReportAt = 0;
+
+function updateRiderGps() {
+  const wanted = communityMode() === 'auto' && config.hub && follow?.detail?.communityKey && 'geolocation' in navigator;
+  if (!wanted) {
+    if (riderWatch != null) navigator.geolocation.clearWatch(riderWatch);
+    riderWatch = null;
+    return;
+  }
+  if (riderWatch == null) {
+    riderWatch = navigator.geolocation.watchPosition(onRiderFix, () => {}, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  }
+}
+
+/** It says where the bus is only once the rider is on it: on the route, past their stop, moving. */
+function onRiderFix(pos) {
+  const d = follow?.detail;
+  if (!d?.stops?.length || d.stops.every((s) => s.lat == null)) return; // coordinates not loaded yet
+  if (pos.coords.accuracy > 50) return;
+  const p = tripProgress(effectiveDetail(follow), follow);
+  const hit = snapToRoute(pos.coords.latitude, pos.coords.longitude, d.stops.map((s) => (s.lat != null ? [s.lat, s.lon] : null)), RIDER_GPS_MAX_M, p.position);
+  if (!hit) return;
+  const moving = (pos.coords.speed ?? 0) >= 3 || (lastRiderIndex >= 0 && hit.index > lastRiderIndex + 0.05);
+  const previous = lastRiderIndex;
+  lastRiderIndex = Math.max(lastRiderIndex, hit.index);
+  if (hit.index < (p.boardingIndex ?? 0) + 0.05 || !moving) return;
+  const scheduled = d.stops.map((s) => s.scheduledMs);
+  follow.localDelay = { seconds: delayAt(hit.index, scheduled), at: Date.now(), fromGps: true };
+  renderAllFollowSlots();
+  if (Date.now() - lastRiderReportAt < 30000 && Math.floor(hit.index) === Math.floor(previous)) return;
+  lastRiderReportAt = Date.now();
+  const stopIndex = Math.min(Math.floor(hit.index), d.stops.length - 1);
+  api('/api/hub/report', { tripKey: d.communityKey, line: follow.ref.line, stopIndex, stopName: d.stops[stopIndex].name,
+    scheduledMs: scheduledAt(hit.index, scheduled), reporter: follow.reporter, kind: 'gps' });
 }
 
 function catchLine(d, p) {
@@ -413,13 +468,13 @@ function catchLine(d, p) {
 async function report(index, leaving = false) {
   const d = follow?.detail;
   const stop = d?.stops[index];
-  const key = d && communityKey(d);
-  if (!stop || !key || !communityOn()) return;
+  const key = d?.communityKey;
+  if (!stop || !key || communityMode() !== 'buttons' || !config.hub) return;
   if (leaving) follow.leavingAt = Date.now(); else follow.hereAt = Date.now();
   // At the stop before departure time: it waits, so that's on time, not early.
   const arrival = !leaving && index === tripProgress(d, follow).boardingIndex;
   const seconds = Math.round((Date.now() - stop.scheduledMs) / 1000);
-  follow.localDelay = { seconds: arrival ? Math.max(0, seconds) : seconds, at: Date.now() };
+  follow.localDelay = { seconds: arrival ? Math.max(0, seconds) : seconds, at: Date.now(), fromGps: false };
   follow.note = t('community_thanks');
   saveFollow();
   renderAllFollowSlots();
@@ -449,7 +504,7 @@ async function subscribePush(silent) {
     const subscription = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(config.vapidPublicKey) });
     const r = await apiJson('/api/follow', {
       subscription: subscription.toJSON(), ref: follow.ref, boardingPlatformIds: follow.boardingPlatformIds,
-      alightOrder: follow.alightOrder, lang: lang(), community: !!communityOn(),
+      alightOrder: follow.alightOrder, lang: lang(), community: communityMode() !== 'off',
       arriveLeadMinutes: store.get('arriveLead', 2),
     });
     follow.pushId = r.id;
@@ -480,10 +535,10 @@ function followCardHtml() {
   const p = tripProgress(d, follow);
   const f = follow;
   let delay;
-  if (!f.ref.scheduleUrl) delay = delayChip(d.delaySeconds);
-  else if (f.localDelay && d.delaySeconds === f.localDelay.seconds) delay = `${delayChip(d.delaySeconds)} <span class="hint small">${t('community_yours')}</span>`;
-  else if (d.community) delay = `${delayChip(d.delaySeconds)} <span class="hint small">${esc(ridersText(d.community.reporters))}</span>`;
-  else delay = `<span class="hint small">${t('schedule_only')}</span>`;
+  if (f.localDelay && d.delaySeconds === f.localDelay.seconds) delay = `${delayChip(d.delaySeconds)} <span class="hint small">${t(f.localDelay.fromGps ? 'community_your_phone' : 'community_yours')}</span>`;
+  else if (d.community && (d.positionSource === 'riderGps' || d.positionSource === 'riders')) delay = `${delayChip(d.delaySeconds)} <span class="hint small">${esc(ridersText(d.community.reporters))}</span>`;
+  else if (d.positionSource === 'timetable' && f.ref.scheduleUrl) delay = `<span class="hint small">${t('schedule_only')}</span>`;
+  else delay = delayChip(d.delaySeconds);
 
   const title = p.onBoard
     ? t('follow_next', p.nextStopName || d.destination, clock(p.nextExpectedMs))
@@ -496,7 +551,7 @@ function followCardHtml() {
   const short = (n) => (n.length > 18 ? n.slice(0, 17).replace(/[, ]+$/, '') + '…' : n);
   let actions = '';
   // Only when the bus can actually be seen: from 30 min before it is due at the user's stop.
-  if (communityOn() && (p.onBoard || p.secondsToBoarding <= 30 * 60)) {
+  if (buttonsOn() && (p.onBoard || p.secondsToBoarding <= 30 * 60)) {
     // "Bus is here", "Bus is leaving" (the departure moment), then "At <next stop>".
     const after = d.stops[p.boardingIndex + 1];
     if (!p.onBoard && p.boardingIndex != null && f.leavingAt && after) {

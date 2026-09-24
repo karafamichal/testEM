@@ -11,7 +11,7 @@ A cross-platform (Android & iOS) mobile application that logs into the SADZV por
 - **Reminders** (Android): notifications for low credit and for a ticket, card or discount that is about to expire.
 - **App security**: PIN lock with optional biometrics and an adjustable lock timeout.
 - **Customisation**: colour themes, pure-black dark mode, English and Slovak.
-- **Community delays** (opt-in): intercity buses have no live position, so riders following one can tap "Bus is here", "At <next stop>" or "Still at <stop>" on the notification. Everyone following that bus sees the pooled delay. Only the bus, the stop and the time are sent, with a random id that changes for every bus.
+- **Help with bus positions** (opt-in): *Buttons* (tap *Bus is here*, *Bus is leaving*, *At (stop)* on buses without a live position) or *Automatic* (your phone marks where the bus is while you ride it; only the stop is sent, never your location). Positions are used best first: a rider's phone, the bus's own GPS when fresh and on the route, riders' taps, the operator's delay, the timetable.
 - **Will I catch it?** (opt-in): while you wait for a followed bus, the notification says how long the walk to the stop is and when to leave, from your location on the phone (never sent). Leave-now alerts fire only when the bus's real position is known, unless you also allow timetable-based alerts.
 - **Report a bug**: send the app's logs with an optional summary, description, name and email, after agreeing to send them. Reports go to [emhub](hub/README.md).
 - **Web version** for iPhone: a home-screen web app with the same features; see [web/README.md](web/README.md).

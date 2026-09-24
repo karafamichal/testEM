@@ -315,8 +315,8 @@
     <string name="catch_alert_miss_title">Linku %1$s asi nestihnete</string>
     <string name="catch_alert_miss_body">Pešo je to asi %1$d min a autobus odchádza skôr. Pozrite ďalší spoj.</string>
     <string name="privacy_title">Dve voliteľné funkcie</string>
-    <string name="privacy_community_title">Meškania medzimestských spojov od cestujúcich</string>
-    <string name="privacy_community_body">Medzimestské autobusy nemajú živú polohu. Keď nejaký sledujete, jedným ťuknutím označíte, kde autobus naozaj je, a uvidíte hlásenia ostatných. Odosiela sa len spoj, zastávka a čas s náhodným ID, ktoré sa mení pri každom spoji. Bez účtu, bez polohy.</string>
+    <string name="privacy_community_title">Pomoc s polohou autobusov</string>
+    <string name="privacy_community_body">Mnohé autobusy neposielajú svoju polohu. Cestujúci ju môžu: tlačidlami v oznámení sledovaného spoja alebo automaticky z telefónu počas jazdy. Odosiela sa len spoj, zastávka a čas s náhodným ID, ktoré sa mení pri každom spoji. Nikdy nie vaša poloha.</string>
     <string name="privacy_catch_title">Stihnem to?</string>
     <string name="privacy_catch_body">Kým čakáte na sledovaný spoj, aplikácia z vašej polohy vypočíta cestu pešo na zastávku a povie, kedy vyraziť. Poloha zostáva v tomto telefóne.</string>
     <string name="privacy_hint">Obe môžete neskôr zmeniť v Účet > Komunita a poloha.</string>
@@ -377,4 +377,11 @@
     <string name="support_body">testEM je zadarmo a s otvoreným kódom, vzniká vo voľnom čase. Ak vám uľahčuje cestovanie, môžete ďalšiu prácu na projekte podporiť malým príspevkom. Je to úplne dobrovoľné a v aplikácii to nič nemení.</string>
     <string name="support_open">Otvoriť stránku podpory</string>
     <string name="support_later">Teraz nie</string>
+    <string name="community_mode_off">Vypnuté</string>
+    <string name="community_mode_off_hint">Použijú sa len údaje dopravcu a cestovný poriadok.</string>
+    <string name="community_mode_buttons">Tlačidlá</string>
+    <string name="community_mode_buttons_hint">Ťuknite na Autobus je tu, Autobus odchádza a Na (zastávka) v oznámení sledovaného spoja, pri autobusoch bez živej polohy.</string>
+    <string name="community_mode_auto">Automaticky</string>
+    <string name="community_mode_auto_hint">Keď idete sledovaným autobusom, poloha telefónu určí, kde autobus je. Odošle sa len zastávka, medzi ktorými je, nikdy nie vaša poloha. Vyžaduje presnú polohu.</string>
+    <string name="community_your_phone">(z vášho telefónu)</string>
 </resources>

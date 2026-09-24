@@ -210,6 +210,17 @@ body = json.dumps({"tripKey": "5|Zvolen, AS|2", "line": "5", "stopIndex": 0, "st
 res = opener.open(urllib.request.Request(base + "/api/v1/community/reports", data=body, headers={"Content-Type": "application/json", **key}))
 assert json.loads(res.read())["yourDelaySeconds"] == 0, "bus at the stop 6 min before departure is on time, not early"
 
+# a rider's phone on the bus beats taps: taps say 4 min late, the phone says 1 min late
+def send(kind, who, minutes_late, trip="7|gps|1"):
+    body = json.dumps({"tripKey": trip, "line": "7", "stopIndex": 2, "stopName": "X", "kind": kind,
+                       "scheduledMs": (hub.now() - minutes_late * 60) * 1000, "reporter": who}).encode()
+    return json.loads(opener.open(urllib.request.Request(base + "/api/v1/community/reports", data=body,
+                                                         headers={"Content-Type": "application/json", **key})).read())
+send("position", "tap1", 4)
+assert send("position", "tap2", 4)["delay"]["source"] == "riders"
+pooled = send("gps", "phone1", 1)["delay"]
+assert pooled["source"] == "gps" and abs(pooled["delaySeconds"] - 60) <= 2 and pooled["reporters"] == 1, pooled
+
 # keep-alive: a POST whose handler ignores the body must not corrupt the next request
 import http.client
 kc = http.client.HTTPConnection("127.0.0.1", server.server_port)

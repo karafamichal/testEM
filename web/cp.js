@@ -3,7 +3,7 @@
 //  - cp.sk planner (stop suggestions, connections, paging, route pages)
 // All times the browser gets are epoch ms; Slovak wall-clock conversion happens here.
 import { parse } from 'node-html-parser';
-import { readableStop } from './public/js/logic.js';
+import { readableStop, tripProgress, snapToRoute, delayAt, BUS_GPS_MAX_M, GPS_FRESH_MS } from './public/js/logic.js';
 
 const LIVE = 'https://sadzv.qrbus.me/index';
 const TZ = 'Europe/Bratislava';
@@ -153,10 +153,50 @@ export async function getDepartures(platformIds) {
   }).sort((a, b) => a.departsAtMs - b.departsAtMs);
 }
 
+/** "2026-09-24T20:31:40Z" from sadzv is Slovak local time despite the Z. */
+function localTimestamp(textValue) {
+  const m = /(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(textValue || '');
+  return m ? localToEpoch(+m[1], +m[2], +m[3], +m[4], +m[5]) + +m[6] * 1000 : 0;
+}
+
 async function getVehicles() {
   const root = await liveGet('getAllRtdVehicles');
   return (root.vehicles || []).filter((a) => Array.isArray(a) && a.length >= 8 && num(a[3]))
-    .map((a) => ({ lineId: num(a[3]), tripNumber: num(a[5]) || 0, delaySeconds: num(a[7]) }));
+    .map((a) => ({
+      lineId: num(a[3]), tripNumber: num(a[5]) || 0, delaySeconds: num(a[7]),
+      lat: (num(a[0]) || 0) / 1e5, lon: (num(a[1]) || 0) / 1e5, reportedAtMs: localTimestamp(a[6]),
+    }));
+}
+
+const coordinateCache = new Map(); // cp.sk stop name -> [lat, lon] | null
+
+/** Stop coordinates: sadzv platforms for sadzv trips, cp.sk suggestions for timetable stops. */
+export async function withCoordinates(trip, fromSadzv) {
+  if (trip.stops.every((s) => s.lat != null)) return trip;
+  const platforms = fromSadzv ? new Map((await getStops()).flatMap((s) => s.platforms.map((p) => [p.id, p]))) : new Map();
+  const stops = [];
+  for (const stop of trip.stops) {
+    let c = platforms.get(stop.platformId);
+    c = c ? [c.lat, c.lon] : coordinateCache.get(stop.name);
+    if (c === undefined) {
+      const s = (await suggestStops('slovensko', stop.name).catch(() => [])).find((x) => x.coorX && x.coorY);
+      c = s ? [Number(s.coorX), Number(s.coorY)] : null;
+      if (coordinateCache.size > 5000) coordinateCache.clear();
+      coordinateCache.set(stop.name, c);
+    }
+    stops.push({ ...stop, lat: c?.[0] ?? null, lon: c?.[1] ?? null });
+  }
+  return { ...trip, stops };
+}
+
+/** The bus's own GPS, when fresh and on the route, becomes the delay. */
+async function placeBus(trip, busPosition, fromSadzv) {
+  if (!busPosition || trip.stops.length < 2) return trip;
+  const placed = await withCoordinates(trip, fromSadzv);
+  const expected = tripProgress(placed, { boardingPlatformIds: [], alightOrder: null }).position;
+  const hit = snapToRoute(busPosition[0], busPosition[1], placed.stops.map((s) => (s.lat != null ? [s.lat, s.lon] : null)), BUS_GPS_MAX_M, expected);
+  if (!hit) return placed; // the feed sometimes pairs a position with the wrong trip
+  return { ...placed, delaySeconds: delayAt(hit.index, placed.stops.map((s) => s.scheduledMs)), positionSource: 'busGps' };
 }
 
 /** Trip times are local wall-clock values encoded as if they were UTC. */
@@ -262,6 +302,9 @@ export async function getLiveTrip(ref) {
     };
   }).sort((a, b) => a.order - b.order);
   const vehicle = await getVehicles().then((v) => v.find((x) => x.lineId === ref.lineId && x.tripNumber === ref.tripNumber)).catch(() => null);
+  // sadzv keeps some positions for months: only a recent one says where the bus is.
+  const age = vehicle ? Date.now() - vehicle.reportedAtMs : Infinity;
+  const busPosition = vehicle?.lat && age > -60000 && age < GPS_FRESH_MS ? [vehicle.lat, vehicle.lon] : null;
   const passed = [...stops].reverse().find((s) => s.actualMs != null);
   const passedDelay = passed ? Math.trunc((passed.actualMs - passed.scheduledMs) / 1000) : null;
   if (!stops.length) {
@@ -269,16 +312,19 @@ export async function getLiveTrip(ref) {
     // keeping sadzv's live delay when the bus reports one.
     const timetable = await timetableFallback(ref);
     if (timetable) {
-      return { ...timetable, line: ref.line, destination: ref.destination || timetable.destination,
-        delaySeconds: vehicle?.delaySeconds ?? null, alightOrder: null, fromTimetable: true };
+      return placeBus({ ...timetable, line: ref.line, destination: ref.destination || timetable.destination,
+        delaySeconds: vehicle?.delaySeconds ?? null, alightOrder: null, fromTimetable: true,
+        positionSource: vehicle?.delaySeconds != null ? 'busDelay' : 'timetable' }, busPosition, false);
     }
   }
-  return {
+  const delaySeconds = vehicle?.delaySeconds ?? passedDelay;
+  return placeBus({
     line: ref.line,
     destination: ref.destination || stops.at(-1)?.name || '',
     stops,
-    delaySeconds: vehicle?.delaySeconds ?? passedDelay,
-  };
+    delaySeconds,
+    positionSource: delaySeconds != null ? 'busDelay' : 'timetable',
+  }, busPosition, true);
 }
 
 // ---------------------------------------------------------------- cp.sk

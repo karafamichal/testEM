@@ -28,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -50,6 +51,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ksjd.testem.AppViewModel
+import com.ksjd.testem.COMMUNITY_AUTO
+import com.ksjd.testem.COMMUNITY_BUTTONS
+import com.ksjd.testem.COMMUNITY_OFF
 import com.ksjd.testem.CredentialsManager
 import com.ksjd.testem.R
 import com.ksjd.testem.hub.AppLogs
@@ -80,21 +84,31 @@ private val LOCATION_PERMISSIONS = arrayOf(Manifest.permission.ACCESS_FINE_LOCAT
 fun PrivacyDialog(onDone: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { CredentialsManager(context) }
-    var community by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(prefs.getCommunityMode()) }
     var catch by remember { mutableStateOf(false) }
-    val location = rememberLocationRequest { granted -> if (!granted) prefs.saveCatchEnabled(false); onDone() }
+    val location = rememberLocationRequest { granted ->
+        if (!Locations.hasPrecise(context)) {
+            if (!granted) prefs.saveCatchEnabled(false)
+            if (prefs.getCommunityMode() == COMMUNITY_AUTO) prefs.saveCommunityMode(COMMUNITY_BUTTONS)
+        }
+        onDone()
+    }
     val finish = {
-        prefs.saveCommunityEnabled(community)
+        prefs.saveCommunityMode(mode)
         prefs.saveCatchEnabled(catch)
         prefs.markPrivacyAsked()
-        if (catch && !Locations.hasPrecise(context)) location.launch(LOCATION_PERMISSIONS) else onDone()
+        if ((catch || mode == COMMUNITY_AUTO) && !Locations.hasPrecise(context)) location.launch(LOCATION_PERMISSIONS) else onDone()
     }
     AlertDialog(
         onDismissRequest = {},
         title = { Text(stringResource(R.string.privacy_title)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                OptIn(stringResource(R.string.privacy_community_title), stringResource(R.string.privacy_community_body), community) { community = it }
+                Column {
+                    Text(stringResource(R.string.privacy_community_title), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.privacy_community_body), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ModeChoices(mode) { mode = it }
+                }
                 OptIn(stringResource(R.string.privacy_catch_title), stringResource(R.string.privacy_catch_body), catch) { catch = it }
                 Text(stringResource(R.string.privacy_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -119,14 +133,24 @@ private fun OptIn(title: String, body: String, checked: Boolean, onChange: (Bool
 fun CommunitySettings() {
     val context = LocalContext.current
     val prefs = remember { CredentialsManager(context) }
-    var community by remember { mutableStateOf(prefs.getCommunityEnabled()) }
+    var mode by remember { mutableStateOf(prefs.getCommunityMode()) }
     var catch by remember { mutableStateOf(prefs.getCatchEnabled()) }
     var timetable by remember { mutableStateOf(prefs.getCatchTimetableAlerts()) }
     var hasLocation by remember { mutableStateOf(Locations.hasPrecise(context)) }
+    var pendingAuto by remember { mutableStateOf(false) }
     val location = rememberLocationRequest { granted ->
         hasLocation = Locations.hasPrecise(context)
-        catch = granted
-        prefs.saveCatchEnabled(granted)
+        if (pendingAuto) {
+            pendingAuto = false
+            if (hasLocation) { mode = COMMUNITY_AUTO; prefs.saveCommunityMode(COMMUNITY_AUTO) }
+        } else {
+            catch = granted
+            prefs.saveCatchEnabled(granted)
+        }
+    }
+    val setMode: (String) -> Unit = { m ->
+        if (m == COMMUNITY_AUTO && !Locations.hasPrecise(context)) { pendingAuto = true; location.launch(LOCATION_PERMISSIONS) }
+        else { mode = m; prefs.saveCommunityMode(m) }
     }
 
     Text(
@@ -136,12 +160,19 @@ fun CommunitySettings() {
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
     )
     ListGroup {
-        ListRow(
-            stringResource(R.string.community_switch),
-            subtitle = stringResource(R.string.community_switch_hint),
-            onClick = { community = !community; prefs.saveCommunityEnabled(community) },
-            trailing = { Switch(community, { community = it; prefs.saveCommunityEnabled(it) }) }
-        )
+        listOf(
+            Triple(COMMUNITY_OFF, R.string.community_mode_off, R.string.community_mode_off_hint),
+            Triple(COMMUNITY_BUTTONS, R.string.community_mode_buttons, R.string.community_mode_buttons_hint),
+            Triple(COMMUNITY_AUTO, R.string.community_mode_auto, R.string.community_mode_auto_hint)
+        ).forEachIndexed { i, (value, title, hint) ->
+            if (i > 0) GroupDivider()
+            ListRow(
+                stringResource(title),
+                subtitle = stringResource(hint),
+                onClick = { setMode(value) },
+                trailing = { RadioButton(selected = mode == value, onClick = { setMode(value) }) }
+            )
+        }
     }
     Text(
         stringResource(R.string.privacy_catch_body),
@@ -173,6 +204,29 @@ fun CommunitySettings() {
             onAction = { location.launch(LOCATION_PERMISSIONS) }
         )
     }
+}
+
+/** Off / Buttons / Automatic, compact for the first-run dialog. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ModeChoices(selected: String, onSelect: (String) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+        listOf(COMMUNITY_OFF to R.string.community_mode_off, COMMUNITY_BUTTONS to R.string.community_mode_buttons, COMMUNITY_AUTO to R.string.community_mode_auto)
+            .forEach { (value, label) ->
+                FilterChip(
+                    selected = selected == value,
+                    onClick = { onSelect(value) },
+                    label = { Text(stringResource(label)) },
+                    leadingIcon = if (selected == value) ({ Icon(Icons.Outlined.Check, null, Modifier.size(18.dp)) }) else null
+                )
+            }
+    }
+    val hint = when (selected) {
+        COMMUNITY_BUTTONS -> R.string.community_mode_buttons_hint
+        COMMUNITY_AUTO -> R.string.community_mode_auto_hint
+        else -> R.string.community_mode_off_hint
+    }
+    Text(stringResource(hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 private val ARRIVAL_CHOICES = listOf(1, 2, 3, 5, 10)

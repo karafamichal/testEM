@@ -9,11 +9,56 @@ export const lineNumber = (line) => String(line || '').trim().split(' ').pop();
 export const readableStop = (name) =>
   String(name || '').split(',').map((s) => s.trim()).filter(Boolean).join(', ');
 
-/** Same bus, same key on every phone: line, first stop, first departure (epoch ms). */
-export function communityKey(detail) {
+const bratislavaDate = (ms) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bratislava' }).format(new Date(ms));
+
+/**
+ * Same bus, same key on every phone and in the Android app. Buses from sadzv's board:
+ * line and trip ids and the date; timetable trips from the planner: line, first stop, time.
+ */
+export function communityKey(detail, ref = {}) {
   const first = detail?.stops?.[0];
-  return first ? `${detail.line}|${first.name}|${first.scheduledMs}` : null;
+  if (!first) return null;
+  if (!ref.scheduleUrl && ref.lineId) return `sadzv|${ref.lineId}|${ref.tripNumber}|${bratislavaDate(first.scheduledMs)}|${ref.line}`;
+  return `${detail.line}|${first.name}|${first.scheduledMs}`;
 }
+
+/** GPS further than this from the route is not on it (bus feed / rider's phone). */
+export const BUS_GPS_MAX_M = 300;
+export const RIDER_GPS_MAX_M = 80;
+export const GPS_FRESH_MS = 2 * 60000;
+
+/**
+ * Fractional stop index of a GPS point along the stops (2.4 = 40 % from stop 2 to 3) and
+ * its distance, or null when too far. expectedIndex breaks ties on out-and-back routes.
+ */
+export function snapToRoute(lat, lon, coords, maxMeters, expectedIndex = null) {
+  const k = Math.cos((lat * Math.PI) / 180);
+  const xy = ([a, b]) => [(b - lon) * k * 111320, (a - lat) * 110540];
+  let best = null;
+  for (let i = 0; i < coords.length - 1; i++) {
+    if (!coords[i] || !coords[i + 1]) continue;
+    const [ax, ay] = xy(coords[i]);
+    const [bx, by] = xy(coords[i + 1]);
+    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.min(1, Math.max(0, -(ax * dx + ay * dy) / len2));
+    const d = Math.hypot(ax + t * dx, ay + t * dy);
+    if (d > maxMeters) continue;
+    const index = i + t;
+    const cost = d + (expectedIndex == null ? 0 : Math.max(0, Math.abs(index - expectedIndex) - 2) * 150);
+    if (!best || cost < best.cost) best = { index, meters: d, cost };
+  }
+  return best ? { index: best.index, meters: best.meters } : null;
+}
+
+export function scheduledAt(index, scheduledMs) {
+  if (!scheduledMs.length) return 0;
+  const i = Math.min(Math.max(Math.floor(index), 0), scheduledMs.length - 1);
+  if (i === scheduledMs.length - 1) return scheduledMs[i];
+  const frac = Math.min(1, Math.max(0, index - i));
+  return scheduledMs[i] + Math.round((scheduledMs[i + 1] - scheduledMs[i]) * frac);
+}
+
+export const delayAt = (index, scheduledMs, now = Date.now()) => Math.trunc((now - scheduledAt(index, scheduledMs)) / 1000);
 
 export function distanceMeters(lat1, lon1, lat2, lon2) {
   const rad = Math.PI / 180;

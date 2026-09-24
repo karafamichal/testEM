@@ -355,11 +355,14 @@ async function renderBug(id) {
 // ------------------------------------------------------------------ community
 
 function tripParts(key) {
-  // tripKey = line|first stop|first departure (epoch ms)
-  const [line, first, ms] = key.split("|");
+  // City/regional buses from sadzv: sadzv|lineId|trip|date|line; planner trips: line|first stop|first departure (ms)
+  const parts = key.split("|");
+  if (parts[0] === "sadzv") return { line: parts[4] || "", first: "trip " + parts[2], start: parts[3] };
+  const [line, first, ms] = parts;
   const t = Number(ms);
   return { line, first, start: t ? new Date(t).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "" };
 }
+const kindLabel = { gps: "rider's phone", arrival: "bus is here", position: "tap" };
 
 async function renderCommunity(selected) {
   const [trips, stats] = await Promise.all([api("community/trips"), refreshCounts()]);
@@ -373,10 +376,10 @@ async function renderCommunity(selected) {
       </div>
     </div>
     <div class="section">
-      <p class="muted" style="max-width:75ch;margin:0 0 14px">Riders who opted in tap the buttons on the follow notification to say where their intercity bus really is. Each rider counts once per bus; the newest reports weigh most, and reports far from the rest are ignored.</p>
+      <p class="muted" style="max-width:75ch;margin:0 0 14px">Riders who opted in say where their bus really is: with buttons on the follow notification, or automatically from their phone while riding (only the stop is sent). Phones on the bus from the last 3 minutes beat taps. Each rider counts once per bus; the newest reports weigh most, and reports far from the rest are ignored.</p>
       <h2>Buses in the last 6 hours</h2>
       ${trips.length ? `<div class="table-wrap"><table class="grid">
-        <thead><tr><th>Line</th><th>Trip</th><th>Delay now</th><th>Riders</th><th>Last seen at</th><th>Last report</th></tr></thead>
+        <thead><tr><th>Line</th><th>Trip</th><th>Delay now</th><th>Riders</th><th>Source</th><th>Last seen at</th><th>Last report</th></tr></thead>
         <tbody>${trips.map((t) => {
           const p = tripParts(t.trip_key), d = delayText(t.delay?.delaySeconds);
           return `<tr class="click" data-trip="${esc(t.trip_key)}" aria-selected="${t.trip_key === selectedKey}" tabindex="0">
@@ -384,6 +387,7 @@ async function renderCommunity(selected) {
             <td>${esc(p.first)}<div class="muted small">departs ${esc(p.start)}</div></td>
             <td><span class="delay ${d.cls}">${d.text}</span></td>
             <td>${t.delay ? t.delay.reporters : 0} <span class="muted small">(${t.n} reports)</span></td>
+            <td>${t.delay?.source === "gps" ? "riders' phones" : "taps"}</td>
             <td>${esc(t.delay?.lastStopName || "–")}</td>
             <td>${ago(t.last)}</td></tr>`;
         }).join("")}</tbody></table></div>`
@@ -393,12 +397,13 @@ async function renderCommunity(selected) {
       <h2>${selectedKey ? "Reports for this bus" : "Latest reports"}</h2>
       ${selectedKey ? `<p><a href="#community">Show all reports</a></p>` : ""}
       ${reports.length ? `<div class="table-wrap"><table class="grid">
-        <thead><tr><th>When</th><th>Line</th><th>Stop</th><th>Delay</th><th>Rider</th><th>From</th><th></th></tr></thead>
+        <thead><tr><th>When</th><th>Line</th><th>Stop</th><th>Delay</th><th>Type</th><th>Rider</th><th>From</th><th></th></tr></thead>
         <tbody>${reports.map((r) => {
           const d = delayText(r.delay_s);
           return `<tr><td>${ago(r.created_at)}</td><td><span class="plate line">${esc(r.line)}</span></td>
             <td>${esc(r.stop_name)} <span class="muted small">#${r.stop_index + 1}</span></td>
             <td><span class="delay ${d.cls}">${d.text}</span></td>
+            <td>${esc(kindLabel[r.kind] || r.kind || "tap")}</td>
             <td><code title="Random id, new for every followed bus">${esc(r.reporter.slice(0, 8))}</code>${r.blocked ? ' <span class="error-text small">blocked</span>' : ""}</td>
             <td>${esc(r.platform)}</td>
             <td class="row"><button class="btn quiet" data-del="${r.id}" type="button">Delete</button>

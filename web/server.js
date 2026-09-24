@@ -628,7 +628,9 @@ app.post('/api/live/departures', wrap((req) => {
 }));
 app.post('/api/live/trip', wrap(async (req) => {
   const ref = asTripRef(req.body || {});
-  return ref.scheduleUrl ? transit.getScheduledTrip(ref) : transit.getLiveTrip(ref);
+  const trip = await (ref.scheduleUrl ? transit.getScheduledTrip(ref) : transit.getLiveTrip(ref));
+  // Automatic mode places the rider's phone on the route: it needs stop coordinates.
+  return req.body?.withCoordinates ? transit.withCoordinates(trip, !ref.scheduleUrl && !trip.fromTimetable) : trip;
 }));
 app.get('/api/live/match', wrap((req) => transit.matchStopByName(String(req.query.name || ''))));
 app.get('/api/cp/suggest', wrap((req) => transit.suggestStops(String(req.query.city || ''), String(req.query.q || '').slice(0, 80))));
