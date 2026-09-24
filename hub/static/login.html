@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>emhub sign in</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="/brand.css">
+<style>
+  body { min-height: 100dvh; display: grid; place-items: center; padding: 16px; }
+  .sign {
+    width: 100%; max-width: 380px; background: var(--surface); border-radius: 6px; overflow: hidden;
+    border: 1px solid var(--line);
+  }
+  .sign-head { background: var(--sign); color: #fff; padding: 22px 24px 18px; }
+  .sign-head h1 { font-size: 34px; }
+  .sign-head p { margin: 2px 0 0; opacity: 0.85; font-size: 15px; }
+  .stripe { height: 6px; background: var(--amber); }
+  form { padding: 22px 24px 8px; display: flex; flex-direction: column; gap: 14px; }
+  .alt { padding: 6px 24px 24px; display: flex; flex-direction: column; gap: 10px; }
+  .or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .btn { justify-content: center; }
+  #msg { margin: 0; font-size: 14px; }
+</style>
+</head>
+<body>
+<main class="sign">
+  <div class="sign-head">
+    <h1>emhub</h1>
+    <p>Bug reports and community delays for testEM</p>
+  </div>
+  <div class="stripe"></div>
+  <form method="post" action="/auth/login">
+    <label class="field">Username
+      <input name="username" autocomplete="username" required autofocus>
+    </label>
+    <label class="field">Password
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <p id="msg" class="error-text" role="alert" hidden></p>
+    <button class="btn" type="submit">Sign in</button>
+  </form>
+  <div class="alt" id="oidc" hidden>
+    <div class="or">or</div>
+    <a class="btn quiet" href="/auth/oidc/start?mode=login" id="oidc-btn">Sign in with Authentik</a>
+    <p class="muted small" style="margin:0">Link your Authentik account in Settings first, after signing in with your password once.</p>
+  </div>
+</main>
+<script>
+  const messages = {
+    invalid: "Wrong username or password.",
+    rate: "Too many attempts. Wait 15 minutes and try again.",
+    not_linked: "That Authentik account isn't linked to an emhub user yet. Sign in with your password, then link it in Settings.",
+    oidc_failed: "Authentik sign-in didn't complete. Try again.",
+    oidc_state: "The sign-in link expired. Start again.",
+    oidc_off: "Authentik sign-in isn't set up on this server.",
+    oidc_only: "This account signs in with Authentik only. Use the button below.",
+  };
+  const error = new URLSearchParams(location.search).get("error");
+  if (messages[error]) { msg.textContent = messages[error]; msg.hidden = false; }
+  fetch("/auth/config").then(r => r.json()).then(c => {
+    if (c.oidc) { oidc.hidden = false; document.getElementById("oidc-btn").textContent = "Sign in with " + c.oidcLabel; }
+  });
+</script>
+</body>
+</html>

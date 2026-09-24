@@ -1,166 +1,88 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="sk">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>testEM</title>
-
   <link rel="manifest" href="/manifest.webmanifest" />
-  <meta name="theme-color" content="#0b0f14" />
-
-  <!-- iOS "Add to Home Screen" standalone app behavior -->
+  <meta name="theme-color" content="#0F1A30" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="testEM" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <link rel="icon" href="/icons/icon-192.png" />
-
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <!-- INSTALL GATE: shown on mobile until the app runs from the Home Screen -->
-  <div id="install-gate" class="install-gate" hidden>
-    <div class="install-card">
+  <!-- Install gate: phones must open testEM from the Home Screen -->
+  <div id="install-gate" class="center-view" hidden>
+    <div class="narrow">
       <img src="/icons/icon-192.png" alt="" class="brand-logo" />
-      <h1>Install testEM</h1>
-      <p class="install-lead">testEM runs as an app. Add it to your Home Screen and open it from there to continue.</p>
-
-      <div id="ios-instructions" class="install-steps" hidden>
-        <ol>
-          <li>Tap the <strong>Share</strong> button
-            <svg class="ios-share" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 3l4 4M12 3L8 7M12 3v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M6 11H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            in the Safari toolbar.
-          </li>
-          <li>Scroll down and choose <strong>Add to Home Screen</strong>.</li>
-          <li>Open <strong>testEM</strong> from your Home Screen.</li>
-        </ol>
+      <h1 data-i18n="install_title">Install testEM</h1>
+      <p class="hint" data-i18n="install_lead"></p>
+      <ol id="ios-steps" class="steps" hidden>
+        <li data-i18n="install_ios_1"></li><li data-i18n="install_ios_2"></li><li data-i18n="install_ios_3"></li>
+      </ol>
+      <div id="android-steps" hidden>
+        <button id="install-btn" class="btn wide" data-i18n="install_button" hidden></button>
+        <ol class="steps"><li data-i18n="install_android_1"></li><li data-i18n="install_android_2"></li><li data-i18n="install_ios_3"></li></ol>
       </div>
-
-      <div id="android-instructions" class="install-steps" hidden>
-        <button id="android-install-btn" class="btn-primary" hidden>Install app</button>
-        <ol id="android-manual">
-          <li>Tap the <strong>⋮</strong> menu in your browser.</li>
-          <li>Choose <strong>Install app</strong> (or <strong>Add to Home screen</strong>).</li>
-          <li>Open <strong>testEM</strong> from your Home Screen.</li>
-        </ol>
-      </div>
-
-      <p class="install-note muted">It must run from the Home Screen to work correctly.</p>
+      <p class="hint small" data-i18n="install_note"></p>
     </div>
   </div>
 
-  <!-- LOGIN VIEW -->
-  <main id="login-view" class="view">
-    <div class="login-card">
-      <div class="brand">
-        <img src="/icons/icon-192.png" alt="" class="brand-logo" />
-        <h1>testEM</h1>
-        <p class="brand-sub">Unofficial EMtest client</p>
-      </div>
-      <form id="login-form" autocomplete="on">
-        <label>
-          <span>Email</span>
-          <input id="email" type="email" inputmode="email" autocomplete="username" required />
-        </label>
-        <label>
-          <span>Password</span>
-          <input id="password" type="password" autocomplete="current-password" required />
-        </label>
-        <button id="login-btn" type="submit" class="btn-primary">Log in</button>
-        <p id="login-error" class="error" hidden></p>
+  <!-- PIN lock -->
+  <div id="lock-view" class="center-view" hidden>
+    <form id="lock-form" class="narrow stack">
+      <img src="/icons/icon-192.png" alt="" class="brand-logo" />
+      <h1 id="lock-title" data-i18n="lock_title">PIN</h1>
+      <input id="lock-pin" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" aria-labelledby="lock-title" required />
+      <p id="lock-error" class="error-text" role="alert" hidden></p>
+      <button class="btn wide" type="submit" data-i18n="unlock">Unlock</button>
+      <button class="text-btn" type="button" id="lock-forgot" data-i18n="lock_forgot"></button>
+    </form>
+  </div>
+
+  <!-- Sign in -->
+  <div id="login-view" class="center-view" hidden>
+    <div class="narrow">
+      <div class="brand"><img src="/icons/icon-192.png" alt="" class="brand-logo" /><h1>testEM</h1><p class="hint" data-i18n="login_sub"></p></div>
+      <form id="login-form" class="stack" autocomplete="on">
+        <label class="field"><span data-i18n="email">Email</span><input id="email" type="email" inputmode="email" autocomplete="username" required /></label>
+        <label class="field"><span data-i18n="password">Password</span><input id="password" type="password" autocomplete="current-password" required /></label>
+        <button id="login-btn" type="submit" class="btn wide" data-i18n="login">Sign in</button>
+        <p id="login-error" class="error-text" role="alert" hidden></p>
       </form>
-      <p class="disclaimer">
-        Unofficial client for <code>sadzv.qrbus.me</code>. Not affiliated with EMtest.
-        Your credentials are stored only on this device.
-      </p>
-    </div>
-  </main>
-
-  <!-- APP VIEW -->
-  <main id="app-view" class="view" hidden>
-    <header class="app-bar">
-      <div class="app-bar-title">
-        <strong id="user-name">testEM</strong>
-        <span id="card-type" class="muted"></span>
-      </div>
-      <button id="menu-btn" class="icon-btn" aria-label="Menu">⋯</button>
-    </header>
-
-    <section id="low-credit-banner" class="banner banner-warn" hidden>
-      <span id="low-credit-text">Low credit</span>
-    </section>
-
-    <!-- QR CARD -->
-    <section class="card qr-card">
-      <div id="qr-wrap" class="qr-wrap">
-        <div id="qr" class="qr"></div>
-        <div id="qr-placeholder" class="qr-placeholder">Loading ticket…</div>
-      </div>
-      <div class="qr-meta">
-        <div id="refresh-bar" class="refresh-bar"><span id="refresh-fill"></span></div>
-        <p id="status" class="status muted">Connecting…</p>
-      </div>
-    </section>
-
-    <!-- ACCOUNT CARD -->
-    <section class="card">
-      <div class="row">
-        <span class="muted">Balance</span>
-        <strong id="balance">—</strong>
-      </div>
-      <div class="row">
-        <span class="muted">Card</span>
-        <span id="organization">—</span>
-      </div>
-      <div class="row">
-        <span class="muted">Ticket valid</span>
-        <span id="ticket-validity">—</span>
-      </div>
-      <div class="row">
-        <span class="muted">Card valid</span>
-        <span id="card-validity">—</span>
-      </div>
-    </section>
-
-    <!-- HISTORY -->
-    <section class="card">
-      <div class="card-head">
-        <h2>History</h2>
-        <button id="history-refresh" class="text-btn">Refresh</button>
-      </div>
-      <div id="history-list" class="history-list">
-        <p class="muted history-empty">Tap refresh to load ticket &amp; payment history.</p>
-      </div>
-    </section>
-
-    <footer class="app-footer">
-      <button id="logout-btn" class="text-btn danger">Log out</button>
-    </footer>
-  </main>
-
-  <!-- SETTINGS SHEET -->
-  <div id="sheet-backdrop" class="sheet-backdrop" hidden>
-    <div class="sheet" role="dialog" aria-modal="true">
-      <div class="card-head">
-        <h2>Settings</h2>
-        <button id="sheet-close" class="icon-btn" aria-label="Close">✕</button>
-      </div>
-      <label class="sheet-row">
-        <span>Low-credit warning below</span>
-        <input id="threshold-input" type="number" step="0.10" min="0" inputmode="decimal" />
-      </label>
-      <div class="sheet-row">
-        <span class="muted small" id="session-info">—</span>
-      </div>
-      <button id="reload-app" class="text-btn">Check for updates</button>
+      <button id="browse-btn" class="btn outline wide" data-i18n="login_browse"></button>
+      <p class="hint small center" data-i18n="login_disclaimer"></p>
     </div>
   </div>
+
+  <!-- App -->
+  <div id="app-view" hidden>
+    <main class="tabs">
+      <section id="tab-ticket" class="tab"></section>
+      <section id="tab-departures" class="tab" hidden></section>
+      <section id="tab-planner" class="tab" hidden></section>
+      <section id="tab-history" class="tab" hidden></section>
+      <section id="tab-account" class="tab" hidden></section>
+    </main>
+    <nav id="tabbar" class="tabbar">
+      <button data-tab="ticket"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM14 18h2v2h-2zM18 14h2v2h-2z"/></svg><span data-i18n="tab_ticket"></span></button>
+      <button data-tab="departures"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 16V6c0-2.5 3-3 7-3s7 .5 7 3v10c0 .8-.4 1.5-1 1.9V20h-2.5v-1.5h-7V20H6v-2.1c-.6-.4-1-1.1-1-1.9Zm2-6h10V6H7v4Zm1.5 6a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4Zm7 0a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4Z"/></svg><span data-i18n="tab_departures"></span></button>
+      <button data-tab="planner"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3a3 3 0 0 1 1 5.83V13a3 3 0 0 0 3 3h4.17A3 3 0 1 1 14.17 18H10a5 5 0 0 1-5-5V8.83A3 3 0 0 1 6 3Z"/></svg><span data-i18n="tab_planner"></span></button>
+      <button data-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2V2Zm3 5v2h6V7H9Zm0 4v2h6v-2H9Z"/></svg><span data-i18n="tab_history"></span></button>
+      <button data-tab="account"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm0 4a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0 14a8 8 0 0 0 6-2.7C16.7 15.8 14.5 15 12 15s-4.7.8-6 2.3A8 8 0 0 0 12 20Z"/></svg><span data-i18n="tab_account"></span></button>
+    </nav>
+  </div>
+
+  <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="/qrcode.min.js"></script>
-  <script src="/app.js"></script>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -24,7 +24,11 @@ data class TimetableSegment(
     val arrivalTime: String,
     val arrivalStop: String,
     val departurePlatform: String = "",
-    val arrivalPlatform: String = ""
+    val arrivalPlatform: String = "",
+    /** cp.sk page with every stop of this bus. */
+    val routeUrl: String = "",
+    /** ISO date of [departureTime]. */
+    val serviceDate: String = ""
 )
 
 data class TimetableConnection(
@@ -36,6 +40,10 @@ data class TimetableConnection(
 ) {
     val isDirect: Boolean
         get() = segments.size <= 1
+
+    /** cp.sk does not list results in departure order; this sorts them by date and time. */
+    val departureSortKey: String
+        get() = segments.firstOrNull()?.let { "${it.serviceDate} ${it.departureTime.padStart(5, '0')}" }.orEmpty()
 }
 
 data class TimetablePagingCursor(

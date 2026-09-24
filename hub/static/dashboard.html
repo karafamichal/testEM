@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>emhub</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="/brand.css">
+<style>
+  body { display: grid; grid-template-columns: 220px 1fr; min-height: 100dvh; }
+
+  /* ---- rail */
+  .rail { background: var(--rail); color: var(--rail-text); display: flex; flex-direction: column; padding: 20px 0 16px; position: sticky; top: 0; height: 100dvh; }
+  .rail-brand { padding: 0 20px 18px; }
+  .rail-brand strong { font-family: var(--display); font-size: 28px; color: #fff; display: block; line-height: 1; }
+  .rail-brand span { font-size: 13px; }
+  .rail nav { display: flex; flex-direction: column; }
+  .rail nav a {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 20px; color: inherit; text-decoration: none; font-weight: 500;
+    border-left: 4px solid transparent;
+  }
+  .rail nav a:hover { color: #fff; background: rgba(255,255,255,0.04); }
+  .rail nav a[aria-current="page"] { color: #fff; border-left-color: var(--amber); background: rgba(255,255,255,0.06); }
+  .rail .count { font-family: var(--display); font-weight: 700; font-size: 14px; background: var(--amber); color: #14213D; border-radius: 3px; padding: 0 7px; }
+  .rail-foot { margin-top: auto; padding: 0 20px; font-size: 13px; }
+  .rail-foot button { background: none; border: 0; color: var(--rail-text); padding: 0; cursor: pointer; text-decoration: underline; }
+
+  main { min-width: 0; }
+  .page-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 22px 28px 14px; }
+  .page-head h1 { font-size: 30px; }
+
+  /* ---- bugs */
+  .split { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; border-top: 1px solid var(--line); min-height: calc(100dvh - 76px); }
+  .list { border-right: 1px solid var(--line); overflow-y: auto; max-height: calc(100dvh - 76px); }
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; z-index: 1; }
+  .filters button { border: 1px solid var(--line); background: var(--surface); border-radius: 3px; padding: 4px 10px; font-size: 14px; cursor: pointer; }
+  .filters button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .filters input { flex: 1 1 100%; }
+  .bug-row { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); text-decoration: none; color: inherit; }
+  .bug-row:hover { background: var(--surface); }
+  .bug-row[aria-current="true"] { background: var(--surface); box-shadow: inset 4px 0 0 var(--sign); }
+  .bug-row .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bug-row .m { grid-column: 2; font-size: 13px; color: var(--muted); display: flex; gap: 10px; }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+  .status::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--muted); }
+  .status.new::before { background: var(--amber); }
+  .status.triaged::before { background: var(--sign); }
+  .status.in_progress::before { background: var(--late); }
+  .status.resolved::before { background: var(--ok); }
+
+  .detail { padding: 22px 28px 40px; min-width: 0; }
+  .detail-head { display: flex; gap: 14px; align-items: flex-start; }
+  .detail-head h2 { font-size: 26px; overflow-wrap: anywhere; }
+  .meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px 20px; margin: 18px 0; padding: 14px 0; border-block: 1px solid var(--line); font-size: 14px; }
+  .meta dt { color: var(--muted); font-size: 13px; }
+  .meta dd { margin: 0; overflow-wrap: anywhere; }
+  .status-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 18px; }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+  .tabs button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 8px 12px; cursor: pointer; font-weight: 600; color: var(--muted); }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--sign); }
+  .desc { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 75ch; }
+  .logs-tools { display: flex; gap: 8px; margin-bottom: 8px; }
+  .logs { background: #0B1426; color: #D6E2F5; font: 12.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 14px; border-radius: 4px; max-height: 480px; overflow: auto; white-space: pre; }
+  .logs mark { background: var(--amber); color: #14213D; }
+  .logs .e { color: #FF9A8C; }
+  .logs .w { color: #FFD27A; }
+
+  .thread { list-style: none; margin: 24px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; max-width: 75ch; }
+  .msg { border: 1px solid var(--line); background: var(--surface); border-radius: 4px; padding: 12px 14px; }
+  .msg header { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .msg.reply { border-left: 4px solid var(--sign); }
+  .msg.note { border-left: 4px solid var(--amber); background: color-mix(in srgb, var(--amber) 8%, var(--surface)); }
+  .msg.system, .msg.status { background: transparent; border-style: dashed; font-size: 14px; }
+  .msg p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .mail-failed { color: var(--bad); }
+  .composer { margin-top: 18px; max-width: 75ch; display: flex; flex-direction: column; gap: 10px; }
+  .composer-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .preview { border: 1px solid var(--line); border-radius: 4px; width: 100%; height: 520px; background: #fff; }
+
+  .empty { padding: 60px 28px; color: var(--muted); max-width: 48ch; }
+  .empty h2 { color: var(--ink); margin-bottom: 6px; }
+
+  /* ---- community */
+  .section { padding: 0 28px 28px; }
+  .section h2 { font-size: 20px; margin: 10px 0 10px; }
+  table.grid { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); font-size: 14px; }
+  table.grid th { text-align: left; font-weight: 600; color: var(--muted); font-size: 13px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  table.grid td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  table.grid tr.click { cursor: pointer; }
+  table.grid tr.click:hover td { background: color-mix(in srgb, var(--sign) 5%, var(--surface)); }
+  table.grid tr[aria-selected="true"] td { background: color-mix(in srgb, var(--sign) 10%, var(--surface)); }
+  .delay { font-family: var(--display); font-weight: 700; font-size: 17px; }
+  .delay.on { color: var(--ok); }
+  .delay.late { color: var(--late); }
+  .delay.very { color: var(--bad); }
+  .table-wrap { overflow-x: auto; }
+  .stats { display: flex; gap: 28px; flex-wrap: wrap; }
+  .stat b { font-family: var(--display); font-size: 26px; display: block; line-height: 1; }
+  .stat span { font-size: 13px; color: var(--muted); }
+
+  /* ---- settings */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; padding: 0 28px 40px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .card h2 { font-size: 20px; }
+  .card p { margin: 0; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .kv { font-size: 14px; display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; overflow-wrap: anywhere; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; background: var(--paper); padding: 1px 5px; border-radius: 3px; }
+  .stack-form { display: flex; flex-direction: column; gap: 10px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .wide-card { grid-column: 1 / -1; }
+  .wide-card > form, .wide-card > p, .wide-card > .row, .wide-card > #invite-result { max-width: 760px; }
+  #invite-result { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  #invite-result p { margin: 0; }
+  table.grid td .btn { padding: 5px 10px; font-size: 14px; }
+  .templates .list { max-height: none; }
+  .editor { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .editor textarea { width: 100%; min-height: 560px; font: 12.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 12px; tab-size: 2; }
+  .editor .preview { height: 560px; }
+  @media (max-width: 1100px) { .editor { grid-template-columns: 1fr; } }
+  @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 4px; font-size: 14px; z-index: 10; max-width: calc(100vw - 32px); }
+
+  @media (max-width: 900px) {
+    body { grid-template-columns: 1fr; }
+    .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 16px; gap: 6px; }
+    .rail-brand { padding: 0 12px 0 0; }
+    .rail-brand span { display: none; }
+    .rail nav { flex-direction: row; }
+    .rail nav a { padding: 6px 10px; border-left: 0; border-bottom: 3px solid transparent; gap: 6px; }
+    .rail nav a[aria-current="page"] { border-bottom-color: var(--amber); }
+    .rail-foot { margin: 0 0 0 auto; padding: 0; }
+    .rail-foot .who { display: none; }
+    .split { grid-template-columns: 1fr; }
+    .list { max-height: none; border-right: 0; }
+    .split.has-detail .list { display: none; }
+    .split:not(.has-detail) .detail { display: none; }
+    .page-head, .detail, .section { padding-left: 16px; padding-right: 16px; }
+    .cards { padding: 0 16px 32px; grid-template-columns: 1fr; }
+  }
+  .back { display: none; }
+  @media (max-width: 900px) { .back { display: inline-flex; margin-bottom: 12px; } }
+</style>
+</head>
+<body>
+<aside class="rail">
+  <div class="rail-brand"><strong>emhub</strong><span>testEM operations</span></div>
+  <nav>
+    <a href="#bugs" data-nav="bugs">Bugs <span class="count" id="count-new" hidden></span></a>
+    <a href="#community" data-nav="community">Community</a>
+    <a href="#settings" data-nav="settings">Settings</a>
+  </nav>
+  <div class="rail-foot">
+    <div class="who">Signed in as <strong id="me-name"></strong></div>
+    <form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>
+  </div>
+</aside>
+<main id="view"></main>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+"use strict";
+const $ = (sel, root = document) => root.querySelector(sel);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const view = $("#view");
+const STATUSES = ["new", "triaged", "in_progress", "resolved", "closed"];
+const label = (s) => s.replace("_", " ").replace(/^./, (c) => c.toUpperCase());
+let me = null;
+let bugFilter = { status: "open", q: "" };
+
+async function api(path, body) {
+  const res = await fetch("/admin/api/" + path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (res.status === 401) { location.href = "/login"; throw new Error("signed out"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Request failed (" + res.status + ")");
+  return data;
+}
+
+function toast(text) {
+  const el = $("#toast");
+  el.textContent = text; el.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), 3500);
+}
+
+function ago(seconds) {
+  const d = Math.max(0, Date.now() / 1000 - seconds);
+  if (d < 60) return "just now";
+  if (d < 3600) return Math.floor(d / 60) + " min ago";
+  if (d < 86400) return Math.floor(d / 3600) + " h ago";
+  return new Date(seconds * 1000).toLocaleDateString();
+}
+const when = (s) => new Date(s * 1000).toLocaleString();
+
+function delayText(sec) {
+  if (sec == null) return { text: "–", cls: "" };
+  const m = Math.round(sec / 60);
+  if (m <= 0 && m >= -1) return { text: m < 0 ? m + " min" : "on time", cls: "on" };
+  if (m < 0) return { text: m + " min", cls: "on" };
+  return { text: "+" + m + " min", cls: m >= 10 ? "very" : "late" };
+}
+
+// ------------------------------------------------------------------ router
+
+async function route() {
+  const [page, arg] = location.hash.slice(1).split("/");
+  document.querySelectorAll("[data-nav]").forEach((a) =>
+    a.setAttribute("aria-current", (a.dataset.nav === ({ bug: "bugs", templates: "settings" }[page] || page || "bugs")) ? "page" : "false"));
+  try {
+    if (page === "community") return await renderCommunity(arg);
+    if (page === "settings") return await renderSettings(arg);
+    if (page === "templates") return await renderTemplates(arg);
+    return await renderBugs(page === "bug" ? Number(arg) : null);
+  } catch (e) {
+    if (e.message !== "signed out") view.innerHTML = `<div class="empty"><h2>Couldn't load this page</h2><p>${esc(e.message)}</p></div>`;
+  }
+}
+addEventListener("hashchange", route);
+
+async function refreshCounts() {
+  const s = await api("stats");
+  const n = s.bugs.new || 0;
+  const el = $("#count-new");
+  el.textContent = n; el.hidden = !n;
+  return s;
+}
+
+// ------------------------------------------------------------------ bugs
+
+async function renderBugs(selectedId) {
+  const params = new URLSearchParams();
+  if (bugFilter.status !== "all") params.set("status", bugFilter.status);
+  if (bugFilter.q) params.set("q", bugFilter.q);
+  const [bugs] = await Promise.all([api("bugs?" + params), refreshCounts()]);
+  const filters = [["open", "Open"], ...STATUSES.map((s) => [s, label(s)]), ["all", "All"]];
+  view.innerHTML = `
+    <div class="page-head"><h1>Bugs</h1><span class="muted small">${bugs.length} shown</span></div>
+    <div class="split ${selectedId ? "has-detail" : ""}">
+      <div class="list">
+        <div class="filters">
+          ${filters.map(([v, l]) => `<button type="button" data-status="${v}" aria-pressed="${bugFilter.status === v}">${l}</button>`).join("")}
+          <input class="input" type="search" placeholder="Search title, text, name or email" value="${esc(bugFilter.q)}" aria-label="Search bugs">
+        </div>
+        ${bugs.length ? bugs.map((b) => `
+          <a class="bug-row" href="#bug/${b.id}" aria-current="${b.id === selectedId}">
+            <span class="plate">${b.code}</span>
+            <span class="t">${esc(b.title)}</span>
+            <span class="m"><span class="status ${b.status}">${label(b.status)}</span><span>${esc(b.category)}</span><span>${esc(b.platform)}</span><span>${ago(b.updated_at)}</span></span>
+          </a>`).join("") : `<div class="empty"><h2>No reports here</h2><p>Reports sent from the app and the web version appear in this list. Try another filter.</p></div>`}
+      </div>
+      <section class="detail" id="detail">${selectedId ? "" : `<div class="empty"><h2>Pick a report</h2><p>Select a bug on the left to read it, look at the logs and reply to the reporter.</p></div>`}</section>
+    </div>`;
+  view.querySelectorAll("[data-status]").forEach((b) => b.onclick = () => { bugFilter.status = b.dataset.status; renderBugs(selectedId); });
+  const search = $(".filters input", view);
+  search.oninput = () => { clearTimeout(search.t); search.t = setTimeout(() => { bugFilter.q = search.value.trim(); renderBugs(selectedId).then(() => { const s = $(".filters input"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }); }, 300); };
+  if (selectedId) await renderBug(selectedId);
+}
+
+function highlightLogs(text, needle) {
+  return text.split("\n").filter((l) => !needle || l.toLowerCase().includes(needle.toLowerCase())).map((line) => {
+    let h = esc(line);
+    if (needle) h = h.replace(new RegExp(esc(needle).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), (m) => `<mark>${m}</mark>`);
+    const cls = /\bE\/|\bERROR\b|Exception|FATAL/.test(line) ? "e" : /\bW\/|\bWARN/.test(line) ? "w" : "";
+    return cls ? `<span class="${cls}">${h}</span>` : h;
+  }).join("\n");
+}
+
+async function renderBug(id) {
+  const bug = await api("bugs/" + id);
+  const detail = $("#detail");
+  const mailNote = (m) => m.mail_status ? `<span class="${m.mail_status.startsWith("failed") ? "mail-failed" : ""}">email ${esc(m.mail_status)}</span>` : "";
+  const kindLabel = { reply: "Reply to reporter", note: "Internal note", status: "Status change", system: "System" };
+  detail.innerHTML = `
+    <a class="btn quiet back" href="#bugs">Back to list</a>
+    <div class="detail-head"><span class="plate big">${bug.code}</span><h2>${esc(bug.title)}</h2></div>
+    <dl class="meta">
+      <div><dt>Reporter</dt><dd>${esc(bug.name || "No name given")}</dd></div>
+      <div><dt>Email</dt><dd>${bug.email ? `<a href="mailto:${esc(bug.email)}">${esc(bug.email)}</a>` : "No email given"}</dd></div>
+      <div><dt>Platform</dt><dd>${esc(bug.platform)} ${esc(bug.app_version)}</dd></div>
+      <div><dt>Device</dt><dd>${esc(bug.device || "Unknown")}</dd></div>
+      <div><dt>Category</dt><dd>${esc(bug.category)}</dd></div>
+      <div><dt>Sent</dt><dd>${when(bug.created_at)}</dd></div>
+      <div><dt>Consent given</dt><dd>${when(bug.consent_at)}</dd></div>
+    </dl>
+    <div class="status-bar">
+      <label class="field" style="flex-direction:row;align-items:center;gap:8px">Status
+        <select id="status">${STATUSES.map((s) => `<option value="${s}" ${s === bug.status ? "selected" : ""}>${label(s)}</option>`).join("")}</select>
+      </label>
+      <label class="small" ${bug.email ? "" : "hidden"}><input type="checkbox" id="notify" checked> Email the reporter about status changes</label>
+    </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-tab="report">Report</button>
+      <button role="tab" aria-selected="false" data-tab="logs">Logs (${bug.logs ? bug.logs.split("\n").length : 0} lines)</button>
+    </div>
+    <div data-panel="report"><p class="desc">${esc(bug.description)}</p></div>
+    <div data-panel="logs" hidden>
+      ${bug.logs ? `<div class="logs-tools"><input class="input" id="log-filter" type="search" placeholder="Filter lines" style="flex:1"><button class="btn quiet" id="log-dl" type="button">Download</button></div><div class="logs" id="logs"></div>` : `<p class="muted">No logs were attached.</p>`}
+    </div>
+    <ol class="thread">${bug.messages.map((m) => `
+      <li class="msg ${m.kind}"><header><span>${kindLabel[m.kind] || m.kind}${m.author ? " by " + esc(m.author) : ""}</span><span>${mailNote(m)} ${ago(m.created_at)}</span></header><p>${esc(m.body)}</p></li>`).join("")}
+    </ol>
+    <div class="composer">
+      <label class="field">${bug.email ? "Reply to " + esc(bug.name || bug.email) : "Internal note (the reporter left no email)"}
+        <textarea id="body" rows="6" placeholder="${bug.email ? "Write to the reporter. It goes out as a formatted email with the bug id." : "Only admins see notes."}"></textarea>
+      </label>
+      <div class="composer-actions">
+        ${bug.email ? `<button class="btn" id="send" type="button">Send reply</button>
+        <label class="small">and set status to <select id="reply-status">${STATUSES.map((s) => `<option value="${s}" ${s === bug.status ? "selected" : ""}>${label(s)}</option>`).join("")}</select></label>
+        <button class="btn quiet" id="preview" type="button">Preview email</button>` : ""}
+        <button class="btn quiet" id="note" type="button">Add internal note</button>
+      </div>
+      <iframe class="preview" id="preview-frame" title="Email preview" sandbox hidden></iframe>
+    </div>`;
+
+  detail.querySelectorAll("[data-tab]").forEach((t) => t.onclick = () => {
+    detail.querySelectorAll("[data-tab]").forEach((x) => x.setAttribute("aria-selected", x === t));
+    detail.querySelectorAll("[data-panel]").forEach((p) => p.hidden = p.dataset.panel !== t.dataset.tab);
+  });
+  if (bug.logs) {
+    const logs = $("#logs"), filter = $("#log-filter");
+    const paint = () => logs.innerHTML = highlightLogs(bug.logs, filter.value.trim());
+    filter.oninput = paint; paint();
+    $("#log-dl").onclick = () => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([bug.logs], { type: "text/plain" }));
+      a.download = bug.code + "-logs.txt"; a.click();
+    };
+  }
+  $("#status").onchange = async (e) => {
+    await api(`bugs/${id}/status`, { status: e.target.value, notify: $("#notify")?.checked });
+    toast("Status set to " + label(e.target.value)); renderBugs(id);
+  };
+  const body = $("#body");
+  const act = (btn, fn) => btn && (btn.onclick = async () => {
+    if (!body.value.trim()) { body.focus(); return toast("Write something first"); }
+    btn.disabled = true;
+    try { await fn(); } catch (e) { toast(e.message); } finally { btn.disabled = false; }
+  });
+  act($("#send"), async () => {
+    await api(`bugs/${id}/reply`, { body: body.value, status: $("#reply-status").value });
+    toast("Reply sent to " + bug.email); renderBugs(id);
+  });
+  act($("#note"), async () => { await api(`bugs/${id}/note`, { body: body.value }); toast("Note added"); renderBugs(id); });
+  act($("#preview"), async () => {
+    const { html } = await api("preview", { bugId: id, body: body.value });
+    const frame = $("#preview-frame"); frame.srcdoc = html; frame.hidden = false;
+  });
+}
+
+// ------------------------------------------------------------------ community
+
+function tripParts(key) {
+  // tripKey = line|first stop|first departure (epoch ms)
+  const [line, first, ms] = key.split("|");
+  const t = Number(ms);
+  return { line, first, start: t ? new Date(t).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "" };
+}
+
+async function renderCommunity(selected) {
+  const [trips, stats] = await Promise.all([api("community/trips"), refreshCounts()]);
+  const selectedKey = selected ? decodeURIComponent(selected) : "";
+  const reports = await api("community/reports" + (selectedKey ? "?trip=" + encodeURIComponent(selectedKey) : ""));
+  view.innerHTML = `
+    <div class="page-head"><h1>Community</h1>
+      <div class="stats">
+        <div class="stat"><b>${stats.activeTrips}</b><span>buses with live reports</span></div>
+        <div class="stat"><b>${stats.reportsToday}</b><span>reports in 24 h</span></div>
+      </div>
+    </div>
+    <div class="section">
+      <p class="muted" style="max-width:75ch;margin:0 0 14px">Riders who opted in tap the buttons on the follow notification to say where their intercity bus really is. Each rider counts once per bus; the newest reports weigh most, and reports far from the rest are ignored.</p>
+      <h2>Buses in the last 6 hours</h2>
+      ${trips.length ? `<div class="table-wrap"><table class="grid">
+        <thead><tr><th>Line</th><th>Trip</th><th>Delay now</th><th>Riders</th><th>Last seen at</th><th>Last report</th></tr></thead>
+        <tbody>${trips.map((t) => {
+          const p = tripParts(t.trip_key), d = delayText(t.delay?.delaySeconds);
+          return `<tr class="click" data-trip="${esc(t.trip_key)}" aria-selected="${t.trip_key === selectedKey}" tabindex="0">
+            <td><span class="plate line">${esc(t.line || p.line)}</span></td>
+            <td>${esc(p.first)}<div class="muted small">departs ${esc(p.start)}</div></td>
+            <td><span class="delay ${d.cls}">${d.text}</span></td>
+            <td>${t.delay ? t.delay.reporters : 0} <span class="muted small">(${t.n} reports)</span></td>
+            <td>${esc(t.delay?.lastStopName || "–")}</td>
+            <td>${ago(t.last)}</td></tr>`;
+        }).join("")}</tbody></table></div>`
+        : `<div class="empty" style="padding:20px 0"><h2>No reports yet</h2><p>When a rider taps the buttons on the follow notification, the bus shows up here with its delay.</p></div>`}
+    </div>
+    <div class="section">
+      <h2>${selectedKey ? "Reports for this bus" : "Latest reports"}</h2>
+      ${selectedKey ? `<p><a href="#community">Show all reports</a></p>` : ""}
+      ${reports.length ? `<div class="table-wrap"><table class="grid">
+        <thead><tr><th>When</th><th>Line</th><th>Stop</th><th>Delay</th><th>Rider</th><th>From</th><th></th></tr></thead>
+        <tbody>${reports.map((r) => {
+          const d = delayText(r.delay_s);
+          return `<tr><td>${ago(r.created_at)}</td><td><span class="plate line">${esc(r.line)}</span></td>
+            <td>${esc(r.stop_name)} <span class="muted small">#${r.stop_index + 1}</span></td>
+            <td><span class="delay ${d.cls}">${d.text}</span></td>
+            <td><code title="Random id, new for every followed bus">${esc(r.reporter.slice(0, 8))}</code>${r.blocked ? ' <span class="error-text small">blocked</span>' : ""}</td>
+            <td>${esc(r.platform)}</td>
+            <td class="row"><button class="btn quiet" data-del="${r.id}" type="button">Delete</button>
+              <button class="btn danger" data-block="${esc(r.reporter)}" data-unblock="${r.blocked ? 1 : ""}" type="button">${r.blocked ? "Unblock" : "Block rider"}</button></td></tr>`;
+        }).join("")}</tbody></table></div>` : `<p class="muted">No reports.</p>`}
+    </div>`;
+  view.querySelectorAll("[data-trip]").forEach((tr) => {
+    const go = () => location.hash = "community/" + encodeURIComponent(tr.dataset.trip);
+    tr.onclick = go; tr.onkeydown = (e) => e.key === "Enter" && go();
+  });
+  view.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+    await api("community/delete", { id: Number(b.dataset.del) }); toast("Report deleted"); renderCommunity(selected);
+  });
+  view.querySelectorAll("[data-block]").forEach((b) => b.onclick = async () => {
+    await api("community/block", { reporter: b.dataset.block, unblock: !!b.dataset.unblock });
+    toast(b.dataset.unblock ? "Rider unblocked" : "Rider blocked; their reports no longer count"); renderCommunity(selected);
+  });
+}
+
+// ------------------------------------------------------------------ settings
+
+const run = (btn, fn) => async (e) => {
+  e?.preventDefault();
+  btn.disabled = true;
+  try { await fn(); } catch (err) { toast(err.message); } finally { btn.disabled = false; }
+};
+const field = (name, label, value, attrs = "") =>
+  `<label class="field">${label}<input name="${name}" value="${esc(value)}" ${attrs}></label>`;
+const secretField = (name, label, isSet) => `
+  <label class="field">${label}<input name="${name}" type="password" autocomplete="new-password" placeholder="${isSet ? "Saved. Leave blank to keep it" : "Not set"}"></label>
+  ${isSet ? `<label class="small"><input type="checkbox" name="${name}_clear"> Remove the saved value</label>` : ""}`;
+
+/** Invite link for when the email didn't go out. */
+function showInviteLink(r, who) {
+  const box = $("#invite-result");
+  box.hidden = false;
+  box.innerHTML = r.mailError
+    ? `<p class="error-text">The invitation email to ${esc(who)} didn't go out: ${esc(r.mailError)}</p>
+       <p class="small">Send them this one-time link yourself. It works for 72 hours.</p>
+       <div class="row"><input class="input" readonly value="${esc(r.link)}" style="flex:1" id="invite-link"><button class="btn quiet" type="button" id="copy-link">Copy</button></div>`
+    : `<p>Invitation sent to ${esc(who)}. The link works once, for 72 hours.</p>`;
+  const copy = $("#copy-link");
+  if (copy) copy.onclick = () => { navigator.clipboard.writeText(r.link); toast("Link copied"); };
+}
+
+async function renderSettings(flag) {
+  const [meNow, admins, cfg] = await Promise.all([api("me"), api("admins"), api("settings")]);
+  me = meNow;
+  const flags = {
+    linked: "Your Authentik account is linked. You can sign in with it now.",
+    "link-taken": "That Authentik account is already linked to another emhub user.",
+  };
+  const status = (a) => a.invited
+    ? `<span class="status new">${a.invite_expires && a.invite_expires * 1000 > Date.now() ? "Invitation sent" : "Invitation expired"}</span>`
+    : `<span class="status resolved">Active</span>`;
+  view.innerHTML = `
+    <div class="page-head"><h1>Settings</h1></div>
+    <div class="cards">
+      <section class="card">
+        <h2>Your account</h2>
+        <dl class="kv"><dt>Username</dt><dd>${esc(me.username)}</dd></dl>
+        <label class="field">Email for new-bug alerts and replies
+          <input id="my-email" type="email" value="${esc(me.email)}" placeholder="you@example.com"></label>
+        <div class="row"><button class="btn quiet" id="save-email" type="button">Save email</button></div>
+        <form id="pw" class="stack-form">
+          <label class="field">Current password<input type="password" name="current" autocomplete="current-password" required></label>
+          <label class="field">New password (10+ characters)<input type="password" name="new" autocomplete="new-password" minlength="10" required></label>
+          <div class="row"><button class="btn" type="submit">Change password</button></div>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Your Authentik sign-in</h2>
+        ${flag && flags[flag] ? `<p class="${flag === "linked" ? "" : "error-text"}">${flags[flag]}</p>` : ""}
+        ${flag?.startsWith("oidc-error:") ? `<p class="error-text">Linking didn't work: ${esc(decodeURIComponent(flag.slice(11)))}</p>` : ""}
+        ${!me.oidcEnabled ? `<p class="muted">Set up Authentik in the card below first.</p>`
+          : me.oidcLinked ? `<p>Linked to <strong>${esc(me.oidcName || "your Authentik account")}</strong>.</p>
+            <label class="row" style="align-items:flex-start;flex-wrap:nowrap"><input type="checkbox" id="oidc-only" ${me.oidcOnly ? "checked" : ""} style="margin-top:4px">
+              <span><strong>Sign in with ${esc(me.oidcLabel)} only</strong><br><span class="muted small">Your password stops working for sign-in, even when it's right. Other password sessions are signed out.</span></span></label>
+            <div class="row"><button class="btn danger" id="unlink" type="button" ${me.oidcOnly ? "disabled title=\"Turn off the switch above first\"" : ""}>Unlink</button></div>`
+          : `<p>Link your ${esc(me.oidcLabel)} account to this user, then sign in with one click.</p>
+            <div class="row"><a class="btn" href="/auth/oidc/start?mode=link">Link ${esc(me.oidcLabel)} account</a></div>`}
+      </section>
+
+      <section class="card">
+        <h2>App connection</h2>
+        <dl class="kv"><dt>Public URL</dt><dd><code>${esc(me.publicUrl)}</code></dd><dt>Bug reports</dt><dd><code>POST /api/v1/bugs</code></dd><dt>Community</dt><dd><code>/api/v1/community/*</code></dd></dl>
+        <p class="muted small">The Android and web apps send the app key in <code>X-App-Key</code>. Keys live in <code>HUB_APP_KEYS</code> in <code>/etc/emhub.env</code>.</p>
+      </section>
+      <section class="card wide-card">
+        <h2>Admins</h2>
+        <table class="grid"><tbody>${admins.map((a) => `<tr>
+          <td><strong>${esc(a.username)}</strong>${a.me ? ' <span class="muted small">(you)</span>' : ""}
+            <div class="muted small">${esc(a.email || "no email")}${a.oidc_name ? ", Authentik: " + esc(a.oidc_name) : ""}${a.oidc_only ? ", Authentik only" : ""}</div></td>
+          <td>${status(a)}</td>
+          <td style="text-align:right;white-space:nowrap">${a.invited ? `<button class="btn quiet" data-resend="${a.id}" data-email="${esc(a.email)}" type="button">Resend</button>` : ""}
+            ${a.me ? "" : `<button class="btn danger" data-remove="${a.id}" data-name="${esc(a.username)}" type="button">Remove</button>`}</td></tr>`).join("")}</tbody></table>
+        <form id="add-admin" class="stack-form">
+          <p class="muted small">New admins get an email with a link to choose their password. Nobody else ever sees it.</p>
+          <label class="field">Username<input name="username" required pattern="[a-zA-Z0-9._-]{3,60}" autocomplete="off"></label>
+          <label class="field">Their email<input name="email" type="email" required autocomplete="off"></label>
+          <div class="row"><button class="btn" type="submit">Send invitation</button></div>
+        </form>
+        <div id="invite-result" hidden></div>
+      </section>
+
+      <section class="card wide-card">
+        <h2>Authentik (OpenID Connect)</h2>
+        <p class="muted small">In Authentik, create an OAuth2/OpenID provider (confidential client) with this redirect URI, then paste its details here.</p>
+        <div class="row"><input class="input" readonly value="${esc(cfg.redirect_uri)}" style="flex:1" aria-label="Redirect URI"><button class="btn quiet" type="button" id="copy-redirect">Copy</button></div>
+        <form id="oidc-form" class="stack-form">
+          ${field("oidc_issuer", "Issuer or OpenID Configuration URL", cfg.oidc_issuer, 'type="url" placeholder="https://auth.karafa.net/application/o/test-em/"')}
+          ${field("oidc_client_id", "Client ID", cfg.oidc_client_id, 'autocomplete="off"')}
+          ${secretField("oidc_client_secret", "Client secret", cfg.oidc_client_secret_set)}
+          ${field("oidc_label", "Button name", cfg.oidc_label, 'placeholder="Authentik"')}
+          <div class="row"><button class="btn" type="submit">Save Authentik settings</button><button class="btn quiet" type="button" id="test-oidc">Check connection</button></div>
+        </form>
+      </section>
+
+      <section class="card wide-card">
+        <h2>Email</h2>
+        <form id="mail-form" class="stack-form">
+          <div class="grid2">
+            ${field("smtp_host", "SMTP server", cfg.smtp_host, 'placeholder="smtp.example.com" required')}
+            ${field("smtp_port", "Port", cfg.smtp_port, 'inputmode="numeric" pattern="[0-9]+" required')}
+            <label class="field">Security<select name="smtp_security">${["none", "starttls", "ssl"].map((v) => `<option value="${v}" ${cfg.smtp_security === v ? "selected" : ""}>${{ none: "None (port 25)", starttls: "STARTTLS (port 587)", ssl: "SSL/TLS (port 465)" }[v]}</option>`).join("")}</select></label>
+            ${field("smtp_user", "Username", cfg.smtp_user, 'autocomplete="off"')}
+          </div>
+          ${secretField("smtp_pass", "Password", cfg.smtp_pass_set)}
+          ${field("mail_from", "Sender", cfg.mail_from, 'placeholder="testEM &lt;noreply@karafa.network&gt;"')}
+          ${field("mail_reply_to", "Replies go to (optional)", cfg.mail_reply_to, 'placeholder="support@karafa.network"')}
+          ${field("admin_email", "New bug alerts go to (empty = every admin's email)", cfg.admin_email, 'placeholder="you@example.com"')}
+          <div class="row"><button class="btn" type="submit">Save email settings</button><button class="btn quiet" id="test-mail" type="button">Send test email to me</button>
+            <a class="btn quiet" href="#templates">Edit email templates</a></div>
+        </form>
+      </section>
+
+    </div>`;
+
+  $("#save-email").onclick = run($("#save-email"), async () => { await api("account/email", { email: $("#my-email").value.trim() }); toast("Email saved"); });
+  const pw = $("#pw");
+  pw.onsubmit = run($("button", pw), async () => { await api("account/password", Object.fromEntries(new FormData(pw))); pw.reset(); toast("Password changed. Other sessions were signed out."); });
+  $("#unlink") && ($("#unlink").onclick = run($("#unlink"), async () => { await api("account/unlink", {}); toast("Authentik account unlinked"); renderSettings(); }));
+  const only = $("#oidc-only");
+  if (only) only.onchange = async () => {
+    try {
+      await api("account/oidc-only", { enabled: only.checked });
+      toast(only.checked ? "From now on you sign in with " + me.oidcLabel + " only" : "Password sign-in is allowed again");
+      renderSettings();
+    } catch (e) { only.checked = !only.checked; toast(e.message); }
+  };
+
+  const add = $("#add-admin");
+  add.onsubmit = run($("button", add), async () => {
+    const data = Object.fromEntries(new FormData(add));
+    const r = await api("admins", data);
+    await renderSettings();
+    showInviteLink(r, data.email);
+  });
+  view.querySelectorAll("[data-resend]").forEach((b) => b.onclick = run(b, async () => {
+    const r = await api(`admins/${b.dataset.resend}/resend`, {});
+    await renderSettings();
+    showInviteLink(r, b.dataset.email);
+  }));
+  view.querySelectorAll("[data-remove]").forEach((b) => b.onclick = run(b, async () => {
+    if (!confirm(`Remove ${b.dataset.name}? They lose access right away.`)) return;
+    await api(`admins/${b.dataset.remove}/remove`, {});
+    toast(b.dataset.name + " removed");
+    renderSettings();
+  }));
+
+  $("#copy-redirect").onclick = () => { navigator.clipboard.writeText(cfg.redirect_uri); toast("Redirect URI copied"); };
+  const saveForm = (form, message) => form.onsubmit = run($("button[type=submit]", form), async () => {
+    const data = Object.fromEntries(new FormData(form));
+    for (const k of Object.keys(data)) if (k.endsWith("_clear")) data[k] = true;
+    await api("settings", data);
+    toast(message);
+    renderSettings();
+  });
+  saveForm($("#oidc-form"), "Authentik settings saved");
+  saveForm($("#mail-form"), "Email settings saved");
+  $("#test-oidc").onclick = run($("#test-oidc"), async () => { const r = await api("settings/test-oidc", {}); toast("Connected to " + r.issuer); });
+  $("#test-mail").onclick = run($("#test-mail"), async () => { const r = await api("mail/test", {}); toast("Test email sent to " + r.to); });
+}
+
+// ------------------------------------------------------------------ email templates
+
+async function renderTemplates(selected) {
+  const list = await api("templates");
+  const name = list.some((x) => x.name === selected) ? selected : list[0].name;
+  const current = list.find((x) => x.name === name);
+  const tpl = await api("templates/" + name);
+  document.querySelector('[data-nav="settings"]').setAttribute("aria-current", "page");
+  view.innerHTML = `
+    <div class="page-head"><h1>Email templates</h1><a href="#settings" class="small">Back to settings</a></div>
+    <div class="split templates">
+      <div class="list">
+        ${list.map((x) => `<a class="bug-row" href="#templates/${x.name}" aria-current="${x.name === name}">
+          <span class="t" style="grid-column:1/-1">${esc(x.label)}</span>
+          <span class="m" style="grid-column:1/-1">${x.custom ? `Edited${x.updated_by ? " by " + esc(x.updated_by) : ""} ${ago(x.updated_at)}` : "Default"}</span></a>`).join("")}
+      </div>
+      <section class="detail">
+        <h2 style="font-size:24px">${esc(current.label)}</h2>
+        <p class="muted small">Placeholders: ${current.placeholders.map((p) => `<code>${p.endsWith("_html") ? "{{{" + p + "}}}" : "{{" + p + "}}"}</code>`).join(" ")}.
+          <code>{{x}}</code> inserts text safely; <code>{{{x}}}</code> inserts prepared HTML (only for the <code>_html</code> values). Keep styles inline; many email apps drop <code>&lt;style&gt;</code>.</p>
+        <div class="editor">
+          <textarea id="tpl" spellcheck="false" aria-label="Template HTML">${esc(tpl.html)}</textarea>
+          <iframe id="tpl-preview" class="preview" title="Preview with sample values" sandbox></iframe>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" id="tpl-save" type="button">Save template</button>
+          <button class="btn danger" id="tpl-reset" type="button" ${current.custom ? "" : "disabled"}>Reset to default</button>
+          <span class="muted small" id="tpl-state"></span>
+        </div>
+      </section>
+    </div>`;
+  const area = $("#tpl"), frame = $("#tpl-preview"), state = $("#tpl-state");
+  const preview = async () => {
+    try { frame.srcdoc = (await api(`templates/${name}/preview`, { html: area.value })).html; } catch (e) { state.textContent = e.message; }
+  };
+  area.oninput = () => {
+    state.textContent = area.value === tpl.html ? "" : "Unsaved changes";
+    clearTimeout(area.t);
+    area.t = setTimeout(preview, 400);
+  };
+  area.onkeydown = (e) => { // Tab indents instead of leaving the editor
+    if (e.key !== "Tab" || e.shiftKey) return;
+    e.preventDefault();
+    area.setRangeText("  ", area.selectionStart, area.selectionEnd, "end");
+    area.oninput();
+  };
+  $("#tpl-save").onclick = run($("#tpl-save"), async () => { await api(`templates/${name}/save`, { html: area.value }); toast("Template saved"); renderTemplates(name); });
+  $("#tpl-reset").onclick = run($("#tpl-reset"), async () => {
+    if (!confirm("Replace your edits with the default template?")) return;
+    await api(`templates/${name}/reset`, {});
+    toast("Template reset");
+    renderTemplates(name);
+  });
+  preview();
+}
+
+api("me").then((m) => { me = m; $("#me-name").textContent = m.username; route(); });
+</script>
+</body>
+</html>

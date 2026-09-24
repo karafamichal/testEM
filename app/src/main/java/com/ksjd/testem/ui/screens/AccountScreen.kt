@@ -76,7 +76,7 @@ import com.ksjd.testem.ui.components.SectionLabel
 import com.ksjd.testem.ui.components.daysLeftText
 import com.ksjd.testem.ui.theme.TransitTheme
 
-private enum class SettingsPage { Appearance, Security, Reminders, Language, Developer }
+private enum class SettingsPage { Appearance, Security, Reminders, Language, Community, BugReport, Developer }
 
 @Composable
 fun AccountScreen(viewModel: AppViewModel) {
@@ -95,7 +95,9 @@ private fun AccountOverview(viewModel: AppViewModel, onOpen: (SettingsPage) -> U
     val ticket by viewModel.ticketState.collectAsState()
     val app by viewModel.appState.collectAsState()
     var confirmSignOut by remember { mutableStateOf(false) }
+    var showSupport by remember { mutableStateOf(false) }
     val card = ticket.selectedCard
+    if (showSupport) SupportDialog { showSupport = false }
 
     if (confirmSignOut) {
         AlertDialog(
@@ -184,7 +186,15 @@ private fun AccountOverview(viewModel: AppViewModel, onOpen: (SettingsPage) -> U
             GroupDivider()
             SettingsLink(stringResource(R.string.language_title), languageName(app.languageCode)) { onOpen(SettingsPage.Language) }
             GroupDivider()
+            SettingsLink(stringResource(R.string.settings_community), stringResource(R.string.settings_community_hint)) { onOpen(SettingsPage.Community) }
+            GroupDivider()
             SettingsLink(stringResource(R.string.settings_developer), stringResource(R.string.settings_developer_hint)) { onOpen(SettingsPage.Developer) }
+        }
+        Spacer(Modifier.height(16.dp))
+        ListGroup {
+            SettingsLink(stringResource(R.string.bug_title), stringResource(R.string.bug_hint)) { onOpen(SettingsPage.BugReport) }
+            GroupDivider()
+            SettingsLink(stringResource(R.string.support_title), stringResource(R.string.support_hint)) { showSupport = true }
         }
         Spacer(Modifier.height(16.dp))
         ListGroup {
@@ -196,6 +206,28 @@ private fun AccountOverview(viewModel: AppViewModel, onOpen: (SettingsPage) -> U
         }
     }
 }
+
+/** A short note, then the support page in the browser. */
+@Composable
+private fun SupportDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.support_title)) },
+        text = { Text(stringResource(R.string.support_body)) },
+        confirmButton = {
+            Button(onClick = {
+                onDismiss()
+                runCatching {
+                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(SUPPORT_URL)))
+                }
+            }) { Text(stringResource(R.string.support_open)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.support_later)) } }
+    )
+}
+
+private const val SUPPORT_URL = "https://karafa.net/support/"
 
 @Composable
 private fun CardImage(card: AccountDetails) {
@@ -275,6 +307,8 @@ private fun SettingsPageScreen(page: SettingsPage, viewModel: AppViewModel, onBa
         SettingsPage.Security -> stringResource(R.string.security_title)
         SettingsPage.Reminders -> stringResource(R.string.settings_reminders)
         SettingsPage.Language -> stringResource(R.string.language_title)
+        SettingsPage.Community -> stringResource(R.string.settings_community)
+        SettingsPage.BugReport -> stringResource(R.string.bug_title)
         SettingsPage.Developer -> stringResource(R.string.settings_developer)
     }
     Column(
@@ -292,6 +326,8 @@ private fun SettingsPageScreen(page: SettingsPage, viewModel: AppViewModel, onBa
             SettingsPage.Security -> SecuritySettings(app, viewModel)
             SettingsPage.Reminders -> ReminderSettings(app, viewModel)
             SettingsPage.Language -> LanguageSettings(app, viewModel)
+            SettingsPage.Community -> CommunitySettings()
+            SettingsPage.BugReport -> BugReportForm(viewModel, onDone = onBack)
             SettingsPage.Developer -> DeveloperSettings(viewModel)
         }
     }
@@ -350,6 +386,7 @@ private fun ReminderSettings(app: AppState, viewModel: AppViewModel) {
             app.expiryAlerts
         ) { enable(it, viewModel::setExpiryAlerts) }
     }
+    ArrivalAlertSetting()
     SectionLabel(stringResource(R.string.low_credit_threshold_title))
     OutlinedTextField(
         value = thresholdText,

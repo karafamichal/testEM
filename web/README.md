@@ -1,94 +1,54 @@
 # testEM Web (PWA)
 
-A web version of the unofficial **testEM** client for `sadzv.qrbus.me`. It is a
-**Progressive Web App**: iOS users open the site in Safari, tap **Share → Add to
-Home Screen**, and from then on it launches full-screen like a native app — no
-App Store, no developer account.
+The web version of the unofficial **testEM** client for `sadzv.qrbus.me`, mainly for iPhones. People open the site in Safari, tap **Share → Add to Home Screen**, and from then on it launches full screen like an app. No App Store needed.
 
-This exists because a browser cannot talk to `sadzv.qrbus.me` directly (CORS +
-cross-site cookies). So this project is **one small Node server** that:
+A browser can't talk to `sadzv.qrbus.me` or `cp.sk` directly (CORS, cross-site cookies), so this is **one small Node server** that serves the app from `public/` and fetches from those sites on the browser's behalf, the same way the Android app does.
 
-1. Serves the PWA (static files in `public/`), and
-2. Proxies login / QR-token / account / history requests to qrbus on the
-   browser's behalf, mirroring exactly what the Android app does.
+## Features (v2)
 
-## Features (v1)
+- **Ticket**: rotating QR code (error correction H), freshness bar, offline warning with the code's age, full-screen code, card switcher, low-credit and expiry banners, next buses from your favourite stop.
+- **Departures**: stop search, favourites, nearby stops, live departure boards with delays, each trip's stop list. Works without signing in.
+- **Follow a bus**: a live card with the same progress bar as the Android notification (the bus moves along, squares mark where you get on and off). Push alerts before the bus reaches your stop (how many minutes is up to you, under Reminders), before you get off, and on arrival, even with the app closed (iOS 16.4+ from the Home Screen).
+- **Community delays** and **Will I catch it?**: the same opt-in features as Android, asked on first start and changeable under Account.
+- **Planner**: cp.sk connections for Slovakia, Banská Bystrica or Zvolen, suggestions, swap, time, direct only, saved and recent routes, platforms, share, later connections, all stops of a bus, live departures at a stop.
+- **History**: monthly spending chart, average fare, trips your credit covers, most-used stops, CSV export.
+- **Account and settings**: card details, validity, several cards, reminders, optional PIN lock (your saved password is then encrypted with AES-GCM using a key derived from the PIN), lock timeout, colour themes, dark mode and pure black, Slovak and English.
+- **Report a bug**: the app's recent log lines, with optional text, name and email, after the user agrees.
 
-- Email/password login (credentials stored **only** in the browser's
-  `localStorage`, never on the server).
-- Auto-refreshing QR ticket (polls every ~25 s, same as Android), rendered with
-  error-correction level **H** to match the native client.
-- Account details: name, card type, **credit balance** (with low-credit
-  warning), ticket & card validity.
-- Ticket & payment **history**.
-- Installable, offline-capable shell, keeps the screen awake while showing the
-  ticket.
+Not possible on the web: an ongoing lock-screen notification (iOS has no such thing for web apps; push alerts cover the key moments), biometric unlock, and screen brightness control.
 
-> Timetables, PIN/biometric lock, themes and localization from the Android app
-> are **not** in this first version.
+## Support
+
+Like the project? You can support further work at **[karafa.net/support](https://karafa.net/support/)** (also under **Account → Support testEM** in the app).
 
 ## Run it
 
-Requires Node 18.17+ (Node 20+ recommended).
+Node 18.17+ (20+ recommended).
 
 ```bash
 cd web
 npm install
-npm start          # listens on http://localhost:3000
+npm start          # http://localhost:3000
+node test.mjs      # self-check of the shared logic and the cp.sk parser
 ```
 
-Environment variables:
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `3000` | Port to listen on |
+| `QRBUS_BASE_URL` | `https://sadzv.qrbus.me` | Upstream for sign-in and tickets |
+| `HUB_URL` | *(empty)* | emhub base URL, e.g. `http://emhub-host:8080`. Empty turns off bug reports and community delays |
+| `HUB_APP_KEY` | *(empty)* | App key for emhub. Stays on the server; the browser never sees it |
+| `DATA_DIR` | `./data` | Where the push (VAPID) keys are created on first start. Keep it private and out of git |
+| `VAPID_SUBJECT` | `mailto:noreply@karafa.network` | Contact for push services |
 
-| Var              | Default                    | Purpose                          |
-| ---------------- | -------------------------- | -------------------------------- |
-| `PORT`           | `3000`                     | Port to listen on                |
-| `QRBUS_BASE_URL` | `https://sadzv.qrbus.me`   | Upstream base URL (rarely changed) |
-
-## Deploy behind a Cloudflare Tunnel
-
-1. Run the server on your machine/box: `PORT=3000 npm start`.
-2. Point a Cloudflare Tunnel at it, e.g. in `~/.cloudflared/config.yml`:
-
-   ```yaml
-   tunnel: <your-tunnel-id>
-   credentials-file: /path/to/<tunnel-id>.json
-   ingress:
-     - hostname: testem.example.com
-       service: http://localhost:3000
-     - service: http_status:404
-   ```
-
-3. `cloudflared tunnel run <tunnel-name>` (or run it as a service).
-4. Open `https://testem.example.com` on the iPhone → **Add to Home Screen**.
-
-**HTTPS is required** for the service worker / "Add to Home Screen" to behave as
-a standalone app — the Cloudflare Tunnel provides that automatically.
-
-> Keep the Node process running (use `pm2`, a `systemd` unit, or
-> `cloudflared` + a process manager) so the proxy stays up.
+Serve it over HTTPS (a Cloudflare Tunnel works); service workers and push need it.
 
 ## How sessions work
 
-- The browser stores `{ email, password, serial }` in `localStorage`.
-- On open it calls `POST /api/login`; the server logs into qrbus, keeps the
-  `WPIS` session cookie **server-side**, and hands the browser an opaque
-  `sessionId`.
-- The QR poll (`POST /api/token`) and history calls use that `sessionId`.
-- If the upstream session expires (401), the browser silently re-logs in using
-  the saved credentials.
-
-Server sessions live in memory and expire after 6 hours; a server restart just
-forces a transparent re-login.
-
-## Updating the icons
-
-Icons are generated by a dependency-free script:
-
-```bash
-node generate-icons.mjs
-```
+- The browser stores `{ email, password }` in `localStorage`, encrypted when a PIN is set.
+- `POST /api/login` signs in to qrbus. The server keeps the qrbus session cookie in memory and gives the browser an opaque `sessionId`. Sessions last 6 hours; a restart just forces a quiet re-login.
+- Followed buses for push alerts are also kept in memory; the app registers again when it's opened.
 
 ## Disclaimer
 
-Unofficial client for `sadzv.qrbus.me`, owned by EMtest. Not affiliated with,
-authorized, or endorsed by EMtest. Use at your own risk.
+Unofficial client for `sadzv.qrbus.me`, owned by EMtest. Not affiliated with, authorized or endorsed by EMtest. Use at your own risk.

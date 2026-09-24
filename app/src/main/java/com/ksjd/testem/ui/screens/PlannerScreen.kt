@@ -69,6 +69,7 @@ import com.ksjd.testem.CpStopSuggestion
 import com.ksjd.testem.R
 import com.ksjd.testem.SavedRoute
 import com.ksjd.testem.TimetableConnection
+import com.ksjd.testem.TimetableSegment
 import com.ksjd.testem.TimetableState
 import com.ksjd.testem.ui.components.LinePlate
 import com.ksjd.testem.ui.components.ListGroup
@@ -86,6 +87,7 @@ import java.util.Calendar
 fun PlannerScreen(
     viewModel: AppViewModel,
     onOpenStop: (stopName: String, line: String, time: String) -> Unit,
+    onOpenTrip: (segment: TimetableSegment, line: String) -> Unit,
     onExitGuest: (() -> Unit)?
 ) {
     val state by viewModel.timetableState.collectAsState()
@@ -127,7 +129,7 @@ fun PlannerScreen(
         if (state.connections.isNotEmpty()) {
             item { SectionLabel(stringResource(R.string.timetables_results_title)) }
             items(state.connections, key = { it.id }) { connection ->
-                ConnectionCard(connection, onOpenStop)
+                ConnectionCard(connection, onOpenStop, onOpenTrip)
             }
             item {
                 Box(
@@ -360,7 +362,11 @@ private fun routeLabel(route: SavedRoute): String = "${readableStop(route.fromTe
 
 
 @Composable
-private fun ConnectionCard(connection: TimetableConnection, onOpenStop: (String, String, String) -> Unit) {
+private fun ConnectionCard(
+    connection: TimetableConnection,
+    onOpenStop: (String, String, String) -> Unit,
+    onOpenTrip: (TimetableSegment, String) -> Unit
+) {
     val context = LocalContext.current
     val shareTitle = stringResource(R.string.planner_share)
     val shareText = shareText(connection)
@@ -395,7 +401,14 @@ private fun ConnectionCard(connection: TimetableConnection, onOpenStop: (String,
                         modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 2.dp)
                     )
                 }
-                Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
+                val canOpenTrip = segment.routeUrl.isNotBlank()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .then(if (canOpenTrip) Modifier.clickable { onOpenTrip(segment, lineNumber(segment.line)) } else Modifier)
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
                     LinePlate(lineNumber(segment.line).ifBlank { "–" })
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
@@ -406,12 +419,24 @@ private fun ConnectionCard(connection: TimetableConnection, onOpenStop: (String,
                         }
                     }
                 }
-                if (segment.line.isNotBlank()) {
-                    AssistChip(
-                        onClick = { onOpenStop(segment.departureStop, lineNumber(segment.line), segment.departureTime) },
-                        label = { Text(stringResource(R.string.planner_live_at_stop, readableStop(segment.departureStop)), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        modifier = Modifier.padding(start = 52.dp)
-                    )
+                Row(
+                    Modifier
+                        .padding(start = 52.dp)
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    if (canOpenTrip) {
+                        AssistChip(
+                            onClick = { onOpenTrip(segment, lineNumber(segment.line)) },
+                            label = { Text(stringResource(R.string.planner_show_stops), maxLines = 1) }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    if (segment.line.isNotBlank()) {
+                        AssistChip(
+                            onClick = { onOpenStop(segment.departureStop, lineNumber(segment.line), segment.departureTime) },
+                            label = { Text(stringResource(R.string.planner_live_at_stop, readableStop(segment.departureStop)), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        )
+                    }
                 }
             }
         }

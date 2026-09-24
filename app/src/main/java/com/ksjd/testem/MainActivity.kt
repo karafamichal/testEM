@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity() {
         if (AppCompatDelegate.getApplicationLocales().toLanguageTags() != languageCode) {
             AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(languageCode))
         }
+        com.ksjd.testem.hub.AppLogs.installCrashRecorder(applicationContext)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
@@ -192,11 +193,18 @@ private fun MainScaffold(
                 AppTab.Planner -> PlannerScreen(
                     viewModel = viewModel,
                     onOpenStop = openStopFromPlanner,
+                    onOpenTrip = liveViewModel::openScheduledTrip,
                     onExitGuest = if (guest) onExitGuest else null
                 )
                 AppTab.History -> HistoryScreen(viewModel = viewModel)
                 AppTab.Account -> AccountScreen(viewModel = viewModel)
             }
+            // First run: ask about the two opt-in features (community delays, catch estimate).
+            val context = androidx.compose.ui.platform.LocalContext.current
+            var privacyAsked by rememberSaveable { mutableStateOf(CredentialsManager(context).wasPrivacyAsked()) }
+            if (!privacyAsked) com.ksjd.testem.ui.screens.PrivacyDialog(onDone = { privacyAsked = true })
+            val liveState by liveViewModel.state.collectAsState()
+            liveState.trip?.let { trip -> com.ksjd.testem.ui.screens.TripSheet(trip, onDismiss = liveViewModel::closeTrip) }
         }
     }
 }

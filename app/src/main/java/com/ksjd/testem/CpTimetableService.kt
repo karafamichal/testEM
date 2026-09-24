@@ -268,7 +268,7 @@ class CpTimetableService(
     }
 
     private fun parseConnectionsFromHtml(html: String): List<TimetableConnection> {
-        val doc = Jsoup.parse(html)
+        val doc = Jsoup.parse(html, "https://cp.sk/")
         val boxes = doc.select("div[id^=connectionBox-].box.connection, div[id^=connectionBox-].connection")
         if (boxes.isEmpty()) return emptyList()
 
@@ -277,6 +277,9 @@ class CpTimetableService(
             val id = box.id().removePrefix("connectionBox-")
             val departureTime = box.selectFirst("div.connection-head h2.date")?.ownText()?.trim().orEmpty()
             val totalDuration = box.selectFirst("div.connection-head p.total strong")?.text()?.trim().orEmpty()
+            // "23.9. st" next to the departure time; each segment's date is derived from it.
+            var segmentDate = parseDayMonth(box.selectFirst("div.connection-head h2.date span.date-after")?.text().orEmpty())
+            var previousMinutes = minutesOf(departureTime)
 
             val segments = mutableListOf<TimetableSegment>()
             for (segment in box.select("div.connection-details div.line-item > div.outside-of-popup")) {
@@ -299,6 +302,11 @@ class CpTimetableService(
                 if (depTime.isBlank() || depStop.isBlank() || arrTime.isBlank() || arrStop.isBlank()) {
                     continue
                 }
+                val depMinutes = minutesOf(depTime)
+                if (segmentDate != null && depMinutes != null && previousMinutes != null && depMinutes < previousMinutes) {
+                    segmentDate = segmentDate.plusDays(1)
+                }
+                previousMinutes = minutesOf(arrTime) ?: depMinutes
                 segments += TimetableSegment(
                     line = line,
                     operatorName = operator,
@@ -307,7 +315,9 @@ class CpTimetableService(
                     arrivalTime = arrTime,
                     arrivalStop = arrStop,
                     departurePlatform = platformOf(first),
-                    arrivalPlatform = platformOf(last)
+                    arrivalPlatform = platformOf(last),
+                    routeUrl = segment.selectFirst("a[href*=/draha/]")?.attr("abs:href").orEmpty(),
+                    serviceDate = segmentDate?.toString().orEmpty()
                 )
             }
 
@@ -322,6 +332,24 @@ class CpTimetableService(
             )
         }
         return parsedConnections
+    }
+
+    /** "23.9. st" → the nearest such date (the year is not shown). */
+    private fun parseDayMonth(text: String): java.time.LocalDate? {
+        val match = Regex("""(\d{1,2})\.(\d{1,2})\.""").find(text) ?: return null
+        val (day, month) = match.destructured
+        val today = java.time.LocalDate.now(java.time.ZoneId.of("Europe/Bratislava"))
+        return listOf(today.year - 1, today.year, today.year + 1)
+            .mapNotNull { year -> runCatching { java.time.LocalDate.of(year, month.toInt(), day.toInt()) }.getOrNull() }
+            .minByOrNull { kotlin.math.abs(it.toEpochDay() - today.toEpochDay()) }
+    }
+
+    private fun minutesOf(time: String): Int? {
+        val parts = time.trim().split(":")
+        if (parts.size != 2) return null
+        val h = parts[0].toIntOrNull() ?: return null
+        val m = parts[1].toIntOrNull() ?: return null
+        return h * 60 + m
     }
 
     private fun extractPagingCursor(

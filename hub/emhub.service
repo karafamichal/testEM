@@ -1,0 +1,22 @@
+[Unit]
+Description=emhub (testEM bug reports + community bus delays)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=emhub
+Group=emhub
+EnvironmentFile=/etc/emhub.env
+ExecStart=/usr/bin/python3 /opt/emhub/hub.py
+WorkingDirectory=/opt/emhub
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/emhub
+
+[Install]
+WantedBy=multi-user.target

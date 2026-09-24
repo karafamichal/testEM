@@ -59,7 +59,9 @@ data class TripStop(
     /** Scheduled departure in epoch ms (already converted from local wall-clock). */
     val scheduledMs: Long,
     /** Actual departure in epoch ms, null if the bus has not left this stop yet. */
-    val actualMs: Long?
+    val actualMs: Long?,
+    /** Platform or track at this stop (timetable trips from cp.sk), "" when unknown. */
+    val platform: String = ""
 ) {
     val isPassed: Boolean get() = actualMs != null
 }
@@ -69,8 +71,20 @@ data class TripDetail(
     val destination: String,
     val stops: List<TripStop>,
     /** Latest known delay in seconds (from the vehicle feed or the last passed stop). */
-    val delaySeconds: Int?
-)
+    val delaySeconds: Int?,
+    /** For timetable-only trips: the stops where the user's part of the journey starts and ends. */
+    val boardingOrder: Int? = null,
+    val alightOrder: Int? = null,
+    /** Pooled rider reports for timetable-only trips (when the user opted in). */
+    val community: com.ksjd.testem.hub.CommunityDelay? = null
+) {
+    /**
+     * Same bus, same key on every phone and on the web: line, first stop and its
+     * departure time. Only timetable trips have one.
+     */
+    val communityKey: String?
+        get() = stops.firstOrNull()?.let { "$line|${it.name}|${it.scheduledMs}" }
+}
 
 /** Minimal description of a trip, enough to query its stop list. */
 data class TripRef(
@@ -78,5 +92,11 @@ data class TripRef(
     val lineId: Long,
     val routeNumber: String,
     val tripNumber: Int,
-    val destination: String
-)
+    val destination: String,
+    /** cp.sk route page for buses without live data; times then come from the timetable only. */
+    val scheduleUrl: String = "",
+    /** ISO date of the departure from the boarding stop, needed to place timetable times. */
+    val serviceDate: String = ""
+) {
+    val isScheduleOnly: Boolean get() = scheduleUrl.isNotBlank()
+}

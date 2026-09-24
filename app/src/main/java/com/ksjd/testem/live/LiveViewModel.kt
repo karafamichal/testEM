@@ -1,15 +1,11 @@
 package com.ksjd.testem.live
 
-import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Context
-import android.location.Location
-import android.location.LocationManager
-import androidx.core.content.ContextCompat
-import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ksjd.testem.CredentialsManager
+import com.ksjd.testem.TimetableSegment
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,9 +13,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.coroutines.resume
 
 data class BoardState(
     val stop: LiveStop,
@@ -37,6 +30,8 @@ data class TripSheetState(
     val ref: TripRef,
     /** Platforms of the stop the board was opened for, i.e. where the user boards. */
     val boardingPlatformIds: List<Int> = emptyList(),
+    /** Where the user gets off, when known (planner trips). */
+    val alightOrder: Int? = null,
     val detail: TripDetail? = null,
     val isLoading: Boolean = true,
     val hasError: Boolean = false
@@ -123,15 +118,16 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onLocationPermissionDenied() = _state.update { it.copy(locationStatus = LocationStatus.Denied) }
 
-    fun findNearby() {
+    /** [fresh]: the Refresh button wants a new fix, not the cached one from minutes ago. */
+    fun findNearby(fresh: Boolean = false) {
         val context = getApplication<Application>()
-        if (!hasLocationPermission(context)) {
+        if (!Locations.hasPermission(context)) {
             onLocationPermissionDenied()
             return
         }
         _state.update { it.copy(locationStatus = LocationStatus.Locating) }
         viewModelScope.launch {
-            val location = currentLocation(context)
+            val location = Locations.current(context, maxAgeMs = if (fresh) 15_000L else 10 * 60 * 1000L, fallbackToLastKnown = true)
             if (location == null) {
                 _state.update { it.copy(locationStatus = LocationStatus.Unavailable) }
                 return@launch
@@ -139,35 +135,6 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { repo.nearbyStops(location.latitude, location.longitude) }
                 .onSuccess { nearby -> _state.update { it.copy(nearby = nearby, locationStatus = LocationStatus.Ready) } }
                 .onFailure { _state.update { it.copy(locationStatus = LocationStatus.Unavailable, stopsFailed = true) } }
-        }
-    }
-
-    private fun hasLocationPermission(context: Context): Boolean =
-        ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-
-    @SuppressLint("MissingPermission")
-    private suspend fun currentLocation(context: Context): Location? {
-        val manager = context.getSystemService(LocationManager::class.java) ?: return null
-        val providers = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER, LocationManager.PASSIVE_PROVIDER)
-            .filter { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
-        val recent = providers
-            .mapNotNull { runCatching { manager.getLastKnownLocation(it) }.getOrNull() }
-            .maxByOrNull { it.time }
-            ?.takeIf { System.currentTimeMillis() - it.time < 10 * 60 * 1000 }
-        if (recent != null) return recent
-        val provider = providers.firstOrNull { it != LocationManager.PASSIVE_PROVIDER } ?: return null
-        return withTimeoutOrNull(15_000) {
-            suspendCancellableCoroutine { cont ->
-                val signal = android.os.CancellationSignal()
-                cont.invokeOnCancellation { signal.cancel() }
-                LocationManagerCompat.getCurrentLocation(
-                    manager,
-                    provider,
-                    signal,
-                    ContextCompat.getMainExecutor(context)
-                ) { location -> if (cont.isActive) cont.resume(location) }
-            }
         }
     }
 
@@ -254,15 +221,42 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
             destination = departure.destination
         )
         val boarding = _state.value.board?.stop?.platforms?.map { it.id }.orEmpty()
-        _state.update { it.copy(trip = TripSheetState(ref, boardingPlatformIds = boarding)) }
+        loadTrip(TripSheetState(ref, boardingPlatformIds = boarding))
+    }
+
+    /** A bus from a planner result: no live data, so its stops and times come from cp.sk. */
+    fun openScheduledTrip(segment: TimetableSegment, line: String) {
+        if (segment.routeUrl.isBlank()) return
+        val ref = TripRef(
+            line = line,
+            lineId = 0L,
+            routeNumber = "",
+            tripNumber = 0,
+            destination = segment.arrivalStop.split(",").map { it.trim() }.filter { it.isNotEmpty() }.joinToString(", "),
+            scheduleUrl = segment.routeUrl,
+            serviceDate = segment.serviceDate
+        )
+        loadTrip(TripSheetState(ref))
+    }
+
+    private fun loadTrip(sheet: TripSheetState) {
+        _state.update { it.copy(trip = sheet) }
         tripJob?.cancel()
         tripJob = viewModelScope.launch {
-            val result = runCatching { repo.getTrip(ref) }
+            val result = runCatching { repo.getTrip(sheet.ref) }
             _state.update { state ->
-                val trip = state.trip?.takeIf { it.ref == ref } ?: return@update state
+                val trip = state.trip?.takeIf { it.ref == sheet.ref } ?: return@update state
                 state.copy(
                     trip = result.fold(
-                        onSuccess = { trip.copy(detail = it, isLoading = false) },
+                        onSuccess = { detail ->
+                            trip.copy(
+                                detail = detail,
+                                isLoading = false,
+                                // Timetable trips know the user's stops; stop ids equal their order there.
+                                boardingPlatformIds = detail.boardingOrder?.let { listOf(it) } ?: trip.boardingPlatformIds,
+                                alightOrder = detail.alightOrder ?: trip.alightOrder
+                            )
+                        },
                         onFailure = { trip.copy(isLoading = false, hasError = true) }
                     )
                 )

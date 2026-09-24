@@ -558,7 +558,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         searchResult.connections.filter { it.isDirect }
                     } else {
                         searchResult.connections
-                    }
+                    }.sortedBy { it.departureSortKey }
                     _timetableState.update {
                         it.copy(
                             isLoading = false,
@@ -592,7 +592,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             .let { list -> if (state.directOnly) list.filter { it.isDirect } else list }
                         state.copy(
                             isLoadingMore = false,
-                            connections = (state.connections + newItems).distinctBy { it.id },
+                            connections = (state.connections + newItems).distinctBy { it.id }.sortedBy { it.departureSortKey },
                             pagingCursor = searchResult.pagingCursor,
                             canLoadMore = searchResult.pagingCursor?.allowNext == true && searchResult.connections.isNotEmpty()
                         )

@@ -15,10 +15,20 @@ android {
         applicationId = "com.ksjd.testem"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "2.0.0"
+        versionCode = 4
+        versionName = "2.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // emhub endpoint and app key: the private repo's secrets/hub.properties (outside this
+        // public folder), else local.properties. Without a key, bug reports and community are off.
+        val local = Properties().apply {
+            listOf(rootProject.file("../secrets/hub.properties"), rootProject.file("local.properties"))
+                .firstOrNull { it.exists() && it.readText().contains("hub.appKey") }
+                ?.inputStream()?.use { load(it) }
+        }
+        buildConfigField("String", "HUB_URL", "\"${local.getProperty("hub.url", "https://emhub.karafa.network")}\"")
+        buildConfigField("String", "HUB_APP_KEY", "\"${local.getProperty("hub.appKey", "")}\"")
     }
 
     val keystorePropertiesFile = rootProject.file("keystore.properties")

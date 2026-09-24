@@ -30,6 +30,7 @@ import kotlin.math.sqrt
  * operator's own map page calls.
  */
 class LiveRepository(context: Context) {
+    private val prefs = com.ksjd.testem.CredentialsManager(context)
     private val baseUrl = "https://sadzv.qrbus.me/index"
     private val cacheFile = File(context.cacheDir, "live_platforms.json")
     /** Operator times are Slovak local time, whatever zone the phone is set to. */
@@ -143,6 +144,7 @@ class LiveRepository(context: Context) {
     }
 
     suspend fun getTrip(ref: TripRef): TripDetail = withContext(Dispatchers.IO) {
+        if (ref.isScheduleOnly) return@withContext getScheduledTrip(ref)
         val body = JsonObject().apply {
             addProperty("lineId", ref.lineId)
             addProperty("lineNumber", ref.line)
@@ -176,6 +178,31 @@ class LiveRepository(context: Context) {
             stops = stops,
             delaySeconds = vehicleDelay ?: passedDelay
         )
+    }
+
+    /** Timetable is fixed, so one download per trip is enough (the tracker asks every 15 s). */
+    private val scheduleCache = mutableMapOf<String, TripDetail>()
+
+    private suspend fun getScheduledTrip(ref: TripRef): TripDetail {
+        val detail = synchronized(scheduleCache) { scheduleCache[ref.scheduleUrl] } ?: run {
+            val request = Request.Builder().url(ref.scheduleUrl).header("User-Agent", "Mozilla/5.0").get().build()
+            parseScheduledTrip(execute(request), ref, zone).also { parsed ->
+                if (parsed.stops.isNotEmpty()) synchronized(scheduleCache) { scheduleCache[ref.scheduleUrl] = parsed }
+            }
+        }
+        // Community delay only for riders who opted in; the request itself reveals which bus they follow.
+        val key = detail.communityKey
+        if (key == null || !prefs.getCommunityEnabled() || !com.ksjd.testem.hub.HubClient.isConfigured) return detail
+        val community = runCatching { com.ksjd.testem.hub.HubClient.communityDelay(key) }.getOrNull() ?: return detail
+        return detail.copy(delaySeconds = community.delaySeconds, community = community)
+    }
+
+    /** Stop coordinates by platform id (live trips) or by name (timetable trips), for the catch estimate. */
+    suspend fun stopLocation(platformIds: List<Int>, name: String): Pair<Double, Double>? {
+        val stops = runCatching { getStops() }.getOrNull() ?: return null
+        stops.asSequence().flatMap { it.platforms.asSequence() }.firstOrNull { it.id in platformIds }
+            ?.let { return it.lat to it.lon }
+        return matchStopByName(name)?.let { it.lat to it.lon }
     }
 
     private fun computeDelay(nowMs: Long, secondsUntil: Int, plannedSecondOfDay: Int): Int {
@@ -272,6 +299,68 @@ class LiveRepository(context: Context) {
     }
 
     companion object {
+        /**
+         * Parses a cp.sk route page ("Dráha spoja"). Stops outside the user's part of the
+         * journey are marked inactive; the first active one is where they board, on
+         * [TripRef.serviceDate]. Days roll over wherever the clock goes backwards.
+         */
+        fun parseScheduledTrip(html: String, ref: TripRef, zone: ZoneId): TripDetail {
+            data class Row(val name: String, val departure: Int?, val arrival: Int?, val active: Boolean, val platform: String) {
+                val minutes: Int get() = departure ?: arrival!!
+            }
+            val rows = org.jsoup.Jsoup.parse(html).select("ul.line-itinerary li.item").mapNotNull { li ->
+                val name = li.selectFirst("strong.name")?.text().orEmpty()
+                    .split(",").map { it.trim() }.filter { it.isNotEmpty() }.joinToString(", ")
+                val departure = clockMinutes(li.selectFirst("span.departure")?.ownText().orEmpty())
+                val arrival = clockMinutes(li.selectFirst("span.arrival")?.ownText().orEmpty())
+                // Platform (nástupište) or track (koľaj), like on the connection list.
+                val platform = li.select("span[title]").firstOrNull {
+                    val title = it.attr("title").lowercase()
+                    title.startsWith("nást") || title.startsWith("koľ") || title.startsWith("kol")
+                }?.text()?.trim().orEmpty()
+                if (name.isBlank() || (departure == null && arrival == null)) null
+                else Row(name, departure, arrival, !li.hasClass("inactive"), platform)
+            }
+            if (rows.isEmpty()) return TripDetail(ref.line, ref.destination, emptyList(), null)
+            val boarding = rows.indexOfFirst { it.active }.takeIf { it >= 0 } ?: 0
+            val alight = rows.indexOfLast { it.active }.takeIf { it > boarding }
+            val date = runCatching { LocalDate.parse(ref.serviceDate) }.getOrElse { LocalDate.now(zone) }
+            val days = IntArray(rows.size)
+            for (i in boarding + 1 until rows.size) {
+                days[i] = days[i - 1] + if (rows[i].minutes < rows[i - 1].minutes) 1 else 0
+            }
+            for (i in boarding - 1 downTo 0) {
+                days[i] = days[i + 1] - if (rows[i].minutes > rows[i + 1].minutes) 1 else 0
+            }
+            val stops = rows.mapIndexed { i, row ->
+                // Where the user gets off, the arrival is what matters (long dwell times at bus stations).
+                val useArrival = i == alight && row.arrival != null
+                val minutes = if (useArrival) row.arrival!! else row.minutes
+                val day = days[i] - if (useArrival && row.arrival!! > row.minutes) 1 else 0
+                TripStop(
+                    name = row.name,
+                    platformId = i + 1,
+                    order = i + 1,
+                    scheduledMs = date.plusDays(day.toLong()).atStartOfDay(zone).toInstant().toEpochMilli() + minutes * 60_000L,
+                    actualMs = null,
+                    platform = row.platform
+                )
+            }
+            return TripDetail(
+                line = ref.line,
+                destination = stops.last().name,
+                stops = stops,
+                delaySeconds = null,
+                boardingOrder = stops[boarding].order,
+                alightOrder = alight?.let { stops[it].order }
+            )
+        }
+
+        private fun clockMinutes(time: String): Int? {
+            val match = Regex("""(\d{1,2}):(\d{2})""").find(time) ?: return null
+            return match.groupValues[1].toInt() * 60 + match.groupValues[2].toInt()
+        }
+
         private val JSON = "application/json; charset=utf-8".toMediaType()
         private const val STOPS_CACHE_MS = 24L * 60 * 60 * 1000
 

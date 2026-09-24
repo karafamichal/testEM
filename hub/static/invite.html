@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Join emhub</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="/brand.css">
+<style>
+  body { min-height: 100dvh; display: grid; place-items: center; padding: 16px; }
+  .sign { width: 100%; max-width: 400px; background: var(--surface); border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+  .sign-head { background: var(--sign); color: #fff; padding: 22px 24px 18px; }
+  .sign-head h1 { font-size: 30px; }
+  .sign-head p { margin: 4px 0 0; opacity: 0.9; }
+  .stripe { height: 6px; background: var(--amber); }
+  form, .gone { padding: 22px 24px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .gone p { margin: 0; }
+  .btn { justify-content: center; }
+</style>
+</head>
+<body>
+<main class="sign">
+  <div class="sign-head"><h1>Welcome to emhub</h1><p id="who">Choose your password to finish.</p></div>
+  <div class="stripe"></div>
+  <form method="post" action="/auth/invite" id="form" hidden>
+    <input type="hidden" name="token" id="token">
+    <label class="field">New password (10+ characters)
+      <input name="password" type="password" autocomplete="new-password" minlength="10" required autofocus>
+    </label>
+    <label class="field">Repeat it
+      <input name="confirm" type="password" autocomplete="new-password" minlength="10" required>
+    </label>
+    <p id="msg" class="error-text" role="alert" hidden></p>
+    <button class="btn" type="submit">Set password and sign in</button>
+  </form>
+  <div class="gone" id="gone" hidden>
+    <p>This invitation link has expired or was already used.</p>
+    <p class="muted small">Ask an emhub admin to send a new invitation. If you already set your password, sign in instead.</p>
+    <a class="btn quiet" href="/login">Go to sign in</a>
+  </div>
+</main>
+<script>
+  const params = new URLSearchParams(location.search);
+  const token = params.get("token") || "";
+  const messages = {
+    short: "Use at least 10 characters.",
+    mismatch: "The two passwords don't match.",
+    rate: "Too many attempts. Wait 15 minutes and try again.",
+  };
+  fetch("/auth/invite/check?token=" + encodeURIComponent(token)).then((r) => r.json()).then((r) => {
+    if (!r.ok) { document.getElementById("gone").hidden = false; return; }
+    document.getElementById("who").textContent = `Your username is ${r.username}. Choose a password to finish.`;
+    document.getElementById("token").value = token;
+    document.getElementById("form").hidden = false;
+    const error = messages[params.get("error")];
+    if (error) { msg.textContent = error; msg.hidden = false; }
+  });
+  document.getElementById("form").addEventListener("submit", (e) => {
+    const f = e.target;
+    if (f.password.value !== f.confirm.value) { e.preventDefault(); msg.textContent = messages.mismatch; msg.hidden = false; }
+  });
+</script>
+</body>
+</html>

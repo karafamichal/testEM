@@ -9,11 +9,16 @@ import express from 'express';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import * as transit from './cp.js';
+import { startFollowing, stopFollowing, vapidPublicKey } from './push.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const BASE_URL = process.env.QRBUS_BASE_URL || 'https://sadzv.qrbus.me';
 const PORT = process.env.PORT || 3000;
+// emhub (bug reports + community delays). The key stays on this server, never in the browser.
+const HUB_URL = (process.env.HUB_URL || '').replace(/\/$/, '');
+const HUB_APP_KEY = process.env.HUB_APP_KEY || '';
 const USER_AGENT =
   'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36';
 
@@ -307,11 +312,38 @@ function extractTemplateBase64(templateRaw) {
   }
 }
 
+function allCards(obj) {
+  if (!obj) return [];
+  if (Array.isArray(obj.cards) && obj.cards.length) return obj.cards;
+  if (obj.card) return [obj.card];
+  return allCards(obj.wertyzUser) .length ? allCards(obj.wertyzUser) : allCards(obj.user);
+}
+
+function parseCard(cardObj) {
+  const ticketObj = firstTicket(cardObj);
+  const templateRaw = readString(cardObj, 'template');
+  return {
+    serialNumber: readString(cardObj, 'snr', 'cardSnr', 'cardSNR', 'cardNumber', 'cardnumber', 'serialNumber', 'serialnumber'),
+    cardTypeName: readString(cardObj, 'cardTypeName', 'typeName', 'cardType'),
+    organizationName: readString(cardObj, 'organizationName', 'organization', 'companyName'),
+    cardValidFrom: readLong(cardObj, 'validFrom', 'cardValidFrom'),
+    cardValidTo: readLong(cardObj, 'validTo', 'cardValidTo'),
+    ticketValidFrom: readLong(ticketObj, 'timeValidityFrom', 'validFrom'),
+    ticketValidTo: readLong(ticketObj, 'timeValidityTo', 'validTo'),
+    discountValidFrom: readLong(cardObj, 'discountValidFrom'),
+    discountValidTo: readLong(cardObj, 'discountValidTo'),
+    creditLastBalance: readDouble(cardObj, 'creditLastBalance', 'credit'),
+    currencySymbol: readString(cardObj, 'currencySymbol', 'currency'),
+    cardTemplateBase64: readString(cardObj, 'base64', 'cardBase64') || extractTemplateBase64(templateRaw),
+  };
+}
+
 function parseAccountDetail(json) {
   const data = json.data && typeof json.data === 'object' ? json.data : json;
   const userObj = data.wertyzUser || data.user || data;
   const cardObj = firstCard(userObj) || firstCard(data);
   const ticketObj = firstTicket(cardObj);
+  const cards = (allCards(userObj).length ? allCards(userObj) : allCards(data)).map(parseCard).filter((c) => c.serialNumber);
 
   const cardFullName = readString(cardObj, 'fullName', 'fullname', 'ownerFullName', 'name');
   const cardFirst = readString(cardObj, 'ownerFirstName', 'firstName', 'firstname', 'first_name');
@@ -348,6 +380,7 @@ function parseAccountDetail(json) {
     creditLastBalance: readDouble(cardObj, 'creditLastBalance', 'credit'),
     currencySymbol: readString(cardObj, 'currencySymbol', 'currency'),
     cardTemplateBase64,
+    cards,
   };
 }
 
@@ -382,7 +415,7 @@ function parseHistory(root) {
     const stop = (t.place && t.place.stop) || {};
 
     const saleTimeSec = num(payment.saleTime) ?? num(t.saleTime) ?? 0;
-    const timestampMs = saleTimeSec * 1000; // wall-clock; client formats it
+    const timestampMs = saleTimeSec * 1000; // real UTC epoch; the client shows it in local time
 
     const oldValue = num(balance.oldValue) ?? num(t.oldBalance);
     const newValue = num(balance.newValue) ?? num(t.newBalance);
@@ -414,6 +447,7 @@ function parseHistory(root) {
       oldValue != null && newValue != null ? `${eur(oldValue)} → ${eur(newValue)}` : '';
     const subtitle = [stopName, balancePart].filter(Boolean).join(' • ');
 
+    const isTopUp = t.operationType === 6 || tariffType.id === 3 || deltaCents > 0;
     result.push({
       id,
       sourceType: 'TICKET',
@@ -421,6 +455,9 @@ function parseHistory(root) {
       title,
       subtitle,
       amountText: signedEur(deltaCents),
+      amountCents: deltaCents,
+      isTopUp,
+      stopName,
     });
   });
 
@@ -440,6 +477,9 @@ function parseHistory(root) {
       title: `Transaction #${type}`,
       subtitle,
       amountText: '',
+      amountCents: null,
+      isTopUp: false,
+      stopName: '',
     });
   });
 
@@ -486,7 +526,8 @@ setInterval(() => {
 // HTTP API
 // ---------------------------------------------------------------------------
 const app = express();
-app.use(express.json());
+// Bug reports carry logs, so allow more than the 100 kB default.
+app.use(express.json({ limit: '1.5mb' }));
 
 function sendError(res, err) {
   const status = err instanceof HttpError ? err.status : 500;
@@ -552,6 +593,93 @@ app.post('/api/history', async (req, res) => {
     if (err instanceof HttpError && err.status === 401) sessions.delete(req.body?.sessionId);
     sendError(res, err);
   }
+});
+
+app.post('/api/select-card', (req, res) => {
+  const { sessionId, serial } = req.body || {};
+  const session = getSession(sessionId);
+  if (!session) return res.status(401).json({ success: false, error: 'Session expired' });
+  session.serial = String(serial || '').trim();
+  res.json({ success: true, serial: session.serial });
+});
+
+// ---------------------------------------------------------------------------
+// Public transit (no sign-in): live departures, trips, cp.sk planner.
+// ---------------------------------------------------------------------------
+const wrap = (fn) => async (req, res) => {
+  try {
+    res.json(await fn(req));
+  } catch (err) {
+    res.status(err.status || 502).json({ success: false, error: err.message || 'Upstream error' });
+  }
+};
+const asTripRef = (b) => ({
+  line: String(b.line || ''), lineId: Number(b.lineId) || 0, routeNumber: String(b.routeNumber || ''),
+  tripNumber: Number(b.tripNumber) || 0, destination: String(b.destination || ''),
+  scheduleUrl: String(b.scheduleUrl || ''), serviceDate: String(b.serviceDate || ''),
+});
+
+app.get('/api/live/stops', wrap(() => transit.getStops()));
+app.post('/api/live/departures', wrap((req) => {
+  const ids = (req.body?.platformIds || []).map(Number).filter(Number.isFinite).slice(0, 20);
+  if (!ids.length) throw Object.assign(new Error('platformIds required'), { status: 400 });
+  return transit.getDepartures(ids);
+}));
+app.post('/api/live/trip', wrap(async (req) => {
+  const ref = asTripRef(req.body || {});
+  return ref.scheduleUrl ? transit.getScheduledTrip(ref) : transit.getLiveTrip(ref);
+}));
+app.get('/api/live/match', wrap((req) => transit.matchStopByName(String(req.query.name || ''))));
+app.get('/api/cp/suggest', wrap((req) => transit.suggestStops(String(req.query.city || ''), String(req.query.q || '').slice(0, 80))));
+app.post('/api/cp/search', wrap((req) => transit.searchConnections(req.body || {})));
+app.post('/api/cp/more', wrap((req) => transit.moreConnections(req.body?.cursor)));
+
+// ---------------------------------------------------------------------------
+// Follow a bus: web push alerts (arriving, get off, arrived) while the app is closed.
+// ---------------------------------------------------------------------------
+app.post('/api/follow', wrap((req) => {
+  const b = req.body || {};
+  if (!b.subscription?.endpoint) throw Object.assign(new Error('Push subscription required'), { status: 400 });
+  return {
+    id: startFollowing({
+      subscription: b.subscription,
+      ref: asTripRef(b.ref || {}),
+      boardingPlatformIds: (b.boardingPlatformIds || []).map(Number),
+      alightOrder: b.alightOrder == null ? null : Number(b.alightOrder),
+      lang: b.lang === 'en' ? 'en' : 'sk',
+      arriveLeadMinutes: Math.min(60, Math.max(1, Math.round(Number(b.arriveLeadMinutes) || 2))),
+      community: !!b.community,
+    }, hubRequest),
+  };
+}));
+app.post('/api/unfollow', wrap((req) => ({ ok: stopFollowing(String(req.body?.id || '')) })));
+
+// ---------------------------------------------------------------------------
+// emhub proxy: bug reports and community delays.
+// ---------------------------------------------------------------------------
+async function hubRequest(route, { method = 'GET', body, clientIp } = {}) {
+  if (!HUB_URL || !HUB_APP_KEY) throw Object.assign(new Error('Bug reports and community delays are not set up on this server'), { status: 503 });
+  const res = await fetch(`${HUB_URL}/api/v1/${route}`, {
+    method,
+    headers: { 'X-App-Key': HUB_APP_KEY, 'Content-Type': 'application/json', ...(clientIp ? { 'X-Forwarded-For': clientIp } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15000),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error || `emhub HTTP ${res.status}`), { status: res.status });
+  return json;
+}
+const clientIp = (req) => req.get('CF-Connecting-IP') || req.socket.remoteAddress || '';
+
+app.post('/api/hub/bugs', wrap((req) =>
+  hubRequest('bugs', { method: 'POST', body: { ...req.body, platform: 'web' }, clientIp: clientIp(req) })));
+app.post('/api/hub/report', wrap((req) =>
+  hubRequest('community/reports', { method: 'POST', body: { ...req.body, platform: 'web' }, clientIp: clientIp(req) })));
+app.get('/api/hub/delay', wrap((req) =>
+  hubRequest('community/delay?trip=' + encodeURIComponent(String(req.query.trip || '')), { clientIp: clientIp(req) })));
+
+app.get('/api/config', (req, res) => {
+  res.json({ hub: !!(HUB_URL && HUB_APP_KEY), vapidPublicKey: vapidPublicKey() });
 });
 
 app.post('/api/logout', (req, res) => {

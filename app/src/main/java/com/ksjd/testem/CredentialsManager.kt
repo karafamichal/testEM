@@ -8,6 +8,8 @@ import com.google.gson.JsonParser
 import java.security.MessageDigest
 import java.security.SecureRandom
 
+const val MAX_ARRIVAL_ALERT_MINUTES = 60
+
 /** App preferences: login, security, appearance, reminders and saved places. */
 class CredentialsManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("qr_daemon", Context.MODE_PRIVATE)
@@ -154,6 +156,31 @@ class CredentialsManager(context: Context) {
         val sent = prefs.getStringSet("alerts_sent", emptySet()).orEmpty()
         prefs.edit().putStringSet("alerts_sent", sent.filterNot { it.startsWith(prefix) }.toSet()).apply()
     }
+
+    // ------------------------------------------------------- following a bus
+
+    /** How many minutes before the bus reaches the user's stop to alert them (1–60). */
+    fun getArrivalAlertMinutes(): Int = prefs.getInt("arrival_alert_minutes", 2).coerceIn(1, MAX_ARRIVAL_ALERT_MINUTES)
+    fun saveArrivalAlertMinutes(minutes: Int) =
+        prefs.edit().putInt("arrival_alert_minutes", minutes.coerceIn(1, MAX_ARRIVAL_ALERT_MINUTES)).apply()
+
+    // ------------------------------------------------------- opt-in features
+
+    /** Asked once on first run; both features stay off until the user says yes. */
+    fun wasPrivacyAsked(): Boolean = prefs.getBoolean("privacy_asked", false)
+    fun markPrivacyAsked() = prefs.edit().putBoolean("privacy_asked", true).apply()
+
+    /** Share and receive community delays for intercity buses. */
+    fun getCommunityEnabled(): Boolean = prefs.getBoolean("community_enabled", false)
+    fun saveCommunityEnabled(enabled: Boolean) = prefs.edit().putBoolean("community_enabled", enabled).apply()
+
+    /** Use the phone's location (on the phone only) to say whether the user will catch the bus. */
+    fun getCatchEnabled(): Boolean = prefs.getBoolean("catch_enabled", false)
+    fun saveCatchEnabled(enabled: Boolean) = prefs.edit().putBoolean("catch_enabled", enabled).apply()
+
+    /** Alert on timetable times too, not only when the bus's real position is known. */
+    fun getCatchTimetableAlerts(): Boolean = prefs.getBoolean("catch_timetable_alerts", false)
+    fun saveCatchTimetableAlerts(enabled: Boolean) = prefs.edit().putBoolean("catch_timetable_alerts", enabled).apply()
 
     // ------------------------------------------------------- saved places
 

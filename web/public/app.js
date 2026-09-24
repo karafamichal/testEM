@@ -1,508 +1,725 @@
-'use strict';
+// testEM web client: entry point. Ticket, account, history, settings, PIN lock, bug reports.
+import { t, lang, setLang, applyI18n } from './js/i18n.js';
+import { $, $$, esc, api, apiJson, store, config, loadConfig, clock, dateText, money, toMs, toast, openPage, closeOverlay, switchRow, collectLogs, log, VERSION } from './js/core.js';
+import { historyInsights, historyToCsv } from './js/logic.js';
+import * as live from './js/live.js';
+import { renderPlanner } from './js/planner.js';
 
-// ---------------------------------------------------------------------------
-// Config & state
-// ---------------------------------------------------------------------------
-const POLL_INTERVAL_MS = 25000; // qrbus rotates tokens roughly every 25s
+const POLL_MS = 25000;
 const RETRY_MS = 3000;
-const LS_KEY = 'testem.creds';
-const LS_THRESHOLD = 'testem.threshold';
 
-const state = {
-  sessionId: null,
-  serial: '',
-  account: null,
-  lastBase64: null,
-  pollTimer: null,
-  polling: false,
-  reauthInFlight: false,
-  wakeLock: null,
+const s = {
+  creds: null, // in memory only once decrypted
+  sessionId: null, serial: '', account: null,
+  lastBase64: null, lastTokenAt: 0, pollTimer: null, polling: false, reauthInFlight: false,
+  history: null, historyError: false, guest: false, tab: 'ticket', wakeLock: null, hiddenAt: 0,
 };
 
-// ---------------------------------------------------------------------------
-// DOM
-// ---------------------------------------------------------------------------
-const $ = (id) => document.getElementById(id);
-const loginView = $('login-view');
-const appView = $('app-view');
-const loginForm = $('login-form');
-const loginBtn = $('login-btn');
-const loginError = $('login-error');
-const qrEl = $('qr');
-const qrPlaceholder = $('qr-placeholder');
-const statusEl = $('status');
-const refreshFill = $('refresh-fill');
+// ------------------------------------------------------------------ theme
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function loadCreds() {
+const PRESETS = [
+  { id: 'stop', name: 'Zastávka', color: '#1D4FB8' },
+  { id: 'ocean', name: 'Ocean', color: '#136F63' },
+  { id: 'sunset', name: 'Sunset', color: '#E85D04' },
+];
+function applyTheme() {
+  const preset = store.get('themeId', 'stop');
+  const color = preset === 'custom' ? store.get('themeColor', '#1D4FB8') : (PRESETS.find((x) => x.id === preset) || PRESETS[0]).color;
+  const root = document.documentElement;
+  root.style.setProperty('--accent', color);
+  const mode = store.get('themeMode', 'auto');
+  if (mode === 'auto') delete root.dataset.theme; else root.dataset.theme = mode;
+  root.dataset.amoled = store.get('amoled', false) ? '1' : '';
+  $('meta[name="theme-color"]').content = getComputedStyle(root).getPropertyValue('--bg').trim() || '#0F1A30';
+}
+
+// ------------------------------------------------------------------ credentials & PIN
+
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+async function pinKey(pin, salt) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(pin), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 250000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function encryptCreds(creds, pin) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await pinKey(pin, salt), enc.encode(JSON.stringify(creds)));
+  store.set('credsEnc', { salt: b64(salt), iv: b64(iv), data: b64(data) });
+  store.set('creds', null);
+}
+async function decryptCreds(pin) {
+  const e = store.get('credsEnc');
   try {
-    return JSON.parse(localStorage.getItem(LS_KEY) || 'null');
-  } catch {
-    return null;
-  }
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(e.iv) }, await pinKey(pin, unb64(e.salt)), unb64(e.data));
+    return JSON.parse(dec.decode(plain));
+  } catch { return null; }
 }
-function saveCreds(creds) {
-  localStorage.setItem(LS_KEY, JSON.stringify(creds));
-}
-function clearCreds() {
-  localStorage.removeItem(LS_KEY);
-}
-function getThreshold() {
-  const v = parseFloat(localStorage.getItem(LS_THRESHOLD));
-  return Number.isFinite(v) && v >= 0 ? v : 1.0;
+const hasPin = () => !!store.get('credsEnc');
+/** With a PIN the password is only ever stored encrypted. */
+async function saveCreds(creds) {
+  s.creds = creds;
+  if (!hasPin()) store.set('creds', creds);
+  else if (s.pin) await encryptCreds(creds, s.pin);
 }
 
-async function api(path, body) {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body || {}),
-  });
-  let json = null;
-  try {
-    json = await res.json();
-  } catch {
-    /* ignore */
-  }
-  return { status: res.status, ok: res.ok, json: json || {} };
+// ------------------------------------------------------------------ views
+
+function show(id) {
+  for (const v of ['install-gate', 'lock-view', 'login-view', 'app-view']) $('#' + v).hidden = v !== id;
 }
 
-function setStatus(text, isError) {
-  statusEl.textContent = text;
-  statusEl.classList.toggle('err', !!isError);
+function isStandalone() {
+  return matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
 }
-
-function fmtDate(value) {
-  if (!value) return '—';
-  // Account-detail timestamps may be seconds or milliseconds.
-  const ms = value < 1e12 ? value * 1000 : value;
-  const d = new Date(ms);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
+function enforceInstallGate() {
+  if (isStandalone()) return false;
+  const ua = navigator.userAgent;
+  const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const android = /android/i.test(ua);
+  if (!ios && !android) return false; // desktop may use it in the browser
+  $('#ios-steps').hidden = !ios;
+  $('#android-steps').hidden = ios;
+  show('install-gate');
+  return true;
 }
+let installPrompt = null;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; $('#install-btn').hidden = false; });
 
-function fmtRange(from, to) {
-  if (!from && !to) return '—';
-  return `${fmtDate(from)} – ${fmtDate(to)}`;
-}
+// ---- PIN lock
 
-// ---------------------------------------------------------------------------
-// QR rendering
-// ---------------------------------------------------------------------------
-function renderQR(text) {
-  // typeNumber 0 = auto-size; error-correction 'H' matches the Android client.
-  const qr = qrcode(0, 'H');
-  qr.addData(text);
-  qr.make();
-  qrEl.innerHTML = qr.createSvgTag({ scalable: true, margin: 0 });
-  qrPlaceholder.hidden = true;
-}
-
-function resetRefreshBar() {
-  refreshFill.style.transition = 'none';
-  refreshFill.style.transform = 'scaleX(1)';
-  // Force reflow so the next transition runs from full width.
-  void refreshFill.offsetWidth;
-  refreshFill.style.transition = `transform ${POLL_INTERVAL_MS}ms linear`;
-  refreshFill.style.transform = 'scaleX(0)';
-}
-
-// ---------------------------------------------------------------------------
-// Account rendering
-// ---------------------------------------------------------------------------
-function renderAccount(account) {
-  if (!account) return;
-  state.account = account;
-
-  $('user-name').textContent = account.userName || 'testEM';
-  $('card-type').textContent = account.cardTypeName || '';
-
-  if (account.creditLastBalance != null) {
-    const cur = account.currencySymbol || '';
-    $('balance').textContent = `${account.creditLastBalance.toFixed(2)}${cur ? ' ' + cur : ''}`;
-  } else {
-    $('balance').textContent = '—';
-  }
-
-  $('organization').textContent = account.organizationName || account.cardTypeName || '—';
-  $('ticket-validity').textContent = fmtRange(account.ticketValidFrom, account.ticketValidTo);
-  $('card-validity').textContent = fmtRange(account.cardValidFrom, account.cardValidTo);
-
-  // Low-credit banner
-  const banner = $('low-credit-banner');
-  const threshold = getThreshold();
-  if (account.creditLastBalance != null && account.creditLastBalance < threshold) {
-    const cur = account.currencySymbol || '';
-    $('low-credit-text').textContent =
-      `Low credit: ${account.creditLastBalance.toFixed(2)}${cur ? ' ' + cur : ''} remaining`;
-    banner.hidden = false;
-  } else {
-    banner.hidden = true;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// History
-// ---------------------------------------------------------------------------
-async function loadHistory() {
-  const list = $('history-list');
-  list.innerHTML = '<p class="muted history-empty"><span class="spinner"></span> Loading…</p>';
-  const { ok, status, json } = await api('/api/history', { sessionId: state.sessionId, limit: 30 });
-
-  if (status === 401) {
-    if (await reauthenticate()) return loadHistory();
-    list.innerHTML = '<p class="muted history-empty">Session expired.</p>';
-    return;
-  }
-  if (!ok || !json.success) {
-    list.innerHTML = `<p class="muted history-empty">${json.error || 'Failed to load history.'}</p>`;
-    return;
-  }
-  const items = json.items || [];
-  if (!items.length) {
-    list.innerHTML = '<p class="muted history-empty">No history yet.</p>';
-    return;
-  }
-  list.innerHTML = '';
-  for (const it of items) {
-    const row = document.createElement('div');
-    row.className = 'history-item';
-    const amt = (it.amountText || '').trim();
-    const amtClass = amt.startsWith('+') ? 'pos' : amt.startsWith('-') ? 'neg' : 'neutral';
-
-    const add = (cls, text) => {
-      const d = document.createElement('div');
-      d.className = cls;
-      d.textContent = text;
-      row.appendChild(d);
-    };
-
-    // Matches the Android layout: date/time, title, subtitle, amount (stacked).
-    const when = fmtDateTime(it.timestampMs);
-    if (when) add('h-time', when);
-    add('h-title', it.title);
-    if (it.subtitle) add('h-sub', it.subtitle);
-    if (amt) add('h-amount ' + amtClass, amt);
-
-    list.appendChild(row);
-  }
-}
-
-function pad2(n) {
-  return String(n).padStart(2, '0');
-}
-
-function fmtDateTime(ms) {
-  if (!ms) return '';
-  const d = new Date(ms);
-  if (Number.isNaN(d.getTime())) return '';
-  // The API stores local wall-clock encoded as a unix timestamp. Read it back
-  // with UTC getters so the displayed time is identical on any device timezone
-  // (this reproduces what the Android app shows).
-  return (
-    `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ` +
-    `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Token polling
-// ---------------------------------------------------------------------------
-async function pollOnce() {
-  if (!state.sessionId) return;
-  const { status, ok, json } = await api('/api/token', { sessionId: state.sessionId });
-
-  if (status === 401) {
-    setStatus('Session expired — reconnecting…');
-    if (await reauthenticate()) {
-      scheduleNext(500);
-    } else {
-      setStatus('Could not reconnect. Please log in again.', true);
-      handleAuthFailure();
-    }
-    return;
-  }
-
-  if (ok && json.success && json.base64) {
-    if (json.base64 !== state.lastBase64) {
-      state.lastBase64 = json.base64;
-      renderQR(json.base64);
-    }
-    resetRefreshBar();
-    setStatus('Ticket active');
-    scheduleNext(POLL_INTERVAL_MS);
-  } else {
-    setStatus(json.error || 'No ticket available — retrying…', !json.success);
-    scheduleNext(RETRY_MS);
-  }
-}
-
-function scheduleNext(delay) {
-  clearTimeout(state.pollTimer);
-  if (!state.polling) return;
-  state.pollTimer = setTimeout(pollOnce, delay);
-}
-
-function startPolling() {
-  if (state.polling) return;
-  state.polling = true;
-  pollOnce();
-}
-
-function stopPolling() {
-  state.polling = false;
-  clearTimeout(state.pollTimer);
-}
-
-// ---------------------------------------------------------------------------
-// Auth
-// ---------------------------------------------------------------------------
-async function reauthenticate() {
-  if (state.reauthInFlight) return false;
-  const creds = loadCreds();
-  if (!creds) return false;
-  state.reauthInFlight = true;
-  try {
-    const { ok, json } = await api('/api/login', creds);
-    if (ok && json.success) {
-      state.sessionId = json.sessionId;
-      state.serial = json.serial || state.serial;
-      if (json.account) renderAccount(json.account);
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  } finally {
-    state.reauthInFlight = false;
-  }
-}
-
-function handleAuthFailure() {
+let lockTries = 0, lockUntil = 0;
+function showLock() {
   stopPolling();
-  state.sessionId = null;
-  showLogin();
+  show('lock-view');
+  const input = $('#lock-pin');
+  input.value = '';
+  $('#lock-error').hidden = true;
+  setTimeout(() => input.focus(), 50);
 }
+$('#lock-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const err = $('#lock-error');
+  if (Date.now() < lockUntil) { err.textContent = t('lock_wait', Math.ceil((lockUntil - Date.now()) / 1000)); err.hidden = false; return; }
+  const pin = $('#lock-pin').value;
+  const creds = await decryptCreds(pin);
+  if (!creds) {
+    lockTries++;
+    if (lockTries >= 5) { lockUntil = Date.now() + 30000; lockTries = 0; err.textContent = t('lock_wait', 30); }
+    else err.textContent = t('lock_wrong', 5 - lockTries);
+    err.hidden = false;
+    $('#lock-pin').value = '';
+    return;
+  }
+  lockTries = 0;
+  s.creds = creds;
+  s.pin = pin;
+  if (s.sessionId) { showApp(); startPolling(); } else signIn(creds);
+};
+$('#lock-forgot').onclick = () => { if (confirm(t('logout_confirm'))) logout(); };
 
-async function doLogin(creds, { fromForm } = {}) {
-  const { ok, json, status } = await api('/api/login', creds);
-  if (!ok || !json.success) {
-    const msg = json.error || `Login failed (${status})`;
+// ---- login
+
+$('#login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = $('#login-btn');
+  const creds = { email: $('#email').value.trim(), password: $('#password').value };
+  if (!creds.email || !creds.password) return;
+  btn.disabled = true;
+  btn.textContent = t('logging_in');
+  $('#login-error').hidden = true;
+  const ok = await signIn(creds, { fromForm: true });
+  btn.disabled = false;
+  btn.textContent = t('login');
+  if (ok) $('#password').value = '';
+};
+$('#browse-btn').onclick = () => { s.guest = true; showApp(); };
+
+async function signIn(creds, { fromForm } = {}) {
+  const r = await api('/api/login', { ...creds, serial: store.get('serial', '') });
+  if (!r.ok || !r.json.success) {
     if (fromForm) {
-      loginError.textContent = msg;
-      loginError.hidden = false;
-    }
+      $('#login-error').textContent = r.json.error === 'offline' ? t('ticket_offline_no_code') : r.json.error || t('login_failed', r.status);
+      $('#login-error').hidden = false;
+    } else { showLogin(); }
     return false;
   }
-  state.sessionId = json.sessionId;
-  state.serial = json.serial || '';
-  saveCreds({ email: creds.email, password: creds.password, serial: state.serial });
-  if (json.account) renderAccount(json.account);
+  s.guest = false;
+  s.sessionId = r.json.sessionId;
+  await saveCreds(creds);
+  setAccount(r.json.account);
+  // Keep the card the user picked last time.
+  const preferred = store.get('serial', '');
+  s.serial = s.account?.cards?.some((c) => c.serialNumber === preferred) ? preferred : r.json.serial || '';
+  if (s.serial !== r.json.serial) await api('/api/select-card', { sessionId: s.sessionId, serial: s.serial });
   showApp();
   startPolling();
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// View switching
-// ---------------------------------------------------------------------------
-function showApp() {
-  loginView.hidden = true;
-  appView.hidden = false;
-  requestWakeLock();
+async function reauth() {
+  if (s.reauthInFlight || !s.creds) return false;
+  s.reauthInFlight = true;
+  try {
+    const r = await api('/api/login', { ...s.creds, serial: s.serial });
+    if (!r.ok || !r.json.success) return false;
+    s.sessionId = r.json.sessionId;
+    setAccount(r.json.account);
+    if (s.serial && s.serial !== r.json.serial) await api('/api/select-card', { sessionId: s.sessionId, serial: s.serial });
+    return true;
+  } finally { s.reauthInFlight = false; }
 }
 
 function showLogin() {
-  releaseWakeLock();
-  appView.hidden = true;
-  loginView.hidden = false;
-  loginError.hidden = true;
-  // Pre-fill saved email for convenience.
-  const creds = loadCreds();
-  if (creds?.email) $('email').value = creds.email;
+  s.guest = false;
+  show('login-view');
+  applyI18n($('#login-view'));
+  $('#email').value = s.creds?.email || store.get('creds')?.email || '';
 }
 
-// ---------------------------------------------------------------------------
-// Wake lock (keep screen on while showing the ticket)
-// ---------------------------------------------------------------------------
-async function requestWakeLock() {
-  if (!('wakeLock' in navigator)) return;
-  try {
-    state.wakeLock = await navigator.wakeLock.request('screen');
-  } catch {
-    /* user agent may reject; ignore */
-  }
-}
-function releaseWakeLock() {
-  try {
-    state.wakeLock?.release();
-  } catch {
-    /* ignore */
-  }
-  state.wakeLock = null;
-}
-
-// ---------------------------------------------------------------------------
-// Events
-// ---------------------------------------------------------------------------
-loginForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  loginError.hidden = true;
-  const creds = {
-    email: $('email').value.trim(),
-    password: $('password').value,
-  };
-  if (!creds.email || !creds.password) return;
-  loginBtn.disabled = true;
-  loginBtn.textContent = 'Logging in…';
-  await doLogin(creds, { fromForm: true });
-  loginBtn.disabled = false;
-  loginBtn.textContent = 'Log in';
-});
-
-$('history-refresh').addEventListener('click', loadHistory);
-
-$('logout-btn').addEventListener('click', async () => {
-  if (state.sessionId) api('/api/logout', { sessionId: state.sessionId });
+function logout() {
+  if (s.sessionId) api('/api/logout', { sessionId: s.sessionId });
   stopPolling();
-  clearCreds();
-  state.sessionId = null;
-  state.lastBase64 = null;
-  qrEl.innerHTML = '';
-  qrPlaceholder.hidden = false;
-  $('password').value = '';
+  Object.assign(s, { creds: null, pin: null, sessionId: null, account: null, lastBase64: null, history: null, serial: '' });
+  store.set('creds', null);
+  store.set('credsEnc', null);
+  store.set('serial', null);
+  closeOverlay('page');
   showLogin();
-});
+}
 
-// Settings sheet
-const sheetBackdrop = $('sheet-backdrop');
-$('menu-btn').addEventListener('click', () => {
-  $('threshold-input').value = getThreshold().toFixed(2);
-  $('session-info').textContent = state.serial ? `Card: ${state.serial}` : 'No card serial';
-  sheetBackdrop.hidden = false;
-});
-$('sheet-close').addEventListener('click', () => (sheetBackdrop.hidden = true));
-sheetBackdrop.addEventListener('click', (e) => {
-  if (e.target === sheetBackdrop) sheetBackdrop.hidden = true;
-});
-$('threshold-input').addEventListener('change', (e) => {
-  const v = parseFloat(e.target.value);
-  if (Number.isFinite(v) && v >= 0) {
-    localStorage.setItem(LS_THRESHOLD, String(v));
-    renderAccount(state.account);
-  }
-});
-$('reload-app').addEventListener('click', async () => {
-  if ('serviceWorker' in navigator) {
-    const regs = await navigator.serviceWorker.getRegistrations();
-    await Promise.all(regs.map((r) => r.update()));
-  }
-  location.reload();
-});
+// ------------------------------------------------------------------ app shell & tabs
 
-// Pause polling when hidden; resume + refresh immediately when visible.
+const TABS = ['ticket', 'departures', 'planner', 'history', 'account'];
+function showApp() {
+  show('app-view');
+  const allowed = s.guest ? ['departures', 'planner'] : TABS;
+  $$('#tabbar [data-tab]').forEach((b) => (b.hidden = !allowed.includes(b.dataset.tab)));
+  if (!allowed.includes(s.tab)) s.tab = allowed[0];
+  applyI18n($('#tabbar'));
+  selectTab(s.tab);
+  maybeAskPrivacy();
+  requestWakeLock();
+}
+
+function selectTab(tab) {
+  s.tab = tab;
+  $$('#tabbar [data-tab]').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'));
+  $$('.tab').forEach((el) => (el.hidden = el.id !== 'tab-' + tab));
+  const el = $('#tab-' + tab);
+  if (tab === 'ticket') renderTicket(el);
+  if (tab === 'departures') live.renderDepartures(el, { guest: s.guest });
+  if (tab === 'planner') renderPlanner(el, { openStop: openStopFromPlanner, guest: s.guest });
+  if (tab === 'history') renderHistory(el);
+  if (tab === 'account') renderAccount(el);
+  el.scrollTop = 0;
+  window.scrollTo(0, 0);
+}
+$('#tabbar').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) selectTab(b.dataset.tab); };
+document.addEventListener('click', (e) => { if (e.target.closest('[data-signin]')) showLogin(); });
+
+function openStopFromPlanner(name, highlight) {
+  selectTab('departures');
+  live.openStopByName(name, highlight);
+}
+live.liveState.onChange = () => { if (s.tab === 'ticket') renderPreview(); };
+
+// ------------------------------------------------------------------ account data
+
+function setAccount(account) {
+  if (!account) return;
+  s.account = account;
+  if (!account.cards?.length && account.serialNumber) account.cards = [account];
+  if (s.tab === 'ticket') renderBanners();
+}
+const selectedCard = () => s.account?.cards?.find((c) => c.serialNumber === s.serial) || s.account?.cards?.[0] || s.account;
+
+async function selectCard(serial) {
+  s.serial = serial;
+  store.set('serial', serial);
+  s.lastBase64 = null;
+  s.history = null;
+  await api('/api/select-card', { sessionId: s.sessionId, serial });
+  pollOnce();
+}
+
+// ------------------------------------------------------------------ ticket tab
+
+function renderTicket(el) {
+  const cards = s.account?.cards || [];
+  el.innerHTML = `
+    <header class="screen-head"><div><h1>${esc(s.account?.userName || t('tab_ticket'))}</h1><p class="hint small" id="card-type"></p></div></header>
+    <div id="banners"></div>
+    ${cards.length > 1 ? `<div class="segmented card-switch" role="radiogroup" aria-label="${esc(t('ticket_card'))}">${cards.map((c) => `<button role="radio" aria-checked="${c.serialNumber === s.serial}" data-card="${esc(c.serialNumber)}">${esc(c.cardTypeName || c.serialNumber)}</button>`).join('')}</div>` : ''}
+    <section class="ticket">
+      <button class="qr-wrap" id="qr-btn" aria-label="${esc(t('ticket_fullscreen'))}"><div id="qr" class="qr"></div><span id="qr-placeholder" class="qr-placeholder">${t('ticket_loading')}</span></button>
+      <div class="stub">
+        <div class="refresh-bar"><span id="refresh-fill"></span></div>
+        <p id="status" class="status" role="status">${t('ticket_connecting')}</p>
+        <p id="validity" class="hint small"></p>
+      </div>
+    </section>
+    <div id="follow-slot-ticket"></div>
+    <div id="preview"></div>`;
+  el.onclick = (e) => {
+    const c = e.target.closest('[data-card]');
+    if (c) { selectCard(c.dataset.card); renderTicket(el); }
+    if (e.target.closest('#qr-btn') && s.lastBase64) openFullscreenQr();
+  };
+  if (s.lastBase64) renderQR(s.lastBase64);
+  renderBanners();
+  live.renderFollowSlot($('#follow-slot-ticket', el));
+  renderPreview();
+  updateStatus();
+}
+
+function renderPreview() {
+  const el = $('#preview');
+  if (el) live.renderPreview(el);
+}
+
+function renderBanners() {
+  const el = $('#banners');
+  const card = selectedCard();
+  if (!el || !card) return;
+  $('#card-type').textContent = card.cardTypeName || '';
+  $('#validity').textContent = card.ticketValidTo ? t('ticket_valid_until', dateText(toMs(card.ticketValidTo))) : '';
+  const out = [];
+  const threshold = store.get('threshold', 1.0);
+  if (card.creditLastBalance != null && card.creditLastBalance < threshold) out.push(t('low_credit', money(card.creditLastBalance, card.currencySymbol)));
+  if (store.get('expiryWarn', true)) {
+    for (const [label, to] of [[t('ticket'), card.ticketValidTo], [t('card'), card.cardValidTo], [t('discount'), card.discountValidTo]]) {
+      if (!to) continue;
+      const days = Math.floor((toMs(to) - Date.now()) / 86400000);
+      if (days < 0) out.push(t('expired', label));
+      else if (days <= 7) out.push(t('expires_soon', label, days === 0 ? t('today') : t('days_left', days)));
+    }
+  }
+  el.innerHTML = out.map((m) => `<div class="notice warn">${esc(m)}</div>`).join('');
+}
+
+function renderQR(text) {
+  const el = $('#qr');
+  if (!el) return;
+  const qr = qrcode(0, 'H'); // error correction H, like Android
+  qr.addData(text);
+  qr.make();
+  el.innerHTML = qr.createSvgTag({ scalable: true, margin: 0 });
+  $('#qr-placeholder').hidden = true;
+}
+
+function openFullscreenQr() {
+  const o = document.createElement('div');
+  o.className = 'qr-full';
+  o.innerHTML = `<div class="qr-full-code"></div><p>${t('ticket_fullscreen_close')}</p>`;
+  const qr = qrcode(0, 'H');
+  qr.addData(s.lastBase64);
+  qr.make();
+  $('.qr-full-code', o).innerHTML = qr.createSvgTag({ scalable: true, margin: 2 });
+  o.onclick = () => o.remove();
+  document.body.appendChild(o);
+}
+
+function resetRefreshBar() {
+  const fill = $('#refresh-fill');
+  if (!fill) return;
+  fill.style.transition = 'none';
+  fill.style.transform = 'scaleX(1)';
+  void fill.offsetWidth;
+  fill.style.transition = `transform ${POLL_MS}ms linear`;
+  fill.style.transform = 'scaleX(0)';
+}
+
+let statusOverride = '';
+function updateStatus(text, isError) {
+  if (text !== undefined) statusOverride = text ? { text, isError } : '';
+  const el = $('#status');
+  if (!el) return;
+  let msg = statusOverride?.text || t('ticket_ready'), err = statusOverride?.isError;
+  const age = s.lastTokenAt ? Math.round((Date.now() - s.lastTokenAt) / 60000) : 0;
+  if (!navigator.onLine) {
+    msg = s.lastBase64 ? t('ticket_offline', clock(s.lastTokenAt), age) : t('ticket_offline_no_code');
+    err = true;
+  } else if (!statusOverride && s.lastTokenAt) {
+    msg = t('ticket_refresh_in', Math.max(0, Math.ceil((s.lastTokenAt + POLL_MS - Date.now()) / 1000)));
+  }
+  el.textContent = msg;
+  el.classList.toggle('err', !!err);
+}
+setInterval(() => { if (s.tab === 'ticket' && !document.hidden) updateStatus(); }, 1000);
+addEventListener('online', () => pollOnce());
+addEventListener('offline', () => updateStatus());
+
+async function pollOnce() {
+  if (!s.sessionId) return;
+  const r = await api('/api/token', { sessionId: s.sessionId });
+  if (r.status === 401) {
+    updateStatus(t('ticket_reconnecting'));
+    if (await reauth()) return schedule(500);
+    updateStatus(t('ticket_signed_out'), true);
+    return schedule(30000);
+  }
+  if (r.status === 400 && /serial/i.test(r.json.error || '')) { updateStatus(t('ticket_no_card'), true); return schedule(60000); }
+  if (r.ok && r.json.success && r.json.base64) {
+    if (r.json.base64 !== s.lastBase64) { s.lastBase64 = r.json.base64; renderQR(s.lastBase64); }
+    s.lastTokenAt = Date.now();
+    resetRefreshBar();
+    updateStatus('');
+    return schedule(POLL_MS);
+  }
+  updateStatus(r.status === 0 ? '' : t('ticket_retry'), r.status !== 0);
+  schedule(RETRY_MS);
+}
+function schedule(ms) {
+  clearTimeout(s.pollTimer);
+  if (s.polling) s.pollTimer = setTimeout(pollOnce, ms);
+}
+function startPolling() { if (!s.polling) { s.polling = true; pollOnce(); } }
+function stopPolling() { s.polling = false; clearTimeout(s.pollTimer); }
+
+// Pause when hidden, lock after the chosen timeout, refresh at once when back.
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    clearTimeout(state.pollTimer);
-  } else if (state.polling && state.sessionId) {
-    requestWakeLock();
-    pollOnce();
+  if (document.hidden) { s.hiddenAt = Date.now(); clearTimeout(s.pollTimer); return; }
+  if (hasPin() && s.creds && Date.now() - s.hiddenAt >= store.get('lockAfter', 0) * 1000) { s.creds = null; return showLock(); }
+  requestWakeLock();
+  if (s.polling) pollOnce();
+  live.resumeFollow();
+});
+
+async function requestWakeLock() {
+  try { if ('wakeLock' in navigator && s.tab === 'ticket') s.wakeLock = await navigator.wakeLock.request('screen'); } catch { /* not allowed */ }
+}
+
+// ------------------------------------------------------------------ history tab
+
+async function renderHistory(el) {
+  el.innerHTML = `<header class="screen-head"><h1>${t('history_title')}</h1>
+    <span><button class="text-btn" data-csv ${s.history?.length ? '' : 'disabled'}>${t('export_csv')}</button><button class="text-btn" data-reload>${t('refresh')}</button></span></header>
+    <div id="hist-body">${s.history ? '' : '<p class="hint"><span class="spinner"></span></p>'}</div>`;
+  el.onclick = (e) => {
+    if (e.target.closest('[data-reload]')) { s.history = null; renderHistory(el); }
+    if (e.target.closest('[data-csv]')) exportCsv();
+  };
+  if (!s.history) {
+    const r = await api('/api/history', { sessionId: s.sessionId, limit: 100 });
+    if (r.status === 401 && await reauth()) return renderHistory(el);
+    s.historyError = !r.ok;
+    s.history = r.ok ? r.json.items || [] : null;
+    if (s.tab === 'history') renderHistory(el);
+    return;
   }
-});
-
-// ---------------------------------------------------------------------------
-// Install gate: on phones, require the app to be launched from the Home Screen
-// ---------------------------------------------------------------------------
-function isStandalone() {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.matchMedia('(display-mode: fullscreen)').matches ||
-    window.matchMedia('(display-mode: minimal-ui)').matches ||
-    window.navigator.standalone === true // iOS Safari
-  );
+  const body = $('#hist-body', el);
+  if (s.historyError) { body.innerHTML = `<div class="notice error">${t('history_failed')}</div>`; return; }
+  if (!s.history.length) { body.innerHTML = `<div class="empty"><p>${t('history_empty')}</p></div>`; return; }
+  const card = selectedCard();
+  const ins = historyInsights(s.history, card?.creditLastBalance ?? null);
+  const max = Math.max(1, ...ins.months.map((m) => m.spentCents));
+  const monthName = (m) => new Date(m.year, m.month, 1).toLocaleDateString(lang() === 'en' ? 'en-GB' : 'sk-SK', { month: 'short' });
+  const tripsText = (n) => (n === 1 ? t('trip_count_1') : t('trips_count', n));
+  const now = ins.months.at(-1), prev = ins.months.at(-2);
+  body.innerHTML = `
+    <section class="insights">
+      <div class="big-stat"><span class="hint">${t('spent_month')}</span><strong>${money(now.spentCents / 100)}</strong><span class="hint small">${tripsText(now.trips)} · ${esc(t('last_month', money(prev.spentCents / 100)))}</span></div>
+      <div class="bars" role="img">${ins.months.map((m) => `<div class="bar"><span style="height:${Math.round((m.spentCents / max) * 100)}%" title="${money(m.spentCents / 100)}"></span><small>${esc(monthName(m))}</small></div>`).join('')}</div>
+      <dl class="stats">
+        ${ins.averageFareCents != null ? `<div><dt>${t('avg_fare')}</dt><dd>${money(ins.averageFareCents / 100)}</dd></div>` : ''}
+        ${ins.tripsLeft != null ? `<div><dt>${t('credit_covers')}</dt><dd>${t('trips_left', ins.tripsLeft)}</dd></div>` : ''}
+      </dl>
+      ${ins.topStops.length ? `<h2 class="section-label">${t('top_stops')}</h2><ol class="top-stops">${ins.topStops.map(([name, n]) => `<li><span>${esc(name)}</span><b>${n}×</b></li>`).join('')}</ol>` : ''}
+      ${ins.oldestRecordMs ? `<p class="hint small">${t('insights_basis', dateText(ins.oldestRecordMs))}</p>` : ''}
+    </section>
+    <ul class="list history">${s.history.map((it) => {
+      const amt = (it.amountText || '').trim();
+      const cls = amt.startsWith('+') ? 'pos' : amt.startsWith('-') ? 'neg' : '';
+      const d = new Date(it.timestampMs);
+      // Real UTC timestamps, shown in the phone's time zone like the Android app.
+      const when = `${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      return `<li class="row"><span class="row-text"><span class="row-title">${esc(it.title)}</span><span class="row-sub">${esc(when)}${it.subtitle ? ' · ' + esc(it.subtitle) : ''}</span></span>${amt ? `<b class="amount ${cls}">${esc(amt)}</b>` : ''}</li>`;
+    }).join('')}</ul>`;
 }
 
-function deviceInfo() {
-  const ua = navigator.userAgent || '';
-  const isIOS =
-    /iphone|ipad|ipod/i.test(ua) ||
-    // iPadOS 13+ reports as desktop Safari but has touch points.
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const isAndroid = /android/i.test(ua);
-  return { isIOS, isAndroid, isMobile: isIOS || isAndroid };
+function exportCsv() {
+  const blob = new Blob(['﻿' + historyToCsv(s.history)], { type: 'text/csv' });
+  const file = new File([blob], `testem-history-${new Date().toISOString().slice(0, 10)}.csv`, { type: 'text/csv' });
+  if (navigator.canShare?.({ files: [file] })) { navigator.share({ files: [file] }).catch(() => {}); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = file.name;
+  a.click();
+  toast(t('exported'));
 }
 
-let deferredInstallPrompt = null;
-window.addEventListener('beforeinstallprompt', (e) => {
-  // Chrome/Android: capture so we can offer a one-tap install button.
-  e.preventDefault();
-  deferredInstallPrompt = e;
-  const btn = $('android-install-btn');
-  if (btn) btn.hidden = false;
-});
+// ------------------------------------------------------------------ account tab
 
-window.addEventListener('appinstalled', () => {
-  deferredInstallPrompt = null;
-  const manual = $('android-manual');
-  if (manual) manual.hidden = true;
-});
-
-const androidInstallBtn = $('android-install-btn');
-if (androidInstallBtn) {
-  androidInstallBtn.addEventListener('click', async () => {
-    if (!deferredInstallPrompt) return;
-    deferredInstallPrompt.prompt();
-    try {
-      await deferredInstallPrompt.userChoice;
-    } catch {
-      /* ignore */
+function renderAccount(el) {
+  const card = selectedCard();
+  const cards = s.account?.cards || [];
+  const days = (to) => Math.floor((toMs(to) - Date.now()) / 86400000);
+  const validity = (label, from, to) => `<li class="row"><span class="row-text"><span class="row-title">${esc(label)}</span><span class="row-sub">${to ? `${dateText(toMs(from))} – ${dateText(toMs(to))}` : t('not_set')}</span></span>
+    ${to ? `<b class="days ${days(to) < 0 ? 'neg' : days(to) <= 7 ? 'warn' : ''}">${days(to) < 0 ? '—' : t('days_left', days(to))}</b>` : ''}</li>`;
+  const link = (page, title, hint) => `<li><button class="row link" data-page="${page}"><span class="row-text"><span class="row-title">${esc(title)}</span>${hint ? `<span class="row-sub">${esc(hint)}</span>` : ''}</span><span aria-hidden="true">›</span></button></li>`;
+  el.innerHTML = `
+    <header class="screen-head"><div><h1>${esc(s.account?.userName || t('account_title'))}</h1><p class="hint small">${esc(s.creds?.email || '')}</p></div>
+      <button class="text-btn" data-refresh-account>${t('refresh')}</button></header>
+    ${card?.cardTemplateBase64 ? `<img class="card-image" alt="" src="data:image/png;base64,${esc(card.cardTemplateBase64.replace(/[^A-Za-z0-9+/=_-]/g, ''))}">` : ''}
+    ${card?.creditLastBalance != null ? `<div class="big-stat"><span class="hint">${t('balance')}</span><strong>${money(card.creditLastBalance, card.currencySymbol)}</strong><span class="hint small">${esc(card.cardTypeName || '')}</span></div>` : ''}
+    ${card ? `<h2 class="section-label">${t('validity')}</h2><ul class="list">${validity(t('ticket'), card.ticketValidFrom, card.ticketValidTo)}${validity(t('card'), card.cardValidFrom, card.cardValidTo)}${card.discountValidTo ? validity(t('discount'), card.discountValidFrom, card.discountValidTo) : ''}</ul>` : ''}
+    ${cards.length > 1 ? `<h2 class="section-label">${t('cards')}</h2><ul class="list">${cards.map((c) => `<li><label class="row"><span class="row-text"><span class="row-title">${esc(c.cardTypeName || c.serialNumber)}</span><span class="row-sub">${esc([c.organizationName, c.creditLastBalance != null ? money(c.creditLastBalance, c.currencySymbol) : ''].filter(Boolean).join(', '))}</span></span><input type="radio" name="card" value="${esc(c.serialNumber)}" ${c.serialNumber === s.serial ? 'checked' : ''}></label></li>`).join('')}</ul>` : ''}
+    ${card ? `<h2 class="section-label">${t('details')}</h2><ul class="list">${card.organizationName ? `<li class="row"><span class="row-text"><span class="row-title">${t('organization')}</span><span class="row-sub">${esc(card.organizationName)}</span></span></li>` : ''}<li class="row"><span class="row-text"><span class="row-title">${t('card_number')}</span><span class="row-sub">${esc(card.serialNumber || s.serial)}</span></span></li></ul>` : ''}
+    <h2 class="section-label">${t('settings')}</h2>
+    <ul class="list">
+      ${link('reminders', t('s_reminders'), t('s_reminders_hint'))}
+      ${link('security', t('s_security'), t('s_security_hint'))}
+      ${link('appearance', t('s_appearance'), t('s_appearance_hint'))}
+      ${link('language', t('s_language'), lang() === 'en' ? t('lang_en') : t('lang_sk'))}
+      ${link('community', t('s_community'), t('s_community_hint'))}
+      ${link('about', t('s_about'), t('version', VERSION))}
+    </ul>
+    <ul class="list">${link('bug', t('s_bug'), t('s_bug_hint'))}<li><button class="row link" data-support><span class="row-text"><span class="row-title">${t('s_support')}</span><span class="row-sub">${t('s_support_hint')}</span></span><span aria-hidden="true">›</span></button></li></ul>
+    <ul class="list"><li><button class="row link danger" data-logout><span class="row-title">${t('logout')}</span></button></li></ul>`;
+  el.onclick = async (e) => {
+    const page = e.target.closest('[data-page]');
+    if (page) return openSettings(page.dataset.page);
+    if (e.target.closest('[data-logout]') && confirm(t('logout_confirm'))) return logout();
+    if (e.target.closest('[data-support]')) return showSupport();
+    if (e.target.closest('[data-refresh-account]')) {
+      const r = await api('/api/account', { sessionId: s.sessionId });
+      if (r.ok) { setAccount(r.json.account); renderAccount(el); }
     }
-    deferredInstallPrompt = null;
-    androidInstallBtn.hidden = true;
-  });
+  };
+  el.onchange = (e) => { if (e.target.name === 'card') selectCard(e.target.value).then(() => renderAccount(el)); };
 }
 
-// Returns true if the user is blocked (gate shown), false if allowed through.
-function enforceInstallGate() {
-  if (isStandalone()) return false;
-  const { isIOS, isAndroid, isMobile } = deviceInfo();
-  if (!isMobile) return false; // desktop browsers may use it directly
+// ------------------------------------------------------------------ settings pages
 
-  loginView.hidden = true;
-  appView.hidden = true;
-  $('ios-instructions').hidden = !isIOS;
-  $('android-instructions').hidden = !(isAndroid || (!isIOS && isMobile));
-  $('install-gate').hidden = false;
-  return true;
+function openSettings(page) {
+  const titles = { reminders: 's_reminders', security: 's_security', appearance: 's_appearance', language: 's_language', community: 's_community', about: 's_about', bug: 's_bug' };
+  const body = openPage(t(titles[page]), () => { if (s.tab === 'account') renderAccount($('#tab-account')); });
+  ({ reminders, security, appearance, language, community: communitySettings, about, bug: bugReport })[page](body);
 }
 
-// ---------------------------------------------------------------------------
-// Service worker
-// ---------------------------------------------------------------------------
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
-  });
+const ARRIVE_CHOICES = [1, 2, 3, 5, 10];
+function reminders(body) {
+  const lead = store.get('arriveLead', 2);
+  const custom = !ARRIVE_CHOICES.includes(lead);
+  body.innerHTML = `
+    <label class="field">${t('threshold')}<input type="number" step="0.10" min="0" inputmode="decimal" id="threshold" value="${store.get('threshold', 1).toFixed(2)}"></label>
+    <ul class="list">${switchRow('expiry', t('expiry_warn'), t('expiry_warn_hint'), store.get('expiryWarn', true))}</ul>
+    <h2 class="section-label">${t('arrive_title')}</h2>
+    <p class="hint">${t('arrive_label')}</p>
+    <div class="chips" role="radiogroup" id="arrive">
+      ${ARRIVE_CHOICES.map((m) => `<label class="chip"><input type="radio" name="arrive" value="${m}" ${lead === m ? 'checked' : ''}>${m} min</label>`).join('')}
+      <label class="chip"><input type="radio" name="arrive" value="custom" ${custom ? 'checked' : ''}>${t('arrive_custom')}</label>
+    </div>
+    <label class="field" id="arrive-custom" ${custom ? '' : 'hidden'}>${t('arrive_custom_label')}<input type="number" min="1" max="60" step="1" inputmode="numeric" value="${lead}"></label>`;
+  $('#threshold', body).onchange = (e) => { const v = parseFloat(e.target.value); if (v >= 0) store.set('threshold', v); };
+  const customBox = $('#arrive-custom', body);
+  $('#arrive', body).onchange = (e) => {
+    customBox.hidden = e.target.value !== 'custom';
+    if (e.target.value !== 'custom') store.set('arriveLead', Number(e.target.value));
+    else $('input', customBox).focus();
+  };
+  $('input', customBox).onchange = (e) => {
+    const v = Math.round(Number(e.target.value));
+    if (v >= 1 && v <= 60) store.set('arriveLead', v); else e.target.value = store.get('arriveLead', 2);
+  };
+  $('#expiry', body).onchange = (e) => store.set('expiryWarn', e.target.checked);
 }
 
-// ---------------------------------------------------------------------------
-// Boot
-// ---------------------------------------------------------------------------
-(async function boot() {
-  // On phones, block everything until the app is installed to the Home Screen.
-  if (enforceInstallGate()) return;
+function security(body) {
+  const timeouts = [[0, 'lock_immediately'], [30, 'lock_30s'], [60, 'lock_1m'], [300, 'lock_5m']];
+  const pinForm = (withCurrent) => `<form class="stack" id="pin-form">
+      ${withCurrent ? `<label class="field">${t('pin_current')}<input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" name="current" required></label>` : ''}
+      <label class="field">${t('pin_new')}<input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" name="pin" required></label>
+      <label class="field">${t('pin_confirm')}<input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" name="confirm" required></label>
+      <p class="error-text" id="pin-error" hidden></p>
+      <button class="btn" type="submit">${t('save')}</button></form>`;
+  body.innerHTML = `<p class="hint">${t('pin_hint')}</p>
+    ${hasPin()
+      ? `<h2 class="section-label">${t('pin_change')}</h2>${pinForm(true)}
+         <h2 class="section-label">${t('lock_after')}</h2><ul class="list">${timeouts.map(([sec, key]) => `<li><label class="row"><span class="row-title">${t(key)}</span><input type="radio" name="lockAfter" value="${sec}" ${store.get('lockAfter', 0) === sec ? 'checked' : ''}></label></li>`).join('')}</ul>
+         <button class="btn outline danger wide" data-remove-pin>${t('pin_remove')}</button>`
+      : `<h2 class="section-label">${t('pin_set')}</h2>${pinForm(false)}`}`;
+  const form = $('#pin-form', body);
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(form));
+    const err = $('#pin-error', body);
+    err.hidden = false;
+    if (!/^\d{4,8}$/.test(f.pin)) return (err.textContent = t('pin_short'));
+    if (f.pin !== f.confirm) return (err.textContent = t('pin_mismatch'));
+    if (hasPin() && !(await decryptCreds(f.current))) return (err.textContent = t('lock_wrong', '–'));
+    await encryptCreds(s.creds, f.pin);
+    s.pin = f.pin;
+    toast(t('pin_saved'));
+    security(body);
+  };
+  body.onchange = (e) => { if (e.target.name === 'lockAfter') store.set('lockAfter', Number(e.target.value)); };
+  const remove = $('[data-remove-pin]', body);
+  if (remove) remove.onclick = () => { store.set('credsEnc', null); store.set('creds', s.creds); s.pin = null; toast(t('pin_removed')); security(body); };
+}
 
-  const creds = loadCreds();
-  if (creds?.email && creds?.password) {
+function appearance(body) {
+  const id = store.get('themeId', 'stop');
+  body.innerHTML = `<h2 class="section-label">${t('theme_colours')}</h2>
+    <ul class="list">${PRESETS.map((p) => `<li><label class="row"><span class="swatch" style="background:${p.color}"></span><span class="row-title">${esc(p.name)}</span><input type="radio" name="theme" value="${p.id}" ${id === p.id ? 'checked' : ''}></label></li>`).join('')}
+      <li><label class="row"><input type="color" id="custom-color" value="${esc(store.get('themeColor', '#1D4FB8'))}" aria-label="${esc(t('theme_custom'))}"><span class="row-title">${t('theme_custom')}</span><input type="radio" name="theme" value="custom" ${id === 'custom' ? 'checked' : ''}></label></li></ul>
+    <h2 class="section-label">${t('theme_mode')}</h2>
+    <ul class="list">${['auto', 'light', 'dark'].map((m) => `<li><label class="row"><span class="row-title">${t('mode_' + m)}</span><input type="radio" name="mode" value="${m}" ${store.get('themeMode', 'auto') === m ? 'checked' : ''}></label></li>`).join('')}</ul>
+    <ul class="list">${switchRow('amoled', t('amoled'), t('amoled_hint'), store.get('amoled', false))}</ul>`;
+  body.onchange = (e) => {
+    if (e.target.name === 'theme') store.set('themeId', e.target.value);
+    if (e.target.id === 'custom-color') { store.set('themeColor', e.target.value); store.set('themeId', 'custom'); $('input[value="custom"]', body).checked = true; }
+    if (e.target.name === 'mode') store.set('themeMode', e.target.value);
+    if (e.target.id === 'amoled') store.set('amoled', e.target.checked);
+    applyTheme();
+  };
+}
+
+function language(body) {
+  body.innerHTML = `<ul class="list">${[['sk', t('lang_sk')], ['en', t('lang_en')]].map(([code, label]) => `<li><label class="row"><span class="row-title">${label}</span><input type="radio" name="lang" value="${code}" ${lang() === code ? 'checked' : ''}></label></li>`).join('')}</ul>`;
+  body.onchange = (e) => {
+    setLang(e.target.value);
+    applyI18n();
+    closeOverlay('page');
     showApp();
-    setStatus('Connecting…');
-    const ok = await doLogin(creds);
-    if (!ok) {
-      setStatus('Login failed — check credentials', true);
-      showLogin();
+    selectTab('account');
+  };
+}
+
+function communitySettings(body) {
+  const catchOn = store.get('catchOn', false);
+  body.innerHTML = `<p class="hint">${t('privacy_community_body')}</p>
+    <ul class="list">${switchRow('community-on', t('community_switch'), '', store.get('communityOn', false))}</ul>
+    <p class="hint">${t('privacy_catch_body')}</p>
+    <ul class="list">${switchRow('catch-on', t('catch_switch'), '', catchOn)}${switchRow('catch-tt', t('catch_timetable'), t('catch_timetable_hint'), store.get('catchTimetable', false), !catchOn)}</ul>`;
+  body.onchange = (e) => {
+    if (e.target.id === 'community-on') store.set('communityOn', e.target.checked);
+    if (e.target.id === 'catch-on') {
+      store.set('catchOn', e.target.checked);
+      $('#catch-tt', body).disabled = !e.target.checked;
+      if (e.target.checked) navigator.geolocation?.getCurrentPosition(() => {}, () => toast(t('catch_location_off')));
     }
+    if (e.target.id === 'catch-tt') store.set('catchTimetable', e.target.checked);
+  };
+}
+
+function about(body) {
+  body.innerHTML = `<ul class="list"><li class="row"><span class="row-title">${t('version', VERSION)}</span></li>
+    ${s.serial ? `<li class="row"><span class="row-title">${esc(t('card_serial', s.serial))}</span></li>` : ''}</ul>
+    <button class="btn outline wide" data-update>${t('check_updates')}</button>
+    <p class="hint small">${t('login_disclaimer')}</p>`;
+  $('[data-update]', body).onclick = async () => {
+    const regs = await navigator.serviceWorker?.getRegistrations() || [];
+    await Promise.all(regs.map((r) => r.update()));
+    location.reload();
+  };
+}
+
+const CATEGORIES = ['crash', 'ticket', 'departures', 'planner', 'tracking', 'account', 'other'];
+function bugReport(body) {
+  if (!config.hub) { body.innerHTML = `<div class="notice warn">${t('bug_off')}</div>`; return; }
+  const logs = collectLogs();
+  body.innerHTML = `<form class="stack" id="bug-form">
+    <fieldset class="chips"><legend class="section-label">${t('bug_category')}</legend>
+      ${CATEGORIES.map((c, i) => `<label class="chip"><input type="radio" name="category" value="${c}" ${i === CATEGORIES.length - 1 ? 'checked' : ''}>${t('cat_' + c)}</label>`).join('')}</fieldset>
+    <label class="field">${t('bug_summary')}<input name="title" maxlength="140"></label>
+    <label class="field">${t('bug_description')}<textarea name="description" rows="5" maxlength="10000"></textarea></label>
+    <label class="field">${t('bug_name')}<input name="name" maxlength="120" value="${esc(s.account?.userName || '')}" autocomplete="name"></label>
+    <label class="field">${t('bug_email')}<input name="email" type="email" maxlength="200" value="${esc(s.creds?.email || '')}" autocomplete="email"><small class="hint">${t('bug_email_hint')}</small></label>
+    <div class="notice warn" id="no-email" ${s.creds?.email ? 'hidden' : ''}>${t('bug_no_email')}</div>
+    <ul class="list">${switchRow('attach-logs', t('bug_logs'), t('bug_logs_hint'), true)}</ul>
+    <details><summary>${t('bug_logs_show')}</summary><pre class="logs">${esc(logs)}</pre></details>
+    <label class="consent"><input type="checkbox" name="consent" required> <span>${t('bug_consent')}</span></label>
+    <p class="error-text" id="bug-error" role="alert" hidden></p>
+    <button class="btn" type="submit" id="bug-send" disabled>${t('bug_send')}</button></form>`;
+  const form = $('#bug-form', body), send = $('#bug-send', body);
+  // Only logs are essential: a description is needed only when no logs are attached.
+  const hasContent = () => $('#attach-logs', body).checked || form.description.value.trim();
+  form.oninput = form.onchange = () => {
+    $('#no-email', body).hidden = !!form.email.value.trim();
+    send.disabled = !form.checkValidity() || !hasContent();
+  };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(form));
+    const err = $('#bug-error', body);
+    send.disabled = true;
+    send.textContent = t('bug_sending');
+    try {
+      const r = await apiJson('/api/hub/bugs', {
+        category: f.category, title: f.title.trim(), description: f.description.trim(), name: f.name.trim(), email: f.email.trim(),
+        appVersion: VERSION, device: navigator.userAgent, logs: $('#attach-logs', body).checked ? logs : '', consent: true,
+      });
+      closeOverlay('page');
+      toast(t('bug_sent', r.code));
+    } catch (error) {
+      err.textContent = t('bug_failed', error.message);
+      err.hidden = false;
+      send.disabled = false;
+      send.textContent = t('bug_send');
+    }
+  };
+}
+
+// ------------------------------------------------------------------ support
+
+const SUPPORT_URL = 'https://karafa.net/support/';
+function showSupport() {
+  const d = document.createElement('div');
+  d.className = 'dialog-backdrop';
+  d.innerHTML = `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="support-title">
+    <h2 id="support-title">${t('s_support')}</h2>
+    <p class="hint">${t('support_body')}</p>
+    <a class="btn wide" href="${SUPPORT_URL}" target="_blank" rel="noopener">${t('support_open')}</a>
+    <button class="text-btn wide-text" data-close-support>${t('support_later')}</button></div>`;
+  d.onclick = (e) => { if (e.target === d || e.target.closest('[data-close-support]') || e.target.closest('a')) d.remove(); };
+  document.body.appendChild(d);
+}
+
+// ------------------------------------------------------------------ first-run privacy question
+
+function maybeAskPrivacy() {
+  if (store.get('privacyAsked', false) || $('#privacy')) return;
+  const d = document.createElement('div');
+  d.id = 'privacy';
+  d.className = 'dialog-backdrop';
+  d.innerHTML = `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="privacy-title">
+    <h2 id="privacy-title">${t('privacy_title')}</h2>
+    <ul class="list">
+      ${switchRow('p-community', t('privacy_community_title'), t('privacy_community_body'), false)}
+      ${switchRow('p-catch', t('privacy_catch_title'), t('privacy_catch_body'), false)}
+    </ul>
+    <p class="hint small">${t('privacy_hint')}</p>
+    <button class="btn wide" data-done>${t('done')}</button></div>`;
+  document.body.appendChild(d);
+  $('[data-done]', d).onclick = () => {
+    store.set('communityOn', $('#p-community', d).checked);
+    store.set('catchOn', $('#p-catch', d).checked);
+    store.set('privacyAsked', true);
+    if ($('#p-catch', d).checked) navigator.geolocation?.getCurrentPosition(() => {}, () => {});
+    d.remove();
+  };
+}
+
+// ------------------------------------------------------------------ boot
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+applyTheme();
+applyI18n();
+$('#install-btn').onclick = async () => { if (installPrompt) { installPrompt.prompt(); await installPrompt.userChoice.catch(() => {}); installPrompt = null; } };
+
+(async function boot() {
+  if (enforceInstallGate()) return;
+  await loadConfig();
+  log('I', 'boot', VERSION);
+  live.resumeFollow();
+  if (hasPin()) return showLock();
+  const creds = store.get('creds');
+  if (creds?.email && creds?.password) {
+    s.creds = creds;
+    showApp();
+    if (!(await signIn(creds))) showLogin();
   } else {
     showLogin();
   }

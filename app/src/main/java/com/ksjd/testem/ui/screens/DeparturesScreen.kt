@@ -109,7 +109,6 @@ fun DeparturesScreen(liveViewModel: LiveViewModel, onExitGuest: (() -> Unit)?) {
     } else {
         StopFinder(state, liveViewModel, onExitGuest)
     }
-    state.trip?.let { trip -> TripSheet(trip, onDismiss = liveViewModel::closeTrip) }
 }
 
 // --------------------------------------------------------------------------
@@ -206,7 +205,7 @@ private fun StopFinder(state: LiveState, vm: LiveViewModel, onExitGuest: (() -> 
         item {
             SectionLabel(stringResource(R.string.departures_nearby)) {
                 if (state.locationStatus == LocationStatus.Ready) {
-                    TextButton(onClick = vm::findNearby) { Text(stringResource(R.string.refresh_button)) }
+                    TextButton(onClick = { vm.findNearby(fresh = true) }) { Text(stringResource(R.string.refresh_button)) }
                 }
             }
             when (state.locationStatus) {
@@ -445,9 +444,10 @@ private fun BoardRow(departure: LiveDeparture, now: Long, highlighted: Boolean, 
 // Trip sheet
 // --------------------------------------------------------------------------
 
+/** Stops of one bus with the Follow button; shown over any tab (Departures or Planner). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit) {
+fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = MaterialTheme.colorScheme.surface) {
@@ -462,7 +462,25 @@ private fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit) {
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    DelayLabel(trip.detail?.delaySeconds)
+                    val community = trip.detail?.community
+                    if (trip.ref.isScheduleOnly && community != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            DelayLabel(community.delaySeconds)
+                            Text(
+                                " " + pluralStringResource(R.plurals.community_riders, community.reporters, community.reporters),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else if (trip.ref.isScheduleOnly) {
+                        Text(
+                            stringResource(R.string.track_schedule_only),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        DelayLabel(trip.detail?.delaySeconds)
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -484,7 +502,7 @@ private fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit) {
             else -> TripTimeline(
                 stops = trip.detail.stops,
                 delaySeconds = trip.detail.delaySeconds,
-                alightOrder = tracked?.alightOrder?.takeIf { following },
+                alightOrder = if (following) tracked?.alightOrder else trip.alightOrder,
                 onStopClick = if (following) {
                     { order -> TripTracking.setAlightStop(context, order.takeIf { it != tracked?.alightOrder }) }
                 } else null
@@ -567,6 +585,13 @@ private fun TripTimeline(
                     if (isAlight) {
                         Text(stringResource(R.string.track_your_stop), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     }
+                    if (stop.platform.isNotBlank()) {
+                        Text(
+                            stringResource(R.string.planner_platform, stop.platform),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 20.dp)) {
                     val showExpected = expectedMs != null && Format.clock(expectedMs) != Format.clock(stop.scheduledMs)
@@ -594,7 +619,7 @@ private fun FollowControls(trip: TripSheetState) {
     val tracked by TripTracking.active.collectAsState()
     val following = tracked?.ref == trip.ref
     var denied by remember { mutableStateOf(false) }
-    val start = { TripTracking.start(context, TrackedTrip(trip.ref, trip.boardingPlatformIds)) }
+    val start = { TripTracking.start(context, TrackedTrip(trip.ref, trip.boardingPlatformIds, trip.alightOrder)) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         denied = !granted
         if (granted) start()
