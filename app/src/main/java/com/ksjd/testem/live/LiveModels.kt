@@ -75,6 +75,8 @@ data class TripDetail(
     /** For timetable-only trips: the stops where the user's part of the journey starts and ends. */
     val boardingOrder: Int? = null,
     val alightOrder: Int? = null,
+    /** sadzv had no stop list, so stops and times come from cp.sk (live delay still from sadzv). */
+    val fromTimetable: Boolean = false,
     /** Pooled rider reports for timetable-only trips (when the user opted in). */
     val community: com.ksjd.testem.hub.CommunityDelay? = null
 ) {
@@ -96,7 +98,11 @@ data class TripRef(
     /** cp.sk route page for buses without live data; times then come from the timetable only. */
     val scheduleUrl: String = "",
     /** ISO date of the departure from the boarding stop, needed to place timetable times. */
-    val serviceDate: String = ""
+    val serviceDate: String = "",
+    /** sadzv stop where the user boards and the planned departure (seconds after midnight):
+     *  used to find the trip on cp.sk when sadzv has no stop list for it. */
+    val fromStopId: Int = 0,
+    val plannedSecondOfDay: Int = -1
 ) {
     val isScheduleOnly: Boolean get() = scheduleUrl.isNotBlank()
 }

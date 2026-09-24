@@ -218,7 +218,9 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
             lineId = departure.lineId,
             routeNumber = departure.routeNumber,
             tripNumber = departure.tripNumber,
-            destination = departure.destination
+            destination = departure.destination,
+            fromStopId = _state.value.board?.stop?.id ?: 0,
+            plannedSecondOfDay = departure.plannedSecondOfDay
         )
         val boarding = _state.value.board?.stop?.platforms?.map { it.id }.orEmpty()
         loadTrip(TripSheetState(ref, boardingPlatformIds = boarding))
@@ -254,7 +256,7 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
                                 isLoading = false,
                                 // Timetable trips know the user's stops; stop ids equal their order there.
                                 boardingPlatformIds = detail.boardingOrder?.let { listOf(it) } ?: trip.boardingPlatformIds,
-                                alightOrder = detail.alightOrder ?: trip.alightOrder
+                                alightOrder = if (detail.fromTimetable) trip.alightOrder else detail.alightOrder ?: trip.alightOrder
                             )
                         },
                         onFailure = { trip.copy(isLoading = false, hasError = true) }

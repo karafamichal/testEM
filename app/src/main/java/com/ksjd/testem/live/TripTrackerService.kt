@@ -203,7 +203,8 @@ class TripTrackerService : Service() {
         if (!stopLookupDone) {
             stopLookupDone = true
             // Timetable trips use made-up platform ids, so match those by name only.
-            val platforms = if (current.ref.isScheduleOnly) emptyList() else current.boardingPlatformIds
+            val byName = current.ref.isScheduleOnly || lastDetail?.fromTimetable == true
+            val platforms = if (byName) emptyList() else current.boardingPlatformIds
             stopLatLon = repo.stopLocation(platforms, p.boardingStopName)
         }
         if (stopLatLon == null) return null
@@ -523,6 +524,8 @@ class TripTrackerService : Service() {
                 .putExtra("alight", trip.alightOrder ?: -1)
                 .putExtra("scheduleUrl", trip.ref.scheduleUrl)
                 .putExtra("serviceDate", trip.ref.serviceDate)
+                .putExtra("fromStopId", trip.ref.fromStopId)
+                .putExtra("planned", trip.ref.plannedSecondOfDay)
 
         private fun readTrip(intent: Intent): TrackedTrip? {
             val line = intent.getStringExtra("line") ?: return null
@@ -534,7 +537,9 @@ class TripTrackerService : Service() {
                     tripNumber = intent.getIntExtra("trip", 0),
                     destination = intent.getStringExtra("destination").orEmpty(),
                     scheduleUrl = intent.getStringExtra("scheduleUrl").orEmpty(),
-                    serviceDate = intent.getStringExtra("serviceDate").orEmpty()
+                    serviceDate = intent.getStringExtra("serviceDate").orEmpty(),
+                    fromStopId = intent.getIntExtra("fromStopId", 0),
+                    plannedSecondOfDay = intent.getIntExtra("planned", -1)
                 ),
                 boardingPlatformIds = intent.getIntArrayExtra("boarding")?.toList().orEmpty(),
                 alightOrder = intent.getIntExtra("alight", -1).takeIf { it >= 0 }

@@ -617,6 +617,7 @@ const asTripRef = (b) => ({
   line: String(b.line || ''), lineId: Number(b.lineId) || 0, routeNumber: String(b.routeNumber || ''),
   tripNumber: Number(b.tripNumber) || 0, destination: String(b.destination || ''),
   scheduleUrl: String(b.scheduleUrl || ''), serviceDate: String(b.serviceDate || ''),
+  fromStopId: Number(b.fromStopId) || 0, plannedSecondOfDay: Number.isFinite(Number(b.plannedSecondOfDay)) ? Number(b.plannedSecondOfDay) : -1,
 });
 
 app.get('/api/live/stops', wrap(() => transit.getStops()));

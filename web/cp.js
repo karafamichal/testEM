@@ -166,6 +166,87 @@ function wallClockToEpochMs(wallSeconds) {
   return localToEpoch(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes()) + d.getUTCSeconds() * 1000;
 }
 
+/** cp.sk city timetable for a stop: Zvolen or Banská Bystrica city buses, else all of Slovakia. */
+export function cityFor(lat, lon) {
+  const near = [['zvolen', 48.577, 19.125], ['banskabystrica', 48.736, 19.146]]
+    .map(([slug, a, b]) => [slug, distance(lat, lon, a, b)]).filter(([, d]) => d < 12000).sort((x, y) => x[1] - y[1]);
+  return near[0]?.[0] || 'slovensko';
+}
+function distance(lat1, lon1, lat2, lon2) {
+  const rad = Math.PI / 180, x = (lon2 - lon1) * rad * Math.cos(((lat1 + lat2) / 2) * rad), y = (lat2 - lat1) * rad;
+  return Math.sqrt(x * x + y * y) * 6371000;
+}
+
+const minutesGap = (a, b) => Math.min(Math.abs(a - b), 1440 - Math.abs(a - b));
+const hhmm = (m) => `${Math.floor((((m % 1440) + 1440) % 1440) / 60)}:${String(((m % 60) + 60) % 60).padStart(2, '0')}`;
+const lineNo = (line) => String(line || '').trim().split(/\s+/).pop();
+
+/** cp.sk stop nearest to a sadzv stop (names differ, e.g. "Zl.Potok A.Hlinku", and repeat across towns). */
+async function nearestCpStop(city, stop) {
+  const words = stop.name.split(/[\s,.]+/).filter((w) => w.length >= 4);
+  const queries = [...new Set([stop.name, words.slice(-2).join(' '), words.at(-1)].filter(Boolean))];
+  const found = [];
+  const meters = (s) => (s.coorX && s.coorY ? distance(stop.lat, stop.lon, Number(s.coorX), Number(s.coorY)) : Infinity);
+  for (const q of queries) {
+    found.push(...(await suggestStops(city, q).catch(() => [])));
+    if (found.some((s) => meters(s) < 300)) break;
+  }
+  const best = found.map((s) => [s, meters(s)]).sort((a, b) => a[1] - b[1])[0];
+  return best && best[1] < 600 ? best[0] : null;
+}
+
+async function departureBoard(city, stop, time) {
+  const url = `https://cp.sk${prefixFor(city)}/odchody/`;
+  const form = new URLSearchParams({ From: stop.text, FromHidden: hidden(stop), PositionFromHidden: position(stop), Date: '', Time: time, IsArr: 'False' });
+  const html = await fetchText(url, { method: 'POST', body: form, headers: { Referer: url, 'Content-Type': 'application/x-www-form-urlencoded' } });
+  return parse(html).querySelectorAll('tr.dep-row-first').map((row) => ({
+    line: lineNo(text(row.querySelector('.code h3'))),
+    minutes: clockMinutes(row.getAttribute('data-datetime')),
+    destination: parse(row.getAttribute('data-stationname') || '').text.trim(),
+  })).filter((r) => r.minutes != null);
+}
+
+/**
+ * The cp.sk trip for a bus seen on sadzv: cp.sk's departure board for the same stop,
+ * the same line within 2 minutes, then that bus's route via a direct connection to
+ * cp.sk's own name for its final stop.
+ */
+export async function findTimetableTrip(stop, line, plannedMinutes) {
+  for (const city of [...new Set([cityFor(stop.lat, stop.lon), 'slovensko'])]) {
+    const cpStop = await nearestCpStop(city, stop);
+    if (!cpStop) continue;
+    const rows = (await departureBoard(city, cpStop, hhmm(plannedMinutes - 3)).catch(() => []))
+      .filter((r) => r.line === line && minutesGap(r.minutes, plannedMinutes) <= 2)
+      .sort((a, b) => minutesGap(a.minutes, plannedMinutes) - minutesGap(b.minutes, plannedMinutes));
+    for (const row of rows) {
+      const r = await searchConnections({ city, from: cpStop.text, fromSug: cpStop, to: row.destination, time: hhmm(row.minutes), directOnly: true })
+        .catch(() => ({ connections: [] }));
+      const seg = r.connections.map((c) => c.segments[0])
+        .find((s) => lineNo(s.line) === line && clockMinutes(s.departureTime) === row.minutes && s.routeUrl);
+      if (seg) return seg;
+    }
+  }
+  return null;
+}
+
+const fallbackCache = new Map(); // key -> { trip, at }; misses retried after 10 min
+
+async function timetableFallback(ref) {
+  if (!ref.fromStopId || !(ref.plannedSecondOfDay >= 0)) return null;
+  const key = `${ref.lineId}-${ref.tripNumber}-${ref.plannedSecondOfDay}-${isoDate(todayLocal())}`;
+  const cached = fallbackCache.get(key);
+  if (cached && (cached.trip || Date.now() - cached.at < 10 * 60000)) return cached.trip;
+  const stop = (await getStops()).find((s) => s.id === ref.fromStopId);
+  let trip = null;
+  if (stop) {
+    const seg = await findTimetableTrip(stop, ref.line, Math.floor(ref.plannedSecondOfDay / 60) % 1440).catch(() => null);
+    if (seg) trip = await getScheduledTrip({ line: ref.line, destination: ref.destination, scheduleUrl: seg.routeUrl, serviceDate: seg.serviceDate }).catch(() => null);
+  }
+  if (fallbackCache.size > 2000) fallbackCache.clear();
+  fallbackCache.set(key, { trip: trip?.stops.length ? trip : null, at: Date.now() });
+  return trip?.stops.length ? trip : null;
+}
+
 export async function getLiveTrip(ref) {
   const root = await livePost('getPlatformsDataWithHistory', {
     lineId: ref.lineId, lineNumber: ref.line, tripNumber: ref.tripNumber, routeNumber: ref.routeNumber, organizationSystemEntityId: 0,
@@ -183,6 +264,15 @@ export async function getLiveTrip(ref) {
   const vehicle = await getVehicles().then((v) => v.find((x) => x.lineId === ref.lineId && x.tripNumber === ref.tripNumber)).catch(() => null);
   const passed = [...stops].reverse().find((s) => s.actualMs != null);
   const passedDelay = passed ? Math.trunc((passed.actualMs - passed.scheduledMs) / 1000) : null;
+  if (!stops.length) {
+    // sadzv often has no stop list (its own site too): quietly use cp.sk's timetable,
+    // keeping sadzv's live delay when the bus reports one.
+    const timetable = await timetableFallback(ref);
+    if (timetable) {
+      return { ...timetable, line: ref.line, destination: ref.destination || timetable.destination,
+        delaySeconds: vehicle?.delaySeconds ?? null, alightOrder: null, fromTimetable: true };
+    }
+  }
   return {
     line: ref.line,
     destination: ref.destination || stops.at(-1)?.name || '',

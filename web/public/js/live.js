@@ -180,7 +180,8 @@ function renderBoard() {
     const dep = e.target.closest('[data-dep]');
     if (dep) {
       const d = b.departures[Number(dep.dataset.dep)];
-      openTrip({ line: d.line, lineId: d.lineId, routeNumber: d.routeNumber, tripNumber: d.tripNumber, destination: d.destination },
+      openTrip({ line: d.line, lineId: d.lineId, routeNumber: d.routeNumber, tripNumber: d.tripNumber, destination: d.destination,
+        fromStopId: b.stop.id, plannedSecondOfDay: d.plannedSecondOfDay },
         { boardingPlatformIds: b.stop.platforms.map((p) => p.id) });
     }
   };
@@ -213,7 +214,7 @@ export function openTrip(ref, { boardingPlatformIds = [], alightOrder = null } =
     if (!sheetTrip || sheetTrip.ref !== ref) return;
     Object.assign(sheetTrip, { detail, loading: false });
     if (detail.boardingOrder) sheetTrip.boardingPlatformIds = [detail.boardingOrder];
-    if (detail.alightOrder) sheetTrip.alightOrder = detail.alightOrder;
+    if (detail.alightOrder && !detail.fromTimetable) sheetTrip.alightOrder = detail.alightOrder;
     renderTripSheet();
   }).catch(() => { if (sheetTrip) Object.assign(sheetTrip, { loading: false, error: true }); renderTripSheet(); });
 }
@@ -381,10 +382,11 @@ function updateGeo(p) {
   if (!stopCoords) {
     stopCoords = { pending: true };
     const name = p.boardingStopName;
-    const fromPlatforms = !follow.ref.scheduleUrl && live.stops
+    const byName = follow.ref.scheduleUrl || follow.detail?.fromTimetable; // timetable stops have made-up ids
+    const fromPlatforms = !byName && live.stops
       ? live.stops.flatMap((s) => s.platforms).find((pl) => follow.boardingPlatformIds.includes(pl.id)) : null;
     (fromPlatforms ? Promise.resolve(fromPlatforms) : loadStops().then(() => {
-      const pl = !follow?.ref.scheduleUrl && live.stops.flatMap((s) => s.platforms).find((x) => follow.boardingPlatformIds.includes(x.id));
+      const pl = !byName && live.stops.flatMap((s) => s.platforms).find((x) => follow.boardingPlatformIds.includes(x.id));
       return pl || apiJson('/api/live/match?name=' + encodeURIComponent(name)).catch(() => null);
     })).then((c) => { stopCoords = c ? { lat: c.lat, lon: c.lon } : { none: true }; renderAllFollowSlots(); });
   }

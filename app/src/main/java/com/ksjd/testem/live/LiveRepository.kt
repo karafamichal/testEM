@@ -143,6 +143,8 @@ class LiveRepository(context: Context) {
         }
     }
 
+    private val cp = com.ksjd.testem.CpTimetableService()
+
     suspend fun getTrip(ref: TripRef): TripDetail = withContext(Dispatchers.IO) {
         if (ref.isScheduleOnly) return@withContext getScheduledTrip(ref)
         val body = JsonObject().apply {
@@ -172,6 +174,19 @@ class LiveRepository(context: Context) {
         }.getOrNull()?.delaySeconds
         val lastPassed = stops.lastOrNull { it.isPassed }
         val passedDelay = lastPassed?.let { ((it.actualMs!! - it.scheduledMs) / 1000L).toInt() }
+        if (stops.isEmpty()) {
+            // sadzv often has no stop list (its own site too). Quietly use cp.sk's timetable
+            // for this trip, keeping sadzv's live delay when the bus reports one.
+            timetableFallback(ref)?.let { timetable ->
+                return@withContext timetable.copy(
+                    line = ref.line,
+                    destination = ref.destination.ifBlank { timetable.destination },
+                    delaySeconds = vehicleDelay,
+                    alightOrder = null, // the user hasn't chosen where to get off
+                    fromTimetable = true
+                )
+            }
+        }
         TripDetail(
             line = ref.line,
             destination = ref.destination.ifBlank { stops.lastOrNull()?.name.orEmpty() },
@@ -183,13 +198,42 @@ class LiveRepository(context: Context) {
     /** Timetable is fixed, so one download per trip is enough (the tracker asks every 15 s). */
     private val scheduleCache = mutableMapOf<String, TripDetail>()
 
-    private suspend fun getScheduledTrip(ref: TripRef): TripDetail {
-        val detail = synchronized(scheduleCache) { scheduleCache[ref.scheduleUrl] } ?: run {
+    private fun timetableTrip(ref: TripRef): TripDetail =
+        synchronized(scheduleCache) { scheduleCache[ref.scheduleUrl] } ?: run {
             val request = Request.Builder().url(ref.scheduleUrl).header("User-Agent", "Mozilla/5.0").get().build()
             parseScheduledTrip(execute(request), ref, zone).also { parsed ->
                 if (parsed.stops.isNotEmpty()) synchronized(scheduleCache) { scheduleCache[ref.scheduleUrl] = parsed }
             }
         }
+
+    /** cp.sk lookups for live trips without a stop list: result (or miss) and when it was made. */
+    private val fallbackCache = mutableMapOf<String, Pair<TripDetail?, Long>>()
+
+    /**
+     * The same trip on cp.sk: a direct connection from the boarding stop to the bus's
+     * destination at its departure time, with the same line. Misses are retried after 10 min.
+     */
+    private suspend fun timetableFallback(ref: TripRef): TripDetail? {
+        if (ref.fromStopId == 0 || ref.plannedSecondOfDay < 0) return null
+        val key = "${ref.lineId}-${ref.tripNumber}-${ref.plannedSecondOfDay}-${LocalDate.now(zone)}"
+        synchronized(fallbackCache) { fallbackCache[key] }?.let { (detail, at) ->
+            if (detail != null || System.currentTimeMillis() - at < 10 * 60_000L) return detail
+        }
+        val stop = stopById(ref.fromStopId) ?: return null
+        val segment = runCatching {
+            cp.findTrip(stop.name, stop.lat, stop.lon, ref.line, ref.plannedSecondOfDay / 60 % (24 * 60), cityFor(stop.lat, stop.lon))
+        }.getOrNull()
+        val detail = segment?.let { s ->
+            runCatching {
+                timetableTrip(TripRef(ref.line, 0, "", 0, ref.destination, scheduleUrl = s.routeUrl, serviceDate = s.serviceDate))
+            }.getOrNull()?.takeIf { it.stops.isNotEmpty() }
+        }
+        synchronized(fallbackCache) { fallbackCache[key] = detail to System.currentTimeMillis() }
+        return detail
+    }
+
+    private suspend fun getScheduledTrip(ref: TripRef): TripDetail {
+        val detail = timetableTrip(ref)
         // Community delay only for riders who opted in; the request itself reveals which bus they follow.
         val key = detail.communityKey
         if (key == null || !prefs.getCommunityEnabled() || !com.ksjd.testem.hub.HubClient.isConfigured) return detail
@@ -371,6 +415,13 @@ class LiveRepository(context: Context) {
                 .replace(Regex("[^a-z0-9]+"), " ")
                 .trim()
         }
+
+        /** cp.sk city timetable for a stop: Zvolen or Banská Bystrica city buses, else all of Slovakia. */
+        fun cityFor(lat: Double, lon: Double): String =
+            listOf("zvolen" to (48.577 to 19.125), "banskabystrica" to (48.736 to 19.146))
+                .map { (slug, c) -> slug to distanceMeters(lat, lon, c.first, c.second) }
+                .filter { it.second < 12_000 }
+                .minByOrNull { it.second }?.first ?: "slovensko"
 
         fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Int {
             // Equirectangular approximation is plenty for "nearby stops".

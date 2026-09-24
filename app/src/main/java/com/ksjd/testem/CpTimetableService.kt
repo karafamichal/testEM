@@ -178,6 +178,80 @@ class CpTimetableService(
         }
     }
 
+    /** One row of cp.sk's departure board. */
+    private data class BoardRow(val line: String, val minutes: Int, val destination: String)
+
+    /**
+     * The cp.sk trip for a bus seen on sadzv, found the way a person would: open cp.sk's
+     * departure board for the same stop, take the same line at (almost) the same time
+     * (sadzv and cp.sk can differ by a minute), then open that bus's route via a direct
+     * connection to cp.sk's own name for its final stop. The stop is matched by
+     * coordinates, since names differ ("Zl.Potok A.Hlinku") and repeat across towns.
+     */
+    suspend fun findTrip(stopName: String, lat: Double, lon: Double, line: String, plannedMinutes: Int, preferredCity: String): TimetableSegment? {
+        fun gap(a: Int, b: Int) = minOf(kotlin.math.abs(a - b), 1440 - kotlin.math.abs(a - b))
+        fun clock(m: Int) = ((m % 1440) + 1440) % 1440 / 60 to ((m % 60) + 60) % 60
+        fun hhmm(m: Int) = clock(m).let { (h, mm) -> "%d:%02d".format(h, mm) }
+        for (city in listOf(preferredCity, "slovensko").distinct()) {
+            val stop = nearestStop(city, stopName, lat, lon) ?: continue
+            val rows = runCatching { departureBoard(city, stop, hhmm(plannedMinutes - 3)) }.getOrDefault(emptyList())
+                .filter { it.line == line && gap(it.minutes, plannedMinutes) <= 2 }
+                .sortedBy { gap(it.minutes, plannedMinutes) }
+            for (row in rows) {
+                val result = searchConnections(
+                    SearchRequest(city, stop.selectedText, row.destination, hhmm(row.minutes), directOnly = true, fromSuggestion = stop)
+                ).getOrNull() ?: continue
+                result.connections.firstNotNullOfOrNull { c ->
+                    c.segments.firstOrNull()?.takeIf {
+                        it.line.trim().substringAfterLast(' ') == line && minutesOf(it.departureTime) == row.minutes && it.routeUrl.isNotBlank()
+                    }
+                }?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun nearestStop(citySlug: String, name: String, lat: Double, lon: Double): CpStopSuggestion? {
+        fun meters(s: CpStopSuggestion): Int? {
+            val x = s.coorX?.toDoubleOrNull() ?: return null
+            val y = s.coorY?.toDoubleOrNull() ?: return null
+            return com.ksjd.testem.live.LiveRepository.distanceMeters(lat, lon, x, y)
+        }
+        val words = name.split(Regex("[\\s,.]+")).filter { it.length >= 4 }
+        val queries = listOfNotNull(name, words.takeLast(2).joinToString(" ").ifBlank { null }, words.lastOrNull()).distinct()
+        val found = mutableListOf<CpStopSuggestion>()
+        for (query in queries) {
+            found += runCatching { fetchSuggestions(citySlug, query) }.getOrDefault(emptyList())
+            if (found.any { (meters(it) ?: Int.MAX_VALUE) < 300 }) break
+        }
+        return found.mapNotNull { s -> meters(s)?.let { s to it } }.minByOrNull { it.second }?.takeIf { it.second < 600 }?.first
+    }
+
+    private fun departureBoard(citySlug: String, stop: CpStopSuggestion, time: String): List<BoardRow> {
+        val url = buildPageUrl(routePrefixCandidates(normalizeCitySlug(citySlug)).first(), "/odchody/")
+        val form = FormBody.Builder()
+            .add("From", stop.selectedText)
+            .add("FromHidden", stop.toHiddenFieldValue())
+            .add("PositionFromHidden", stop.toPositionFieldValue())
+            .add("Date", "")
+            .add("Time", time)
+            .add("IsArr", "False")
+            .build()
+        val request = Request.Builder().url(url).post(form).addHeader("User-Agent", "Mozilla/5.0").addHeader("Referer", url).build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return emptyList()
+            return Jsoup.parse(response.body?.string().orEmpty()).select("tr.dep-row-first").mapNotNull { row ->
+                val minutes = Regex("""(\d{1,2}):(\d{2})""").find(row.attr("data-datetime"))
+                    ?.destructured?.let { (h, m) -> h.toInt() * 60 + m.toInt() } ?: return@mapNotNull null
+                BoardRow(
+                    line = row.selectFirst(".code h3")?.text()?.trim()?.substringAfterLast(' ').orEmpty(),
+                    minutes = minutes,
+                    destination = row.attr("data-stationname").trim()
+                )
+            }
+        }
+    }
+
     suspend fun suggestStops(citySlug: String, input: String): Result<List<CpStopSuggestion>> {
         return try {
             Result.success(fetchSuggestions(citySlug, input))
