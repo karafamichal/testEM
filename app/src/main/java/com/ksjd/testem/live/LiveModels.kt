@@ -84,6 +84,8 @@ data class TripDetail(
     val fromTimetable: Boolean = false,
     /** Pooled rider reports (when the user opted in). */
     val community: com.ksjd.testem.hub.CommunityDelay? = null,
+    /** How late this trip usually is, from riders' reports on earlier days. */
+    val history: com.ksjd.testem.hub.TripHistory? = null,
     /** Same bus, same key on every phone and on the web (see LiveRepository.communityKey). */
     val communityKey: String? = null,
     /** Where the current position comes from, best first: rider GPS, bus GPS, riders' taps, delay, timetable. */
@@ -93,7 +95,8 @@ data class TripDetail(
 )
 
 enum class PositionSource {
-    Timetable, BusDelay, Riders, BusGps, RiderGps;
+    /** History: the timetable shifted by how late this trip usually is (when the user chose that). */
+    Timetable, History, BusDelay, Riders, BusGps, RiderGps;
 
     /** Someone knows exactly where the bus is: no need to ask riders to tap. */
     val isLive: Boolean get() = this == BusGps || this == RiderGps

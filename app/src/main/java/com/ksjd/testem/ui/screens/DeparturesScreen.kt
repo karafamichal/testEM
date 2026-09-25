@@ -72,6 +72,7 @@ import com.ksjd.testem.live.LiveState
 import com.ksjd.testem.live.LiveStop
 import com.ksjd.testem.live.LiveViewModel
 import com.ksjd.testem.live.LocationStatus
+import com.ksjd.testem.live.PositionSource
 import com.ksjd.testem.live.TrackedTrip
 import com.ksjd.testem.live.TripSheetState
 import com.ksjd.testem.live.TripTracking
@@ -480,6 +481,14 @@ fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit) {
                         )
                     } else {
                         DelayLabel(trip.detail?.delaySeconds)
+                    }
+                    val history = trip.detail?.history
+                    if (history != null && trip.detail.positionSource.let { it == PositionSource.Timetable || it == PositionSource.History }) {
+                        Text(
+                            Format.history(context, history),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }

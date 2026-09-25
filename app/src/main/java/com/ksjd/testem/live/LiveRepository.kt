@@ -170,8 +170,13 @@ class LiveRepository(context: Context) {
         }
         val key = detail.communityKey
         if (key == null || !prefs.getCommunityEnabled() || !com.ksjd.testem.hub.HubClient.isConfigured) return detail
-        val community = runCatching { com.ksjd.testem.hub.HubClient.communityDelay(key) }.getOrNull()
+        val (community, history) = runCatching { com.ksjd.testem.hub.HubClient.communityDelay(key) }.getOrNull()
             ?: return detail
+        detail = detail.copy(history = history)
+        if (community == null) {
+            val shift = history != null && prefs.getPredictShift() && detail.positionSource == PositionSource.Timetable
+            return if (shift) detail.copy(delaySeconds = history!!.delaySeconds, positionSource = PositionSource.History) else detail
+        }
         return when {
             community.isFreshGps -> detail.copy(delaySeconds = community.delaySeconds, community = community, positionSource = PositionSource.RiderGps)
             // Taps correct the timetable or sadzv's delay, but not a live GPS position.

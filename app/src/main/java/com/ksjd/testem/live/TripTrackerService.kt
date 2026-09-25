@@ -318,7 +318,7 @@ class TripTrackerService : Service() {
 
     /** Is the bus's real position known (live feed, a rider report or the community)? */
     private fun positionKnown(@Suppress("UNUSED_PARAMETER") ref: TripRef, detail: TripDetail): Boolean =
-        detail.positionSource != PositionSource.Timetable || localDelay != null
+        (detail.positionSource != PositionSource.Timetable && detail.positionSource != PositionSource.History) || localDelay != null
 
     private fun catchLine(current: TrackedTrip, detail: TripDetail, p: TripProgress): String? {
         if (p.onBoard || !prefs.getCatchEnabled()) return null
@@ -445,6 +445,8 @@ class TripTrackerService : Service() {
                 delayText(detail.delaySeconds) + " " + getString(if (localFromGps) R.string.community_your_phone else R.string.community_yours)
             community != null && (detail.positionSource == PositionSource.RiderGps || detail.positionSource == PositionSource.Riders) ->
                 delayText(detail.delaySeconds) + " " + resources.getQuantityString(R.plurals.community_riders, community.reporters, community.reporters)
+            detail.positionSource == PositionSource.History -> delayText(detail.delaySeconds) + " " + getString(R.string.history_estimate)
+            detail.positionSource == PositionSource.Timetable && detail.history != null -> "\n" + Format.history(this, detail.history)
             detail.positionSource == PositionSource.Timetable && trip.ref.isScheduleOnly -> "\n" + getString(R.string.track_schedule_only)
             else -> delayText(detail.delaySeconds)
         } + (reportNote?.let { "\n" + it } ?: "")

@@ -372,4 +372,14 @@
     <string name="community_mode_auto">Automatic</string>
     <string name="community_mode_auto_hint">While you ride a bus you follow, your phone\'s position marks where the bus is. Only the stop it\'s between is sent, never your location. Needs precise location.</string>
     <string name="community_your_phone">(from your phone)</string>
+    <string name="history_usually_late">Usually ~%1$d min late</string>
+    <string name="history_usually_early">Usually ~%1$d min early</string>
+    <string name="history_usually_on_time">Usually on time</string>
+    <string name="history_runs">(late %1$d of the last %2$d %3$s)</string>
+    <string name="history_workdays">workdays</string>
+    <string name="history_saturdays">Saturdays</string>
+    <string name="history_sundays">Sundays</string>
+    <string name="history_estimate">(estimate from past days)</string>
+    <string name="predict_switch">Use past delays for times</string>
+    <string name="predict_switch_hint">When nothing live is known about a bus, shift its times by how late it usually is. Off: shown only as a hint.</string>
 </resources>

@@ -189,6 +189,10 @@ class CredentialsManager(context: Context) {
     fun saveCatchEnabled(enabled: Boolean) = prefs.edit().putBoolean("catch_enabled", enabled).apply()
 
     /** Alert on timetable times too, not only when the bus's real position is known. */
+    /** No live data: shift the timetable by how late the trip usually is (else only a hint). */
+    fun getPredictShift(): Boolean = prefs.getBoolean("predict_shift", false)
+    fun savePredictShift(enabled: Boolean) = prefs.edit().putBoolean("predict_shift", enabled).apply()
+
     fun getCatchTimetableAlerts(): Boolean = prefs.getBoolean("catch_timetable_alerts", false)
     fun saveCatchTimetableAlerts(enabled: Boolean) = prefs.edit().putBoolean("catch_timetable_alerts", enabled).apply()
 

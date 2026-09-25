@@ -593,6 +593,7 @@ function communitySettings(body) {
   const mode = live.communityMode();
   body.innerHTML = `<p class="hint">${t('privacy_community_body')}</p>
     <ul class="list">${MODES.map(([value, title, hint]) => `<li><label class="row"><span class="row-text"><span class="row-title">${t(title)}</span><span class="row-sub">${t(hint)}</span></span><input type="radio" name="community-mode" value="${value}" ${mode === value ? 'checked' : ''}></label></li>`).join('')}</ul>
+    <ul class="list">${switchRow('predict', t('predict_switch'), t('predict_switch_hint'), store.get('predictShift', false))}</ul>
     <p class="hint">${t('privacy_catch_body')}</p>
     <ul class="list">${switchRow('catch-on', t('catch_switch'), '', catchOn)}${switchRow('catch-tt', t('catch_timetable'), t('catch_timetable_hint'), store.get('catchTimetable', false), !catchOn)}</ul>`;
   body.onchange = (e) => {
@@ -606,6 +607,7 @@ function communitySettings(body) {
       if (e.target.checked) navigator.geolocation?.getCurrentPosition(() => {}, () => toast(t('catch_location_off')));
     }
     if (e.target.id === 'catch-tt') store.set('catchTimetable', e.target.checked);
+    if (e.target.id === 'predict') store.set('predictShift', e.target.checked);
   };
 }
 

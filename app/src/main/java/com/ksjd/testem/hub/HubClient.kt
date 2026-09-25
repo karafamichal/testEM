@@ -25,6 +25,16 @@ data class CommunityDelay(
     val isFreshGps: Boolean get() = source == "gps" && System.currentTimeMillis() - updatedAtMs < 3 * 60_000L
 }
 
+/** How late this trip usually is: its last [runs] on the same kind of day ([dayType]). */
+data class TripHistory(
+    val delaySeconds: Int,
+    val runs: Int,
+    /** Runs at least 2 min late. */
+    val lateRuns: Int,
+    /** "workday", "saturday" or "sunday". */
+    val dayType: String
+)
+
 data class BugReport(
     val category: String,
     val title: String,
@@ -86,10 +96,15 @@ object HubClient {
         parseDelay(post("community/reports", body))
     }
 
-    suspend fun communityDelay(tripKey: String): CommunityDelay? = withContext(Dispatchers.IO) {
+    /** Live pooled delay and the trip's history, either may be null. */
+    suspend fun communityDelay(tripKey: String): Pair<CommunityDelay?, TripHistory?> = withContext(Dispatchers.IO) {
         val url = "${BuildConfig.HUB_URL}/api/v1/community/delay".toHttpUrl().newBuilder()
             .addQueryParameter("trip", tripKey).build()
-        parseDelay(execute(Request.Builder().url(url).get()))
+        val root = execute(Request.Builder().url(url).get())
+        val h = root.get("history")?.takeIf { it.isJsonObject }?.asJsonObject
+        parseDelay(root) to h?.let {
+            TripHistory(it.get("delaySeconds").asInt, it.get("runs").asInt, it.get("lateRuns").asInt, it.get("dayType").asString)
+        }
     }
 
     private fun parseDelay(root: JsonObject): CommunityDelay? {

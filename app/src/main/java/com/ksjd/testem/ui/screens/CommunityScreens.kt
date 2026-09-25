@@ -176,6 +176,13 @@ fun CommunitySettings() {
             )
         }
     }
+    var predict by remember { mutableStateOf(prefs.getPredictShift()) }
+    Spacer(Modifier.height(8.dp))
+    ListGroup {
+        ListRow(stringResource(R.string.predict_switch), subtitle = stringResource(R.string.predict_switch_hint),
+            onClick = { predict = !predict; prefs.savePredictShift(predict) },
+            trailing = { Switch(predict, { predict = it; prefs.savePredictShift(it) }) })
+    }
     Text(
         stringResource(R.string.privacy_catch_body),
         style = MaterialTheme.typography.bodyMedium,

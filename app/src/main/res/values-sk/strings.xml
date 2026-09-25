@@ -384,4 +384,14 @@
     <string name="community_mode_auto">Automaticky</string>
     <string name="community_mode_auto_hint">Keď idete sledovaným autobusom, poloha telefónu určí, kde autobus je. Odošle sa len zastávka, medzi ktorými je, nikdy nie vaša poloha. Vyžaduje presnú polohu.</string>
     <string name="community_your_phone">(z vášho telefónu)</string>
+    <string name="history_usually_late">Zvyčajne mešká ~%1$d min</string>
+    <string name="history_usually_early">Zvyčajne ide ~%1$d min skôr</string>
+    <string name="history_usually_on_time">Zvyčajne načas</string>
+    <string name="history_runs">(meškal %1$d z posledných %2$d %3$s)</string>
+    <string name="history_workdays">pracovných dní</string>
+    <string name="history_saturdays">sobôt</string>
+    <string name="history_sundays">nedieľ</string>
+    <string name="history_estimate">(odhad z minulých dní)</string>
+    <string name="predict_switch">Časy podľa minulých meškaní</string>
+    <string name="predict_switch_hint">Keď o autobuse nie je nič známe naživo, posunie jeho časy o to, koľko zvyčajne mešká. Vypnuté: len ako tip.</string>
 </resources>

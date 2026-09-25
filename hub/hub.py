@@ -29,13 +29,16 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
+import statistics
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -72,6 +75,12 @@ REPORT_KINDS = ("arrival", "position", "gps")
 COMMUNITY_HALF_LIFE_S = 10 * 60
 MAX_ABS_DELAY_S = 3 * 60 * 60   # latest a bus can plausibly be
 MAX_EARLY_S = 20 * 60            # earliest: a report further ahead of the timetable is a mistake
+# History: earlier runs of the same trip on the same kind of day predict today's delay.
+HISTORY_DAYS = 120
+HISTORY_RUNS = 10
+HISTORY_MIN_RUNS = 2
+HISTORY_LATE_S = 120
+LOCAL_ZONE = ZoneInfo("Europe/Bratislava")
 
 
 # ------------------------------------------------------------------ database
@@ -442,6 +451,55 @@ def aggregate_delay(reports, now_s):
         "updatedAt": newest["created_at"] * 1000,
         "lastStopIndex": newest.get("stop_index"),
         "lastStopName": newest.get("stop_name"),
+    }
+
+
+def trip_run(trip_key):
+    """
+    (the same trip on any day, its date) from a community key, or None. Keys are
+    "sadzv|lineId|trip|YYYY-MM-DD|line" or "line|first stop|first departure epoch ms".
+    """
+    parts = trip_key.split("|")
+    if parts[0] == "sadzv" and len(parts) >= 5:
+        return "|".join(parts[:3] + parts[4:]), parts[3]
+    if len(parts) >= 3 and parts[-1].isdigit():
+        start = datetime.fromtimestamp(int(parts[-1]) / 1000, LOCAL_ZONE)
+        return "|".join(parts[:-1]) + start.strftime("|%H:%M"), start.date().isoformat()
+    return None
+
+
+def day_type(day):
+    # ponytail: public holidays count as workdays; add a holiday list if their runs skew predictions.
+    weekday = date.fromisoformat(day).weekday()
+    return "saturday" if weekday == 5 else "sunday" if weekday == 6 else "workday"
+
+
+def trip_history(conn, trip_key):
+    """How late this trip usually is: its last runs on the same kind of day, today's run left out."""
+    run = trip_run(trip_key)
+    if not run:
+        return None
+    trip, day = run
+    kind = day_type(day)
+    parts = trip_key.split("|")
+    prefix = "|".join(parts[:3] if parts[0] == "sadzv" else parts[:-1]) + "|%"
+    runs = {}
+    for key, delay_s in conn.execute(
+        """SELECT trip_key, delay_s FROM community_reports WHERE trip_key LIKE ? AND created_at>=?
+           AND reporter NOT IN (SELECT reporter FROM blocked_reporters)""",
+        (prefix, now() - HISTORY_DAYS * 86400),
+    ):
+        other = trip_run(key)
+        if other and other[0] == trip and other[1] != day and day_type(other[1]) == kind:
+            runs.setdefault(other[1], []).append(delay_s)
+    recent = [statistics.median(delays) for _, delays in sorted(runs.items(), reverse=True)[:HISTORY_RUNS]]
+    if len(recent) < HISTORY_MIN_RUNS:
+        return None
+    return {
+        "delaySeconds": int(statistics.median(recent)),
+        "runs": len(recent),
+        "lateRuns": sum(d >= HISTORY_LATE_S for d in recent),
+        "dayType": kind,
     }
 
 
@@ -861,7 +919,8 @@ class Handler(BaseHTTPRequestHandler):
             if not key:
                 return self.error(400, "trip is required", cors=True)
             with db() as conn:
-                return self.send(200, {"trip": key, "delay": trip_delay(conn, key)}, headers=self.cors())
+                return self.send(200, {"trip": key, "delay": trip_delay(conn, key), "history": trip_history(conn, key)},
+                                 headers=self.cors())
         self.error(404, "Not found", cors=True)
 
     def submit_bug(self):

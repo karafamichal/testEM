@@ -239,8 +239,16 @@ async function loadTrip(ref, { withCoordinates = false } = {}) {
   const detail = await apiJson('/api/live/trip', { ...ref, withCoordinates });
   detail.communityKey = communityKey(detail, ref);
   if (communityMode() === 'off' || !config.hub || !detail.communityKey) return detail;
-  const pooled = (await apiJson('/api/hub/delay?trip=' + encodeURIComponent(detail.communityKey)).catch(() => null))?.delay;
-  if (!pooled) return detail;
+  const res = await apiJson('/api/hub/delay?trip=' + encodeURIComponent(detail.communityKey)).catch(() => null);
+  const pooled = res?.delay;
+  detail.history = res?.history || null;
+  if (!pooled) {
+    // No one reported today: optionally shift the timetable by how late this trip usually is.
+    if (detail.history && detail.positionSource === 'timetable' && store.get('predictShift', false)) {
+      Object.assign(detail, { delaySeconds: detail.history.delaySeconds, positionSource: 'history' });
+    }
+    return detail;
+  }
   detail.community = pooled;
   if (pooled.source === 'gps' && Date.now() - pooled.updatedAt < 3 * 60000) {
     Object.assign(detail, { delaySeconds: pooled.delaySeconds, positionSource: 'riderGps' });
@@ -249,6 +257,16 @@ async function loadTrip(ref, { withCoordinates = false } = {}) {
   }
   return detail;
 }
+/** "Usually ~3 min late (late 7 of the last 10 workdays)", or '' without history. */
+function historyText(d) {
+  const h = d?.history;
+  if (!h || (d.positionSource !== 'timetable' && d.positionSource !== 'history')) return '';
+  const m = Math.round(h.delaySeconds / 60);
+  const usually = m >= 1 ? t('history_late', m) : m <= -1 ? t('history_early', -m) : t('history_on_time');
+  return `${usually} ${t('history_runs', h.lateRuns, h.runs, t('history_' + h.dayType))}`;
+}
+const historyHint = (d) => (historyText(d) ? `<span class="hint small">${esc(historyText(d))}</span>` : '');
+
 const isLive = (d) => d?.positionSource === 'busGps' || d?.positionSource === 'riderGps';
 
 const sameRef = (a, b) => a && b && JSON.stringify(a) === JSON.stringify(b);
@@ -262,6 +280,7 @@ function renderTripSheet(body = $('#sheet .sheet-body')) {
   const status = s.ref.scheduleUrl
     ? (detail?.community && detail.positionSource !== 'timetable' ? `${delayChip(detail.delaySeconds)} <span class="hint small">${esc(ridersText(detail.community.reporters))}</span>` : `<span class="hint small">${t('schedule_only')}</span>`)
     : delayChip(detail?.delaySeconds);
+  const statusLine = historyText(detail) ? `${status} ${historyHint(detail)}` : status;
   let timeline = '';
   if (s.loading) timeline = '<p class="hint"><span class="spinner"></span></p>';
   else if (s.error || !detail?.stops?.length) timeline = `<div class="empty"><p>${t('trip_unavailable')}</p></div>`;
@@ -278,7 +297,7 @@ function renderTripSheet(body = $('#sheet .sheet-body')) {
     }).join('')}</ol>`;
   }
   body.innerHTML = `
-    <div class="trip-head">${plate(s.ref.line, 'big')}<div><h3>${esc(detail?.destination || s.ref.destination)}</h3><div>${status}</div></div></div>
+    <div class="trip-head">${plate(s.ref.line, 'big')}<div><h3>${esc(detail?.destination || s.ref.destination)}</h3><div>${statusLine}</div></div></div>
     ${following
       ? `<p class="hint">${t('following_hint')}</p><button class="btn outline wide" data-unfollow>${t('unfollow')}</button>`
       : `<button class="btn wide" data-follow ${detail?.stops?.length ? '' : 'disabled'}>${BUS_SVG}${t('follow')}</button>`}
@@ -455,7 +474,7 @@ function catchLine(d, p) {
   if (!catchOn() || p.onBoard) return '';
   if (fix?.denied) return `<p class="catch muted">${t('catch_location_off')}</p>`;
   if (!fix || fix.accuracy > 300 || !stopCoords?.lat) return '';
-  const known = follow.ref.scheduleUrl ? !!(d.community || follow.localDelay) : d.delaySeconds != null;
+  const known = follow.ref.scheduleUrl ? !!(d.community || follow.localDelay) : d.delaySeconds != null && d.positionSource !== 'history';
   if (!known && !store.get('catchTimetable', false)) return '';
   const e = catchEstimate(distanceMeters(fix.latitude, fix.longitude, stopCoords.lat, stopCoords.lon), p.secondsToBoarding);
   const walk = Math.max(1, Math.round(e.walkSeconds / 60));
@@ -537,6 +556,8 @@ function followCardHtml() {
   let delay;
   if (f.localDelay && d.delaySeconds === f.localDelay.seconds) delay = `${delayChip(d.delaySeconds)} <span class="hint small">${t(f.localDelay.fromGps ? 'community_your_phone' : 'community_yours')}</span>`;
   else if (d.community && (d.positionSource === 'riderGps' || d.positionSource === 'riders')) delay = `${delayChip(d.delaySeconds)} <span class="hint small">${esc(ridersText(d.community.reporters))}</span>`;
+  else if (d.positionSource === 'history') delay = `${delayChip(d.delaySeconds)} <span class="hint small">${t('history_estimate')}</span>`;
+  else if (d.positionSource === 'timetable' && d.history) delay = historyHint(d);
   else if (d.positionSource === 'timetable' && f.ref.scheduleUrl) delay = `<span class="hint small">${t('schedule_only')}</span>`;
   else delay = delayChip(d.delaySeconds);
 

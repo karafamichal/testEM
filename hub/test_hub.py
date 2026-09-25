@@ -35,6 +35,25 @@ agg = hub.aggregate_delay([r(300, 30, "a"), r(330, 60, "b"), r(2700, 5, "troll")
 assert 300 <= agg["delaySeconds"] <= 330 and agg["reporters"] == 2, agg   # outlier dropped
 assert hub.aggregate_delay([r(0, 20 * 60, "a"), r(600, 0, "b")], NOW)["delaySeconds"] > 400  # fresh weighs more
 
+# ---- history: same trip, other days of the same kind
+assert hub.trip_run("sadzv|9|31|2026-09-25|2") == ("sadzv|9|31|2", "2026-09-25")
+assert hub.trip_run("101|Zvolen, AS|1790311200000") == ("101|Zvolen, AS|06:40", "2026-09-25")
+assert hub.trip_run("junk") is None
+assert [hub.day_type(d) for d in ("2026-09-25", "2026-09-26", "2026-09-27")] == ["workday", "saturday", "sunday"]
+hc = sqlite3.connect(":memory:")
+hc.executescript(hub.SCHEMA.replace("PRAGMA journal_mode=WAL;", ""))
+hc.execute("ALTER TABLE community_reports ADD COLUMN kind TEXT NOT NULL DEFAULT 'position'")
+def hist(key, delay):
+    hc.execute("INSERT INTO community_reports(created_at, trip_key, line, stop_index, stop_name, scheduled_ms, delay_s, reporter) "
+               "VALUES (?,?,?,?,?,?,?,?)", (hub.now(), key, "2", 0, "x", 0, delay, "r"))
+assert hub.trip_history(hc, "sadzv|9|31|2026-09-25|2") is None
+for day, delay in (("2026-09-22", 200), ("2026-09-23", 60), ("2026-09-23", 120), ("2026-09-24", 300),
+                   ("2026-09-26", 900), ("2026-09-25", 999)):  # a Saturday and today don't count
+    hist(f"sadzv|9|31|{day}|2", delay)
+hist("sadzv|9|32|2026-09-24|2", 999)  # another trip
+h = hub.trip_history(hc, "sadzv|9|31|2026-09-25|2")
+assert h == {"delaySeconds": 200, "runs": 3, "lateRuns": 2, "dayType": "workday"}, h
+
 # ---- templates escape user text, keep prepared HTML, fill every placeholder
 bug = {"id": 7, "title": "<script>x</script>", "description": "line1\n\n<b>line2</b>", "name": "Ann", "email": "a@b.sk",
        "status": "in_progress", "category": "crash", "platform": "android", "app_version": "2.0", "device": "Pixel",

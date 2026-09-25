@@ -1,5 +1,8 @@
 package com.ksjd.testem.ui
 
+import android.content.Context
+import com.ksjd.testem.R
+import com.ksjd.testem.hub.TripHistory
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -57,5 +60,21 @@ object Format {
         if (epoch <= 0L) return Long.MAX_VALUE
         val end = Instant.ofEpochMilli(toMs(epoch)).atZone(zone).toLocalDate()
         return java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(zone), end)
+    }
+
+    /** "Usually ~3 min late (late 7 of the last 10 workdays)". */
+    fun history(context: Context, h: TripHistory): String {
+        val minutes = Math.round(h.delaySeconds / 60.0).toInt()
+        val usually = when {
+            minutes >= 1 -> context.getString(R.string.history_usually_late, minutes)
+            minutes <= -1 -> context.getString(R.string.history_usually_early, -minutes)
+            else -> context.getString(R.string.history_usually_on_time)
+        }
+        val days = context.getString(when (h.dayType) {
+            "saturday" -> R.string.history_saturdays
+            "sunday" -> R.string.history_sundays
+            else -> R.string.history_workdays
+        })
+        return usually + " " + context.getString(R.string.history_runs, h.lateRuns, h.runs, days)
     }
 }
