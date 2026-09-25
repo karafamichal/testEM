@@ -54,6 +54,15 @@ object TripTracking {
         ContextCompat.startForegroundService(context, TripTrackerService.intent(context, trip))
     }
 
+    /**
+     * After the community mode or catch setting changes: restart the followed trip so the
+     * service gets (or drops) the location type. Must run while the app is in the foreground,
+     * or Android won't deliver the rider's GPS once the screen goes off.
+     */
+    fun refresh(context: Context) {
+        _active.value?.let { start(context, it) }
+    }
+
     fun setAlightStop(context: Context, order: Int?) {
         val current = _active.value ?: return
         start(context, current.copy(alightOrder = order))
@@ -240,7 +249,7 @@ class TripTrackerService : Service() {
         scope.launch {
             runCatching {
                 HubClient.reportPosition(key, current.ref.line, stopIndex, detail.stops[stopIndex].name,
-                    RoutePosition.scheduledAt(index, scheduled), reporterId, kind = "gps")
+                    RoutePosition.referenceAt(index, scheduled, now), reporterId, kind = "gps")
             }.getOrNull()?.let { pooled -> lastDetail = lastDetail?.copy(community = pooled) }
         }
     }

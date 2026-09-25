@@ -1,7 +1,7 @@
 // Departures, stop boards, trip sheet and "follow this bus" for the web client.
 import { t, lang } from './i18n.js';
 import { $, $$, esc, api, apiJson, store, config, clock, countdown, delayChip, delayInfo, plate, toast, openSheet, closeOverlay, log } from './core.js';
-import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, scheduledAt, delayAt, RIDER_GPS_MAX_M } from './logic.js';
+import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, referenceAt, delayAt, RIDER_GPS_MAX_M } from './logic.js';
 
 /** Helping with bus positions: 'off' | 'buttons' | 'auto' (earlier versions had an on/off switch). */
 export const communityMode = () => store.get('communityMode', store.get('communityOn', false) ? 'buttons' : 'off');
@@ -448,7 +448,7 @@ function onRiderFix(pos) {
   lastRiderReportAt = Date.now();
   const stopIndex = Math.min(Math.floor(hit.index), d.stops.length - 1);
   api('/api/hub/report', { tripKey: d.communityKey, line: follow.ref.line, stopIndex, stopName: d.stops[stopIndex].name,
-    scheduledMs: scheduledAt(hit.index, scheduled), reporter: follow.reporter, kind: 'gps' });
+    scheduledMs: referenceAt(hit.index, scheduled), reporter: follow.reporter, kind: 'gps' });
 }
 
 function catchLine(d, p) {

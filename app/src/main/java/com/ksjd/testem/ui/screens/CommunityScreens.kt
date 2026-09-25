@@ -60,6 +60,7 @@ import com.ksjd.testem.hub.AppLogs
 import com.ksjd.testem.hub.BugReport
 import com.ksjd.testem.hub.HubClient
 import com.ksjd.testem.live.Locations
+import com.ksjd.testem.live.TripTracking
 import com.ksjd.testem.ui.components.GroupDivider
 import com.ksjd.testem.ui.components.ListGroup
 import com.ksjd.testem.ui.components.ListRow
@@ -147,10 +148,11 @@ fun CommunitySettings() {
             catch = granted
             prefs.saveCatchEnabled(granted)
         }
+        TripTracking.refresh(context)
     }
     val setMode: (String) -> Unit = { m ->
         if (m == COMMUNITY_AUTO && !Locations.hasPrecise(context)) { pendingAuto = true; location.launch(LOCATION_PERMISSIONS) }
-        else { mode = m; prefs.saveCommunityMode(m) }
+        else { mode = m; prefs.saveCommunityMode(m); TripTracking.refresh(context) }
     }
 
     Text(
@@ -182,7 +184,7 @@ fun CommunitySettings() {
     )
     val setCatch: (Boolean) -> Unit = { on ->
         if (on && !Locations.hasPrecise(context)) location.launch(LOCATION_PERMISSIONS)
-        else { catch = on; prefs.saveCatchEnabled(on) }
+        else { catch = on; prefs.saveCatchEnabled(on); TripTracking.refresh(context) }
     }
     ListGroup {
         ListRow(stringResource(R.string.catch_switch), subtitle = stringResource(R.string.catch_switch_hint), onClick = { setCatch(!catch) },

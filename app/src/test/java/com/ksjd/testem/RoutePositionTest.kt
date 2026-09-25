@@ -48,6 +48,11 @@ class RoutePositionTest {
     fun delayFromPosition() {
         // Halfway between stop 1 (t0+3 min) and 2 (t0+6 min) = t0+4:30; seen at t0+6 min -> 90 s late.
         assertEquals(90, RoutePosition.delayAt(1.5f, sched, t0 + 6 * 60_000L))
-        assertEquals(-60, RoutePosition.delayAt(2f, sched, t0 + 5 * 60_000L))
+        // Timetable times are departures: at stop 2 a minute before its time the bus waits, on time.
+        assertEquals(0, RoutePosition.delayAt(2f, sched, t0 + 5 * 60_000L))
+        // Halfway to stop 2 at t0+2 min: it left stop 1 (t0+3) a minute early.
+        assertEquals(-60, RoutePosition.delayAt(1.5f, sched, t0 + 2 * 60_000L))
+        // Still at the first stop early: waiting, not early.
+        assertEquals(0, RoutePosition.delayAt(0.05f, sched, t0 - 60_000L))
     }
 }

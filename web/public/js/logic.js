@@ -58,7 +58,17 @@ export function scheduledAt(index, scheduledMs) {
   return scheduledMs[i] + Math.round((scheduledMs[i + 1] - scheduledMs[i]) * frac);
 }
 
-export const delayAt = (index, scheduledMs, now = Date.now()) => Math.trunc((now - scheduledAt(index, scheduledMs)) / 1000);
+// Timetable times are departures: behind them the bus is late, but it is early only once it
+// has left a stop before that stop's time (a bus waiting at a stop early just waits).
+export function referenceAt(index, scheduledMs, now = Date.now()) {
+  const at = scheduledAt(index, scheduledMs);
+  if (now >= at || !scheduledMs.length) return at;
+  const left = Math.floor(index - 0.1); // a little past a stop still counts as at it
+  if (left < 0) return now;
+  return Math.max(now, scheduledMs[Math.min(left, scheduledMs.length - 1)]);
+}
+
+export const delayAt = (index, scheduledMs, now = Date.now()) => Math.trunc((now - referenceAt(index, scheduledMs, now)) / 1000);
 
 export function distanceMeters(lat1, lon1, lat2, lon2) {
   const rad = Math.PI / 180;

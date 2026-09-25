@@ -2,6 +2,7 @@ package com.ksjd.testem.live
 
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.sqrt
 
 /** Where a GPS point lies along a trip's stops. Pure logic, no Android types. */
@@ -58,7 +59,21 @@ object RoutePosition {
         return scheduledMs[i] + ((scheduledMs[i + 1] - scheduledMs[i]) * frac).toLong()
     }
 
+    /**
+     * The timetable moment a bus seen at [index] at [nowMs] is measured against. Timetable
+     * times are departures: behind them the bus is late, but it is early only once it has
+     * left a stop before that stop's time (a bus waiting at a stop early just waits).
+     */
+    fun referenceAt(index: Float, scheduledMs: List<Long>, nowMs: Long): Long {
+        val at = scheduledAt(index, scheduledMs)
+        if (nowMs >= at || scheduledMs.isEmpty()) return at
+        // A little past a stop still counts as at it (creeping out, GPS noise).
+        val left = floor(index - 0.1f).toInt()
+        if (left < 0) return nowMs
+        return maxOf(nowMs, scheduledMs[left.coerceAtMost(scheduledMs.lastIndex)])
+    }
+
     /** Delay in seconds of a bus seen at [index] at [nowMs]. */
     fun delayAt(index: Float, scheduledMs: List<Long>, nowMs: Long): Int =
-        ((nowMs - scheduledAt(index, scheduledMs)) / 1000L).toInt()
+        ((nowMs - referenceAt(index, scheduledMs, nowMs)) / 1000L).toInt()
 }

@@ -38,6 +38,8 @@ assert.ok(Math.abs(snapToRoute(48.575, 19.125, loop, 300, 0.4).index - 0.5) < 0.
 assert.ok(Math.abs(snapToRoute(48.575, 19.125, loop, 300, 3.6).index - 3.5) < 0.05);
 const sched = [0, 3, 6, 9].map((m) => T0 + m * 60000);
 assert.equal(delayAt(1.5, sched, T0 + 6 * 60000), 90);
+assert.equal(delayAt(2, sched, T0 + 5 * 60000), 0); // waiting at a stop before its departure: on time
+assert.equal(delayAt(1.5, sched, T0 + 2 * 60000), -60); // left stop 1 a minute early
 assert.equal(lineNumber('Bus 507105'), '507105');
 
 // cp.sk route page: boarding at the first active stop, day rollover after midnight.
