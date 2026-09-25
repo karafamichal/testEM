@@ -445,12 +445,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         fromSuggestionJob?.cancel()
         toSuggestionJob?.cancel()
         _timetableState.update {
+            // Routes saved before 2.5 used the intercity-only timetable; its stop ids differ, so look them up again.
+            val old = route.citySlug == "slovensko"
             it.copy(
-                citySlug = route.citySlug,
+                citySlug = if (old) PLANNER_ALL else route.citySlug,
                 fromInput = route.fromText,
                 toInput = route.toText,
-                selectedFromSuggestion = route.from,
-                selectedToSuggestion = route.to,
+                selectedFromSuggestion = route.from.takeUnless { old },
+                selectedToSuggestion = route.to.takeUnless { old },
                 fromSuggestions = emptyList(),
                 toSuggestions = emptyList()
             )
@@ -604,7 +606,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun normalizeTimetableCitySlug(citySlug: String): String = when (citySlug.trim().lowercase()) {
-        "", "slovakia" -> "slovensko"
+        "", "slovakia", "slovensko" -> PLANNER_ALL
         "banska-bystrica", "banská-bystrica", "banska bystrica", "banská bystrica" -> "banskabystrica"
         else -> citySlug.trim().lowercase()
     }

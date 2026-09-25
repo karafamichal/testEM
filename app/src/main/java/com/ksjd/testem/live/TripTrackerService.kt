@@ -41,7 +41,9 @@ data class TrackedTrip(
     /** Platforms of the stop where the user gets on (empty = already on board). */
     val boardingPlatformIds: List<Int>,
     /** stopOrder where the user gets off, null = ride to the end. */
-    val alightOrder: Int? = null
+    val alightOrder: Int? = null,
+    /** The buses after this one on a journey with changes; followed one after another. */
+    val nextLegs: List<TrackedTrip> = emptyList()
 )
 
 /** Shared between the tracking service and the UI. */
@@ -67,6 +69,18 @@ object TripTracking {
     fun setAlightStop(context: Context, order: Int?) {
         val current = _active.value ?: return
         start(context, current.copy(alightOrder = order))
+    }
+
+    /** A journey the user is putting together bus by bus (when cp.sk finds no connection). */
+    private val _draft = MutableStateFlow<List<TrackedTrip>>(emptyList())
+    val draft: StateFlow<List<TrackedTrip>> = _draft
+    fun addToDraft(leg: TrackedTrip) { _draft.value = _draft.value.filter { it.ref != leg.ref } + leg }
+    fun clearDraft() { _draft.value = emptyList() }
+
+    /** Follows [legs] as one journey: each bus until its stop, then the next one. */
+    fun startJourney(context: Context, legs: List<TrackedTrip>) {
+        val first = legs.firstOrNull() ?: return
+        start(context, first.copy(nextLegs = legs.drop(1).map { it.copy(nextLegs = emptyList()) }))
     }
 
     fun stop(context: Context) {
@@ -135,29 +149,42 @@ class TripTrackerService : Service() {
             finish()
             return START_NOT_STICKY
         }
-        if (trip?.ref != requested.ref) {
-            alertsSent.clear()
-            startedAt = System.currentTimeMillis()
-            reporterId = UUID.randomUUID().toString()
-            localDelay = null
-            lastDetail = null
-            reportNote = null
-            herePressed = false
-            leavingPressed = false
-            stopLatLon = null
-            stopLookupDone = false
-            stopRiderTracking()
-            routeCoords = null
-            lastRiderIndex = -1f
-            lastRiderReportAt = 0L
-            localFromGps = false
-        }
+        if (trip?.ref != requested.ref) resetTripState()
         trip = requested
         TripTracking.set(requested)
         startInForeground(placeholderNotification(requested))
         loop?.cancel()
         loop = scope.launch { track() }
         return START_REDELIVER_INTENT
+    }
+
+    /** Forget everything about the previous bus. */
+    private fun resetTripState() {
+        alertsSent.clear()
+        startedAt = System.currentTimeMillis()
+        reporterId = UUID.randomUUID().toString()
+        localDelay = null
+        lastDetail = null
+        reportNote = null
+        herePressed = false
+        leavingPressed = false
+        stopLatLon = null
+        stopLookupDone = false
+        stopRiderTracking()
+        routeCoords = null
+        lastRiderIndex = -1f
+        lastRiderReportAt = 0L
+        localFromGps = false
+    }
+
+    /** Journey: the bus reached the user's change stop, so follow the next one. */
+    private fun changeTo(next: TrackedTrip, rest: List<TrackedTrip>, changeStop: String) {
+        val leg = next.copy(nextLegs = rest)
+        trip = leg
+        TripTracking.set(leg)
+        resetTripState()
+        notifyAlert("change", getString(R.string.journey_change_title, leg.ref.line), getString(R.string.journey_change_body, changeStop))
+        NotificationManagerCompat.from(this).notifySafely(NOTIFICATION_ID, placeholderNotification(leg))
     }
 
     override fun onDestroy() {
@@ -237,11 +264,19 @@ class TripTrackerService : Service() {
         val current = trip ?: return
         val detail = lastDetail ?: return
         val coords = routeCoords ?: return Log.i(GPS_TAG, "fix: no stop coordinates yet").let { }
+        if (coords.count { it != null } < 2) {
+            // Lookup failed (offline, cp.sk down): try again on the next tracking round.
+            Log.i(GPS_TAG, "fix: only ${coords.count { it != null }} of ${coords.size} stops have coordinates, retrying")
+            routeCoords = null
+            return
+        }
         val key = detail.communityKey ?: return
         if (!fix.hasAccuracy() || fix.accuracy > 50f) return Log.i(GPS_TAG, "fix: accuracy ${fix.accuracy} m").let { }
         val p = TripProgress.from(withLocalDelay(detail), current)
         val (index, meters) = RoutePosition.snap(fix.latitude, fix.longitude, coords, RoutePosition.RIDER_GPS_MAX_M, p.position)
-            ?: return Log.i(GPS_TAG, "fix: off the route").let { }
+            ?: return RoutePosition.snap(fix.latitude, fix.longitude, coords, Double.MAX_VALUE).let { nearest ->
+                Log.i(GPS_TAG, "fix: off the route, nearest %.0f m at stop %.1f".format(nearest?.second ?: -1.0, nearest?.first ?: -1f))
+            }
         val boarding = (p.boardingIndex ?: 0).toFloat()
         val moving = (fix.hasSpeed() && fix.speed >= 3f) || (lastRiderIndex >= 0f && index > lastRiderIndex + 0.05f)
         val previous = lastRiderIndex
@@ -253,8 +288,8 @@ class TripTrackerService : Service() {
         localDelay = RoutePosition.delayAt(index, scheduled, now) to now
         localFromGps = true
         redraw(current, detail)
-        // Every 30 s, or right away when the bus passes a stop.
-        if (now - lastRiderReportAt < 30_000L && index.toInt() == previous.toInt()) return
+        // Every 15 s, or right away when the bus passes a stop.
+        if (now - lastRiderReportAt < 15_000L && index.toInt() == previous.toInt()) return
         lastRiderReportAt = now
         val stopIndex = index.toInt().coerceIn(0, detail.stops.lastIndex)
         scope.launch {
@@ -365,12 +400,19 @@ class TripTrackerService : Service() {
     private suspend fun track() {
         var failures = 0
         while (scope.isActive) {
-            val current = trip ?: return
+            var current = trip ?: return
             if (System.currentTimeMillis() - startedAt > MAX_TRACKING_MS) {
                 finish()
                 return
             }
             val fetched = runCatching { repo.getTrip(current.ref) }.getOrNull()
+            // Timetable trips (journey legs) learn where the user gets on and off from cp.sk's route page.
+            val board = fetched?.boardingOrder
+            if (board != null && current.boardingPlatformIds.isEmpty()) {
+                current = current.copy(boardingPlatformIds = listOf(board), alightOrder = current.alightOrder ?: fetched.alightOrder)
+                trip = current
+                TripTracking.set(current)
+            }
             if (fetched != null && fetched.stops.isNotEmpty()) lastDetail = fetched
             val detail = fetched?.let(::withLocalDelay)
             if (detail == null || detail.stops.isEmpty()) {
@@ -383,6 +425,11 @@ class TripTrackerService : Service() {
                 failures = 0
                 val progress = TripProgress.from(detail, current)
                 if (progress.finished) {
+                    val next = current.nextLegs.firstOrNull()
+                    if (next != null) {
+                        changeTo(next, current.nextLegs.drop(1), progress.lastStopName)
+                        continue
+                    }
                     notifyAlert("arrived", getString(R.string.track_arrived_title), getString(R.string.track_arrived_body, progress.lastStopName))
                     finish()
                     return
@@ -399,6 +446,10 @@ class TripTrackerService : Service() {
         }
     }
 
+    /** "Then bus 101 → Krupina" on a journey with changes. */
+    private fun thenLine(trip: TrackedTrip): String? =
+        trip.nextLegs.firstOrNull()?.let { getString(R.string.journey_then, it.ref.line, it.ref.destination) }
+
     private fun sendAlerts(trip: TrackedTrip, p: TripProgress) {
         val line = trip.ref.line
         val lead = prefs.getArrivalAlertMinutes()
@@ -411,7 +462,12 @@ class TripTrackerService : Service() {
         }
         val alight = p.alightStopName
         if (p.onBoard && alight != null && p.nextIsAlight) {
-            notifyAlert("alight", getString(R.string.track_alert_alight_title), getString(R.string.track_alert_alight_body, alight))
+            val next = trip.nextLegs.firstOrNull()
+            notifyAlert(
+                "alight", getString(R.string.track_alert_alight_title),
+                if (next != null) getString(R.string.journey_alight_change, alight, next.ref.line)
+                else getString(R.string.track_alert_alight_body, alight)
+            )
         }
     }
 
@@ -471,7 +527,7 @@ class TripTrackerService : Service() {
                 .setContentTitle(getString(R.string.track_title, trip.ref.line, detail.destination))
                 .setContentText(
                     getString(R.string.track_waiting_text, Format.clock(p.boardingExpectedMs), p.boardingStopName) +
-                        (catchLine?.let { "\n" + it } ?: "") + delayText
+                        (catchLine?.let { "\n" + it } ?: "") + delayText + (thenLine(trip)?.let { "\n" + it } ?: "")
                 )
                 .setShortCriticalText(shortMinutes(p.secondsToBoarding))
                 .setWhen(p.boardingExpectedMs)
@@ -485,7 +541,8 @@ class TripTrackerService : Service() {
                 .setContentText(
                     listOfNotNull(
                         p.currentStopName?.let { getString(R.string.track_now_at, it) },
-                        p.alightStopName?.let { getString(R.string.track_get_off_at, it) }
+                        p.alightStopName?.let { getString(R.string.track_get_off_at, it) },
+                        thenLine(trip)
                     ).joinToString("\n") + delayText
                 )
                 .setShortCriticalText(shortMinutes(p.secondsToNext))
@@ -637,6 +694,7 @@ class TripTrackerService : Service() {
                 .putExtra("serviceDate", trip.ref.serviceDate)
                 .putExtra("fromStopId", trip.ref.fromStopId)
                 .putExtra("planned", trip.ref.plannedSecondOfDay)
+                .putExtra("next", com.google.gson.Gson().toJson(trip.nextLegs))
 
         private fun readTrip(intent: Intent): TrackedTrip? {
             val line = intent.getStringExtra("line") ?: return null
@@ -653,7 +711,13 @@ class TripTrackerService : Service() {
                     plannedSecondOfDay = intent.getIntExtra("planned", -1)
                 ),
                 boardingPlatformIds = intent.getIntArrayExtra("boarding")?.toList().orEmpty(),
-                alightOrder = intent.getIntExtra("alight", -1).takeIf { it >= 0 }
+                alightOrder = intent.getIntExtra("alight", -1).takeIf { it >= 0 },
+                // ponytail: after a restart the service redelivers the first leg; finished legs pass straight on.
+                nextLegs = intent.getStringExtra("next")?.let { json ->
+                    runCatching {
+                        com.google.gson.Gson().fromJson<List<TrackedTrip>>(json, object : com.google.gson.reflect.TypeToken<List<TrackedTrip>>() {}.type)
+                    }.getOrNull()?.map { it.copy(nextLegs = emptyList()) }
+                }.orEmpty()
             )
         }
     }

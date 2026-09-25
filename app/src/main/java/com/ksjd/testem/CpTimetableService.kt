@@ -211,14 +211,23 @@ class CpTimetableService(
         return null
     }
 
-    /** Coordinates of a stop named as on cp.sk route pages ("Detva, aut.st."). */
-    fun coordinatesOf(name: String): Pair<Double, Double>? =
-        runCatching { fetchSuggestions("slovensko", name) }.getOrDefault(emptyList())
-            .firstNotNullOfOrNull { s ->
+    /**
+     * Coordinates of a stop named as on cp.sk route pages ("Detva, aut.st."). City stop names
+     * ("Nám. slobody") exist in many towns, so search [citySlug]'s timetable first, the whole
+     * country only if that finds nothing, and take the match closest to [near] (the previous stop).
+     */
+    fun coordinatesOf(name: String, citySlug: String = "slovensko", near: Pair<Double, Double>? = null): Pair<Double, Double>? {
+        fun found(city: String) = runCatching { fetchSuggestions(city, name) }.getOrDefault(emptyList())
+            .mapNotNull { s ->
                 val x = s.coorX?.toDoubleOrNull()
                 val y = s.coorY?.toDoubleOrNull()
                 if (x != null && y != null) x to y else null
             }
+        val city = normalizeCitySlug(citySlug)
+        val all = found(city).ifEmpty { if (city != "slovensko") found("slovensko") else emptyList() }
+        if (near == null) return all.firstOrNull()
+        return all.minByOrNull { com.ksjd.testem.live.LiveRepository.distanceMeters(near.first, near.second, it.first, it.second) }
+    }
 
     private fun nearestStop(citySlug: String, name: String, lat: Double, lon: Double): CpStopSuggestion? {
         fun meters(s: CpStopSuggestion): Int? {

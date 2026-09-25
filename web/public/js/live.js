@@ -463,7 +463,7 @@ function onRiderFix(pos) {
   const scheduled = d.stops.map((s) => s.scheduledMs);
   follow.localDelay = { seconds: delayAt(hit.index, scheduled), at: Date.now(), fromGps: true };
   renderAllFollowSlots();
-  if (Date.now() - lastRiderReportAt < 30000 && Math.floor(hit.index) === Math.floor(previous)) return;
+  if (Date.now() - lastRiderReportAt < 15000 && Math.floor(hit.index) === Math.floor(previous)) return;
   lastRiderReportAt = Date.now();
   const stopIndex = Math.min(Math.floor(hit.index), d.stops.length - 1);
   api('/api/hub/report', { tripKey: d.communityKey, line: follow.ref.line, stopIndex, stopName: d.stops[stopIndex].name,

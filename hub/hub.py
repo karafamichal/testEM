@@ -38,7 +38,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -297,8 +297,8 @@ class RateLimiter:
 
 login_limiter = RateLimiter(10, 15 * 60)
 bug_limiter = RateLimiter(10, 60 * 60)
-report_limiter = RateLimiter(120, 60 * 60)
-reporter_limiter = RateLimiter(30, 60 * 60)
+report_limiter = RateLimiter(1200, 60 * 60)  # per IP: phones on mobile data share addresses
+reporter_limiter = RateLimiter(300, 60 * 60)  # per rider: GPS every 15 s is 240 an hour
 
 
 # ------------------------------------------------------------------ email

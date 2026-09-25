@@ -394,4 +394,14 @@
     <string name="history_estimate">(odhad z minulých dní)</string>
     <string name="predict_switch">Časy podľa minulých meškaní</string>
     <string name="predict_switch_hint">Keď o autobuse nie je nič známe naživo, posunie jeho časy o to, koľko zvyčajne mešká. Vypnuté: len ako tip.</string>
+    <string name="journey_follow">Sledovať celú cestu</string>
+    <string name="journey_add">Pridať do mojej cesty</string>
+    <string name="journey_pick_alight">Ťuknite na zastávku, kde prestupujete alebo vystupujete, a potom rovnako pridajte ďalší autobus.</string>
+    <string name="journey_draft">Moja cesta: %1$s</string>
+    <string name="journey_start">Sledovať</string>
+    <string name="journey_clear">Zrušiť</string>
+    <string name="journey_then">Potom autobus %1$s → %2$s</string>
+    <string name="journey_change_title">Prestúpte na autobus %1$s</string>
+    <string name="journey_change_body">Vystúpte na zastávke %1$s. Teraz sledujeme váš ďalší autobus.</string>
+    <string name="journey_alight_change">Vystúpte na zastávke %1$s a prestúpte na autobus %2$s</string>
 </resources>

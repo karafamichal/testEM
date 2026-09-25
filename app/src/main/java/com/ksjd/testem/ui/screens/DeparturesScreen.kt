@@ -43,6 +43,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -95,6 +96,14 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun DeparturesScreen(liveViewModel: LiveViewModel, onExitGuest: (() -> Unit)?) {
+    Column(Modifier.fillMaxSize()) {
+        JourneyDraftBar(Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        Box(Modifier.weight(1f)) { DeparturesContent(liveViewModel, onExitGuest) }
+    }
+}
+
+@Composable
+private fun DeparturesContent(liveViewModel: LiveViewModel, onExitGuest: (() -> Unit)?) {
     val state by liveViewModel.state.collectAsState()
     val board = state.board
     if (board != null) {
@@ -448,7 +457,7 @@ private fun BoardRow(departure: LiveDeparture, now: Long, highlighted: Boolean, 
 /** Stops of one bus with the Follow button; shown over any tab (Departures or Planner). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit) {
+fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit, onPickAlight: (Int?) -> Unit = {}) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = MaterialTheme.colorScheme.surface) {
@@ -493,6 +502,7 @@ fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(12.dp))
+            JourneyDraftBar(Modifier.padding(bottom = 8.dp))
             FollowControls(trip)
         }
         val tracked by TripTracking.active.collectAsState()
@@ -514,7 +524,10 @@ fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit) {
                 alightOrder = if (following) tracked?.alightOrder else trip.alightOrder,
                 onStopClick = if (following) {
                     { order -> TripTracking.setAlightStop(context, order.takeIf { it != tracked?.alightOrder }) }
-                } else null
+                } else {
+                    // Not followed yet: pick where to get off, e.g. to change to another bus.
+                    { order -> onPickAlight(order.takeIf { it != trip.alightOrder }) }
+                }
             )
         }
     }
@@ -668,6 +681,60 @@ private fun FollowControls(trip: TripSheetState) {
             Spacer(Modifier.height(8.dp))
             Notice(stringResource(R.string.track_permission_needed))
         }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { TripTracking.addToDraft(TrackedTrip(trip.ref, trip.boardingPlatformIds, trip.alightOrder)) },
+            enabled = trip.detail?.stops?.isNotEmpty() == true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(stringResource(R.string.journey_add)) }
+        if (trip.alightOrder == null) {
+            Text(stringResource(R.string.journey_pick_alight), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
     Spacer(Modifier.height(12.dp))
+}
+
+/** Runs an action once notifications are allowed (asks first on Android 13+). */
+@Composable
+internal fun rememberWithNotifications(): (() -> Unit) -> Unit {
+    val context = LocalContext.current
+    var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) pending?.invoke()
+        pending = null
+    }
+    return { action ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pending = action
+            permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else action()
+    }
+}
+
+/** The journey the user is building bus by bus: "My journey: 1 → 101", Follow, Clear. */
+@Composable
+internal fun JourneyDraftBar(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val draft by TripTracking.draft.collectAsState()
+    if (draft.isEmpty()) return
+    val withNotifications = rememberWithNotifications()
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+        Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.journey_draft, draft.joinToString(" → ") { it.ref.line }),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = TripTracking::clearDraft) { Text(stringResource(R.string.journey_clear)) }
+            Button(onClick = {
+                withNotifications {
+                    TripTracking.startJourney(context, draft)
+                    TripTracking.clearDraft()
+                }
+            }) { Text(stringResource(R.string.journey_start)) }
+        }
+    }
 }

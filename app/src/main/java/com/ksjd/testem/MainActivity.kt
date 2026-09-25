@@ -204,7 +204,7 @@ private fun MainScaffold(
             var privacyAsked by rememberSaveable { mutableStateOf(CredentialsManager(context).wasPrivacyAsked()) }
             if (!privacyAsked) com.ksjd.testem.ui.screens.PrivacyDialog(onDone = { privacyAsked = true })
             val liveState by liveViewModel.state.collectAsState()
-            liveState.trip?.let { trip -> com.ksjd.testem.ui.screens.TripSheet(trip, onDismiss = liveViewModel::closeTrip) }
+            liveState.trip?.let { trip -> com.ksjd.testem.ui.screens.TripSheet(trip, onDismiss = liveViewModel::closeTrip, onPickAlight = liveViewModel::setTripAlight) }
         }
     }
 }

@@ -382,4 +382,14 @@
     <string name="history_estimate">(estimate from past days)</string>
     <string name="predict_switch">Use past delays for times</string>
     <string name="predict_switch_hint">When nothing live is known about a bus, shift its times by how late it usually is. Off: shown only as a hint.</string>
+    <string name="journey_follow">Follow the whole journey</string>
+    <string name="journey_add">Add to my journey</string>
+    <string name="journey_pick_alight">Tap the stop where you change or get off, then add the next bus the same way.</string>
+    <string name="journey_draft">My journey: %1$s</string>
+    <string name="journey_start">Follow</string>
+    <string name="journey_clear">Clear</string>
+    <string name="journey_then">Then bus %1$s → %2$s</string>
+    <string name="journey_change_title">Change to bus %1$s</string>
+    <string name="journey_change_body">Get off at %1$s. Now following your next bus.</string>
+    <string name="journey_alight_change">Get off at %1$s and change to bus %2$s</string>
 </resources>

@@ -201,17 +201,25 @@ class LiveRepository(context: Context) {
     /** Stop coordinates: sadzv platforms for sadzv trips, cp.sk for timetable stops (cached by name). */
     private val coordinateCache = mutableMapOf<String, Pair<Double, Double>?>()
 
-    suspend fun withCoordinates(ref: TripRef, detail: TripDetail): TripDetail {
-        if (detail.stops.all { it.lat != null }) return detail
+    // cp.sk lookups block: run them off the main thread (the tracking service calls this from Main).
+    suspend fun withCoordinates(ref: TripRef, detail: TripDetail): TripDetail = withContext(Dispatchers.IO) {
+        if (detail.stops.all { it.lat != null }) return@withContext detail
         val platforms = if (ref.isScheduleOnly || detail.fromTimetable) emptyMap()
         else runCatching { getStops() }.getOrDefault(emptyList()).flatMap { it.platforms }.associateBy { it.id }
+        // Town of the timetable: from the cp.sk link, else where the user boards (sadzv trips on cp.sk's times).
+        val boarding = ref.fromStopId.takeIf { it != 0 }?.let { runCatching { stopById(it) }.getOrNull() }?.let { it.lat to it.lon }
+        val city = Regex("""cp\.sk/([^/]+)/""").find(ref.scheduleUrl)?.groupValues?.get(1)?.takeIf { it != "bus" && it != "vlak" && it != "vlakbus" }
+            ?: boarding?.let { cityFor(it.first, it.second) } ?: "slovensko"
+        var near = boarding
         val stops = detail.stops.map { stop ->
+            val key = "$city|${stop.name}"
             val c = platforms[stop.platformId]?.let { it.lat to it.lon }
-                ?: synchronized(coordinateCache) { coordinateCache[stop.name] }
-                ?: cp.coordinatesOf(stop.name).also { found -> synchronized(coordinateCache) { coordinateCache[stop.name] = found } }
+                ?: synchronized(coordinateCache) { coordinateCache[key] }
+                ?: cp.coordinatesOf(stop.name, city, near).also { found -> synchronized(coordinateCache) { coordinateCache[key] = found } }
+            if (c != null) near = c
             stop.copy(lat = c?.first, lon = c?.second)
         }
-        return detail.copy(stops = stops)
+        detail.copy(stops = stops)
     }
 
     private suspend fun liveTrip(ref: TripRef): TripDetail {

@@ -53,6 +53,20 @@ data class LiveState(
     val preview: BoardState? = null
 )
 
+/** A planner bus as a trip: stops, times and the user's stops come from its cp.sk route page. */
+fun scheduledTripRef(segment: TimetableSegment, line: String): TripRef? {
+    if (segment.routeUrl.isBlank()) return null
+    return TripRef(
+        line = line,
+        lineId = 0L,
+        routeNumber = "",
+        tripNumber = 0,
+        destination = segment.arrivalStop.split(",").map { it.trim() }.filter { it.isNotEmpty() }.joinToString(", "),
+        scheduleUrl = segment.routeUrl,
+        serviceDate = segment.serviceDate
+    )
+}
+
 class LiveViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = LiveRepository(application)
     private val prefs = CredentialsManager(application)
@@ -228,17 +242,12 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
 
     /** A bus from a planner result: no live data, so its stops and times come from cp.sk. */
     fun openScheduledTrip(segment: TimetableSegment, line: String) {
-        if (segment.routeUrl.isBlank()) return
-        val ref = TripRef(
-            line = line,
-            lineId = 0L,
-            routeNumber = "",
-            tripNumber = 0,
-            destination = segment.arrivalStop.split(",").map { it.trim() }.filter { it.isNotEmpty() }.joinToString(", "),
-            scheduleUrl = segment.routeUrl,
-            serviceDate = segment.serviceDate
-        )
-        loadTrip(TripSheetState(ref))
+        loadTrip(TripSheetState(scheduledTripRef(segment, line) ?: return))
+    }
+
+    /** Where the user gets off the bus in the open sheet (to add it to a journey), null = clear. */
+    fun setTripAlight(order: Int?) {
+        _state.update { it.copy(trip = it.trip?.copy(alightOrder = order)) }
     }
 
     private fun loadTrip(sheet: TripSheetState) {

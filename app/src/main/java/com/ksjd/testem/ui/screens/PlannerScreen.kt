@@ -66,6 +66,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ksjd.testem.AppViewModel
 import com.ksjd.testem.CpStopSuggestion
+import com.ksjd.testem.PLANNER_ALL
+import com.ksjd.testem.live.TrackedTrip
+import com.ksjd.testem.live.TripTracking
+import com.ksjd.testem.live.scheduledTripRef
 import com.ksjd.testem.R
 import com.ksjd.testem.SavedRoute
 import com.ksjd.testem.TimetableConnection
@@ -155,7 +159,7 @@ fun PlannerScreen(
 private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
     val context = LocalContext.current
     val cities = listOf(
-        "slovensko" to stringResource(R.string.timetables_city_slovakia),
+        PLANNER_ALL to stringResource(R.string.timetables_city_slovakia),
         "banskabystrica" to stringResource(R.string.timetables_city_banska_bystrica),
         "zvolen" to stringResource(R.string.timetables_city_zvolen)
     )
@@ -438,6 +442,16 @@ private fun ConnectionCard(
                         )
                     }
                 }
+            }
+            // A connection with changes: follow all its buses as one journey.
+            val legs = connection.segments.mapNotNull { s -> scheduledTripRef(s, lineNumber(s.line))?.let { TrackedTrip(it, emptyList()) } }
+            if (legs.size > 1) {
+                val withNotifications = rememberWithNotifications()
+                Button(
+                    onClick = { withNotifications { TripTracking.startJourney(context, legs) } },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(end = 12.dp, top = 8.dp)
+                ) { Text(stringResource(R.string.journey_follow)) }
             }
         }
     }

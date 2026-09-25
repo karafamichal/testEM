@@ -28,3 +28,7 @@
 -keep class com.ksjd.testem.AccountDetails { *; }
 -keep class com.ksjd.testem.SavedRoute { *; }
 -keep class com.ksjd.testem.CpStopSuggestion { *; }
+# Journey legs travel to the tracking service as JSON.
+-keep class com.ksjd.testem.live.TrackedTrip { *; }
+-keep class com.ksjd.testem.live.TripRef { *; }
+-keep class * extends com.google.gson.reflect.TypeToken

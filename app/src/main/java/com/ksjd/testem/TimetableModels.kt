@@ -1,5 +1,8 @@
 package com.ksjd.testem
 
+/** Planner scope covering all of Slovakia, city buses included. */
+const val PLANNER_ALL = "vlakbusmhd"
+
 data class CpStopSuggestion(
     val selectedText: String,
     val value: String,
@@ -64,7 +67,8 @@ data class TimetableSearchResult(
 
 data class TimetableState(
     val isLoading: Boolean = false,
-    val citySlug: String = "slovensko",
+    /** "vlakbusmhd": cp.sk's timetable of trains, intercity and city buses together, so transfers between them are found. */
+    val citySlug: String = PLANNER_ALL,
     val fromInput: String = "",
     val toInput: String = "",
     val timeInput: String = "",
