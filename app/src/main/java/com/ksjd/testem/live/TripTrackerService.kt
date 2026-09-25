@@ -116,7 +116,10 @@ class TripTrackerService : Service() {
     private var stopLatLon: Pair<Double, Double>? = null
     private var stopLookupDone = false
     private var lastFix: android.location.Location? = null
-    private var lastFixAt = 0L
+    /** Walking to the stop: when to look at the location again (GPS is off in between). */
+    private var nextFixAt = 0L
+    private var stopPass = StopPassDetector()
+    private var lastArrivalStop = -1
 
     // Automatic mode: the rider's phone on the bus marks where it is (only the stop is sent).
     private var riderListener: android.location.LocationListener? = null
@@ -175,6 +178,9 @@ class TripTrackerService : Service() {
         lastRiderIndex = -1f
         lastRiderReportAt = 0L
         localFromGps = false
+        nextFixAt = 0L
+        stopPass = StopPassDetector()
+        lastArrivalStop = -1
     }
 
     /** Journey: the bus reached the user's change stop, so follow the next one. */
@@ -220,7 +226,7 @@ class TripTrackerService : Service() {
 
     // ------------------------------------------------------------ automatic mode (rider GPS)
 
-    private fun updateRiderTracking(current: TrackedTrip, detail: TripDetail) {
+    private fun updateRiderTracking(current: TrackedTrip, detail: TripDetail, p: TripProgress) {
         val wanted = prefs.getCommunityMode() == COMMUNITY_AUTO && HubClient.isConfigured &&
             detail.communityKey != null && Locations.hasPrecise(this)
         if (!wanted) {
@@ -238,6 +244,14 @@ class TripTrackerService : Service() {
                 Log.i(GPS_TAG, "stop coordinates: ${routeCoords?.count { it != null }} of ${detail.stops.size}")
                 routeCoordsLoading = false
             }
+        }
+        // Live GPS only once the rider is at the stop or on the bus; walking there, occasional checks do.
+        val atStop = p.onBoard || stopLatLon == null || lastFix?.let { f ->
+            stopLatLon?.let { (lat, lon) -> LiveRepository.distanceMeters(f.latitude, f.longitude, lat, lon) <= NEAR_STOP_M }
+        } == true
+        if (!atStop) {
+            if (riderListener != null) Log.i(GPS_TAG, "left the stop: live GPS off")
+            return stopRiderTracking()
         }
         if (riderListener != null) return
         val manager = getSystemService(android.location.LocationManager::class.java) ?: return
@@ -271,6 +285,7 @@ class TripTrackerService : Service() {
             return
         }
         val key = detail.communityKey ?: return
+        lastFix = fix
         if (!fix.hasAccuracy() || fix.accuracy > 50f) return Log.i(GPS_TAG, "fix: accuracy ${fix.accuracy} m").let { }
         val p = TripProgress.from(withLocalDelay(detail), current)
         val (index, meters) = RoutePosition.snap(fix.latitude, fix.longitude, coords, RoutePosition.RIDER_GPS_MAX_M, p.position)
@@ -279,25 +294,49 @@ class TripTrackerService : Service() {
             }
         val boarding = (p.boardingIndex ?: 0).toFloat()
         val moving = (fix.hasSpeed() && fix.speed >= 3f) || (lastRiderIndex >= 0f && index > lastRiderIndex + 0.05f)
-        val previous = lastRiderIndex
         lastRiderIndex = maxOf(lastRiderIndex, index)
         Log.i(GPS_TAG, "fix: at %.2f (%.0f m off), boarding %.0f, speed %.1f".format(index, meters, boarding, fix.speed))
-        if (index < boarding + 0.05f || !moving) return
         val now = System.currentTimeMillis()
         val scheduled = detail.stops.map { it.scheduledMs }
+        fun send(stopIndex: Int, scheduledMs: Long, kind: String = "gps") {
+            lastRiderReportAt = now
+            scope.launch {
+                runCatching {
+                    HubClient.reportPosition(key, current.ref.line, stopIndex, detail.stops[stopIndex].name, scheduledMs, reporterId, kind = kind)
+                }.onFailure { Log.w(GPS_TAG, "report failed", it) }.getOrNull()?.let { pooled -> lastDetail = lastDetail?.copy(community = pooled) }
+            }
+        }
+        // Standing within a few tens of metres of a stop: the bus is stopped there.
+        val nearest = kotlin.math.round(index).toInt().coerceIn(0, detail.stops.lastIndex)
+        val atStop = coords.getOrNull(nearest)?.let { (lat, lon) ->
+            LiveRepository.distanceMeters(fix.latitude, fix.longitude, lat, lon) <= STOP_RADIUS_M
+        } == true
+        // Left (after standing there) or drove past a stop: the exact delay there (timetable times are departures).
+        val left = stopPass.onFix(index, moving, now, atStop)?.takeIf { it.stop >= boarding.toInt() && it.stop <= detail.stops.lastIndex }
+        if (left != null) {
+            val delay = ((left.atMs - scheduled[left.stop]) / 1000L).toInt()
+            val kind = if (left.stopped) "departed" else "passed"
+            Log.i(GPS_TAG, "$kind stop ${left.stop} (${detail.stops[left.stop].name}) %+d s".format(delay))
+            localDelay = delay to now
+            localFromGps = true
+            redraw(current, detail)
+            // The hub takes "now" from its own clock, so shift the stop time by how long ago it left.
+            return send(left.stop, scheduled[left.stop] + (now - left.atMs), kind)
+        }
+        // Stopped at a stop after the boarding one (so the rider is on the bus): it arrived there.
+        // The hub counts an early arrival as on time: the bus waits for its departure.
+        if (!moving && atStop && nearest > boarding.toInt() && nearest > lastArrivalStop) {
+            lastArrivalStop = nearest
+            Log.i(GPS_TAG, "arrived at stop $nearest (${detail.stops[nearest].name})")
+            return send(nearest, scheduled[nearest], "arrival")
+        }
+        if (index < boarding + 0.05f || !moving) return
         localDelay = RoutePosition.delayAt(index, scheduled, now) to now
         localFromGps = true
         redraw(current, detail)
-        // Every 15 s, or right away when the bus passes a stop.
-        if (now - lastRiderReportAt < 15_000L && index.toInt() == previous.toInt()) return
-        lastRiderReportAt = now
-        val stopIndex = index.toInt().coerceIn(0, detail.stops.lastIndex)
-        scope.launch {
-            runCatching {
-                HubClient.reportPosition(key, current.ref.line, stopIndex, detail.stops[stopIndex].name,
-                    RoutePosition.referenceAt(index, scheduled, now), reporterId, kind = "gps")
-            }.onFailure { Log.w(GPS_TAG, "report failed", it) }.getOrNull()?.let { pooled -> lastDetail = lastDetail?.copy(community = pooled) }
-        }
+        // Between stops: every 15 s.
+        if (now - lastRiderReportAt < 15_000L) return
+        send(index.toInt().coerceIn(0, detail.stops.lastIndex), RoutePosition.referenceAt(index, scheduled, now))
     }
 
     /** "The bus is at stop [index] right now" ([leaving]: it is pulling out, the timetable's departure moment). */
@@ -338,8 +377,13 @@ class TripTrackerService : Service() {
 
     // ------------------------------------------------------------ catch estimate
 
-    private suspend fun updateCatch(current: TrackedTrip, p: TripProgress): CatchEstimate? {
-        if (p.onBoard || !prefs.getCatchEnabled() || !Locations.hasPermission(this)) return null
+    /**
+     * Walking to the stop: look at the location only now and then, sooner the closer the
+     * user is (see [CatchEstimate.nextCheckMs]). At the stop or on board, live GPS takes over.
+     */
+    private suspend fun updateLocation(current: TrackedTrip, p: TripProgress) {
+        val auto = prefs.getCommunityMode() == COMMUNITY_AUTO
+        if (p.onBoard || (!auto && !prefs.getCatchEnabled()) || !Locations.hasPermission(this)) return
         if (!stopLookupDone) {
             stopLookupDone = true
             // Timetable trips use made-up platform ids, so match those by name only.
@@ -347,11 +391,17 @@ class TripTrackerService : Service() {
             val platforms = if (byName) emptyList() else current.boardingPlatformIds
             stopLatLon = repo.stopLocation(platforms, p.boardingStopName)
         }
-        if (stopLatLon == null) return null
-        if (System.currentTimeMillis() - lastFixAt > LOCATION_REFRESH_MS) {
-            lastFixAt = System.currentTimeMillis()
-            Locations.current(this, maxAgeMs = LOCATION_REFRESH_MS)?.let { lastFix = it }
-        }
+        val now = System.currentTimeMillis()
+        if (riderListener != null || now < nextFixAt) return
+        val fix = Locations.current(this, maxAgeMs = 20_000L)
+        if (fix != null) lastFix = fix
+        val meters = fix?.let { f -> stopLatLon?.let { (lat, lon) -> LiveRepository.distanceMeters(f.latitude, f.longitude, lat, lon) } }
+        nextFixAt = now + (meters?.let { CatchEstimate.nextCheckMs(it) } ?: CatchEstimate.MIN_RECHECK_MS)
+        Log.i(GPS_TAG, "location check: ${meters ?: "?"} m from the stop, next in ${(nextFixAt - now) / 1000} s")
+    }
+
+    private fun updateCatch(p: TripProgress): CatchEstimate? {
+        if (p.onBoard || !prefs.getCatchEnabled() || !Locations.hasPermission(this) || stopLatLon == null) return null
         return catchFor(p)
     }
 
@@ -434,8 +484,9 @@ class TripTrackerService : Service() {
                     finish()
                     return
                 }
-                updateRiderTracking(current, fetched ?: detail)
-                val estimate = updateCatch(current, progress)
+                updateLocation(current, progress)
+                updateRiderTracking(current, fetched ?: detail, progress)
+                val estimate = updateCatch(progress)
                 NotificationManagerCompat.from(this).notifySafely(
                     NOTIFICATION_ID, liveNotification(current, detail, progress, catchLine(current, detail, progress))
                 )
@@ -669,7 +720,10 @@ class TripTrackerService : Service() {
         private const val REQUEST_REPORT_NEXT = 11
         private const val REQUEST_REPORT_BEHIND = 12
         private const val REQUEST_REPORT_LEAVING = 13
-        private const val LOCATION_REFRESH_MS = 60_000L
+        /** Within this of the boarding stop the rider is "at the stop": live GPS on. */
+        private const val NEAR_STOP_M = 150
+        /** A bus standing this close to a stop is stopped there. */
+        private const val STOP_RADIUS_M = 40
         private const val MAX_FIX_ACCURACY_M = 300f
         private const val REPORT_WINDOW_S = 30 * 60
         private const val NOTIFICATION_ID = 4200

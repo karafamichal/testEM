@@ -1,6 +1,6 @@
 // Run: node test.mjs
 import assert from 'node:assert/strict';
-import { tripProgress, catchEstimate, communityKey, lineNumber, historyInsights, historyToCsv, snapToRoute, delayAt, BUS_GPS_MAX_M, RIDER_GPS_MAX_M } from './public/js/logic.js';
+import { tripProgress, catchEstimate, communityKey, lineNumber, historyInsights, historyToCsv, snapToRoute, delayAt, nextCheckMs, stopPassDetector, BUS_GPS_MAX_M, RIDER_GPS_MAX_M } from './public/js/logic.js';
 import { parseScheduledTrip, localToEpoch } from './cp.js';
 
 const T0 = Date.UTC(2026, 8, 24, 10, 0);
@@ -25,6 +25,25 @@ assert.equal(tripProgress(detail, { boardingPlatformIds: [1], alightOrder: 2 }, 
 assert.deepEqual(catchEstimate(600, 900), { walkSeconds: 600, marginSeconds: 300, verdict: 'leaveSoon' });
 assert.equal(catchEstimate(600, 400).verdict, 'miss');
 assert.equal(catchEstimate(30, 10).verdict, 'atStop');
+// location checks while walking: 3/4 of the walk, 30 s .. 10 min
+assert.equal(nextCheckMs(460), 345000);
+assert.equal(nextCheckMs(10), 30000);
+assert.equal(nextCheckMs(20000), 600000);
+// the moment the bus left or passed a stop
+{
+  const pass = stopPassDetector();
+  assert.equal(pass(0.8, true, 0), null);
+  assert.deepEqual(pass(1.2, true, 10000), [1, 5000, false]); // drove past
+  const dwell = stopPassDetector();
+  dwell(0.9, true, 0);
+  assert.equal(dwell(1.01, false, 10000), null); // stopped just past the stop
+  assert.equal(dwell(1.01, false, 40000), null);
+  assert.deepEqual(dwell(1.2, true, 50000), [1, 45000, true]); // left when it moved again
+  const before = stopPassDetector();
+  before(0.9, true, 0);
+  before(0.99, false, 10000, true); // standing at the stop, just before its point
+  assert.equal(before(1.2, true, 50000)[2], true);
+}
 assert.equal(communityKey(detail), `507|S0|${T0}`);
 assert.equal(communityKey(detail, { lineId: 910009139, tripNumber: 123, line: '1' }), 'sadzv|910009139|123|2026-09-24|1');
 

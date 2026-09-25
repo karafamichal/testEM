@@ -168,31 +168,51 @@ async function getVehicles() {
     }));
 }
 
-const coordinateCache = new Map(); // cp.sk stop name -> [lat, lon] | null
+const coordinateCache = new Map(); // "city|stop name" -> [lat, lon] | null
+
+/**
+ * Where a stop named as on cp.sk is. City stop names ("Nám. slobody") exist in many towns,
+ * so search the trip's own timetable first, all of Slovakia only if that finds nothing,
+ * and take the match closest to [near] (the previous stop).
+ */
+async function coordinatesOf(name, city, near) {
+  const found = async (c) => (await suggestStops(c, name).catch(() => []))
+    .filter((x) => x.coorX && x.coorY).map((x) => [Number(x.coorX), Number(x.coorY)]);
+  let all = await found(city);
+  if (!all.length && city !== 'slovensko') all = await found('slovensko');
+  if (!near) return all[0] || null;
+  return all.sort((a, b) => distance(near[0], near[1], a[0], a[1]) - distance(near[0], near[1], b[0], b[1]))[0] || null;
+}
 
 /** Stop coordinates: sadzv platforms for sadzv trips, cp.sk suggestions for timetable stops. */
-export async function withCoordinates(trip, fromSadzv) {
+export async function withCoordinates(trip, fromSadzv, ref = {}) {
   if (trip.stops.every((s) => s.lat != null)) return trip;
   const platforms = fromSadzv ? new Map((await getStops()).flatMap((s) => s.platforms.map((p) => [p.id, p]))) : new Map();
+  // Town of the timetable: from the cp.sk link, else where the user boards (sadzv trips on cp.sk's times).
+  const boardingStop = ref.fromStopId ? (await getStops()).find((s) => s.id === ref.fromStopId) : null;
+  const slug = (/cp\.sk\/([^/]+)\//.exec(ref.scheduleUrl || '') || [])[1];
+  const city = CITY_PREFIX[slug] && slug !== 'slovensko' ? slug : boardingStop ? cityFor(boardingStop.lat, boardingStop.lon) : 'slovensko';
+  let near = boardingStop ? [boardingStop.lat, boardingStop.lon] : null;
   const stops = [];
   for (const stop of trip.stops) {
+    const key = city + '|' + stop.name;
     let c = platforms.get(stop.platformId);
-    c = c ? [c.lat, c.lon] : coordinateCache.get(stop.name);
+    c = c ? [c.lat, c.lon] : coordinateCache.get(key);
     if (c === undefined) {
-      const s = (await suggestStops('slovensko', stop.name).catch(() => [])).find((x) => x.coorX && x.coorY);
-      c = s ? [Number(s.coorX), Number(s.coorY)] : null;
+      c = await coordinatesOf(stop.name, city, near);
       if (coordinateCache.size > 5000) coordinateCache.clear();
-      coordinateCache.set(stop.name, c);
+      coordinateCache.set(key, c);
     }
+    if (c) near = c;
     stops.push({ ...stop, lat: c?.[0] ?? null, lon: c?.[1] ?? null });
   }
   return { ...trip, stops };
 }
 
 /** The bus's own GPS, when fresh and on the route, becomes the delay. */
-async function placeBus(trip, busPosition, fromSadzv) {
+async function placeBus(trip, busPosition, fromSadzv, ref) {
   if (!busPosition || trip.stops.length < 2) return trip;
-  const placed = await withCoordinates(trip, fromSadzv);
+  const placed = await withCoordinates(trip, fromSadzv, ref);
   const expected = tripProgress(placed, { boardingPlatformIds: [], alightOrder: null }).position;
   const hit = snapToRoute(busPosition[0], busPosition[1], placed.stops.map((s) => (s.lat != null ? [s.lat, s.lon] : null)), BUS_GPS_MAX_M, expected);
   if (!hit) return placed; // the feed sometimes pairs a position with the wrong trip
@@ -314,7 +334,7 @@ export async function getLiveTrip(ref) {
     if (timetable) {
       return placeBus({ ...timetable, line: ref.line, destination: ref.destination || timetable.destination,
         delaySeconds: vehicle?.delaySeconds ?? null, alightOrder: null, fromTimetable: true,
-        positionSource: vehicle?.delaySeconds != null ? 'busDelay' : 'timetable' }, busPosition, false);
+        positionSource: vehicle?.delaySeconds != null ? 'busDelay' : 'timetable' }, busPosition, false, ref);
     }
   }
   const delaySeconds = vehicle?.delaySeconds ?? passedDelay;
@@ -324,7 +344,7 @@ export async function getLiveTrip(ref) {
     stops,
     delaySeconds,
     positionSource: delaySeconds != null ? 'busDelay' : 'timetable',
-  }, busPosition, true);
+  }, busPosition, true, ref);
 }
 
 // ---------------------------------------------------------------- cp.sk
@@ -394,7 +414,8 @@ export async function getScheduledTrip(ref) {
   return trip;
 }
 
-const CITY_PREFIX = { slovensko: '/bus', banskabystrica: '/banskabystrica', zvolen: '/zvolen' };
+// vlakbusmhd: trains, intercity and city buses together, so the planner finds changes between them.
+const CITY_PREFIX = { slovensko: '/bus', banskabystrica: '/banskabystrica', zvolen: '/zvolen', vlakbusmhd: '/vlakbusmhd' };
 const prefixFor = (city) => CITY_PREFIX[city] || '/bus';
 const unwrapJsonp = (raw) => {
   const a = raw.indexOf('('), b = raw.lastIndexOf(')');

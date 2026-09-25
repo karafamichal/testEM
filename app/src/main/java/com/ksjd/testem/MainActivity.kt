@@ -203,6 +203,7 @@ private fun MainScaffold(
             val context = androidx.compose.ui.platform.LocalContext.current
             var privacyAsked by rememberSaveable { mutableStateOf(CredentialsManager(context).wasPrivacyAsked()) }
             if (!privacyAsked) com.ksjd.testem.ui.screens.PrivacyDialog(onDone = { privacyAsked = true })
+            else com.ksjd.testem.ui.screens.WhatsNewDialog()
             val liveState by liveViewModel.state.collectAsState()
             liveState.trip?.let { trip -> com.ksjd.testem.ui.screens.TripSheet(trip, onDismiss = liveViewModel::closeTrip, onPickAlight = liveViewModel::setTripAlight) }
         }

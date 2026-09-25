@@ -81,3 +81,55 @@ object RoutePosition {
     fun delayAt(index: Float, scheduledMs: List<Long>, nowMs: Long): Int =
         ((nowMs - referenceAt(index, scheduledMs, nowMs)) / 1000L).toInt()
 }
+
+/**
+ * When the bus left or drove past each stop, from the rider's fixes (every few seconds).
+ * Timetable times are departures, so that moment is what the delay is measured at:
+ * - crossing a stop while moving: passed it (nobody got on or off) or left it without
+ *   stopping on the far side; the moment is interpolated between the two fixes;
+ * - stopped just past it: it leaves when it moves again (between the last two fixes).
+ * Stopping just before a stop is the first case once it drives on.
+ */
+/** The bus left [stop] at [atMs]; [stopped]: it stood there first (else it drove past). */
+data class StopPass(val stop: Int, val atMs: Long, val stopped: Boolean)
+
+class StopPassDetector {
+    private var lastIndex = -1f
+    private var lastAt = 0L
+    private var waitingAt = -1
+
+    private var stoppedBefore = false
+
+    /**
+     * A fix at fractional stop [index]; returns when and how the bus left a stop once it is
+     * behind it. [atStop]: the fix is within a few tens of metres of a stop.
+     */
+    fun onFix(index: Float, moving: Boolean, atMs: Long, atStop: Boolean = false): StopPass? {
+        var passed: StopPass? = null
+        if (lastIndex >= 0f) {
+            val stop = kotlin.math.floor(index).toInt()
+            if (stop > kotlin.math.floor(lastIndex).toInt() && index > lastIndex) {
+                val at = lastAt + kotlin.math.round((stop - lastIndex).toDouble() / (index - lastIndex) * (atMs - lastAt)).toLong()
+                if (moving) {
+                    // Stood just before the stop, then drove on: it stopped there too.
+                    passed = StopPass(stop, at, stoppedBefore)
+                    waitingAt = -1
+                } else {
+                    waitingAt = stop
+                }
+            } else if (waitingAt >= 0 && moving) {
+                passed = StopPass(waitingAt, (lastAt + atMs) / 2, stopped = true)
+                waitingAt = -1
+            }
+        }
+        stoppedBefore = !moving && atStop
+        if (index >= lastIndex) {
+            lastIndex = index
+            lastAt = atMs
+        } else {
+            lastAt = atMs // GPS jitter backwards: keep the furthest point, but the latest time
+        }
+        return passed
+    }
+}
+

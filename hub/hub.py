@@ -38,7 +38,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "1.4.1"
+VERSION = "1.5.1"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -71,7 +71,12 @@ BUG_CATEGORIES = ["crash", "ticket", "departures", "planner", "tracking", "accou
 # Community delay: how far back reports count, and how fast they fade.
 COMMUNITY_WINDOW_S = 45 * 60
 GPS_WINDOW_S = 3 * 60  # riders' phones on the bus: only this recent counts
-REPORT_KINDS = ("arrival", "position", "gps")
+# arrival: at the stop (a tap, or a phone on the bus standing there); position: a tap;
+# gps: a phone on the bus between stops; departed / passed: the exact moment it left or
+# drove past a stop (timetable times are departures, so these are the most exact delays).
+REPORT_KINDS = ("arrival", "position", "gps", "departed", "passed")
+PHONE_KINDS = ("gps", "departed", "passed")
+EXACT_KINDS = ("departed", "passed")
 COMMUNITY_HALF_LIFE_S = 10 * 60
 MAX_ABS_DELAY_S = 3 * 60 * 60   # latest a bus can plausibly be
 MAX_EARLY_S = 20 * 60            # earliest: a report further ahead of the timetable is a mistake
@@ -454,6 +459,32 @@ def aggregate_delay(reports, now_s):
     }
 
 
+# ------------------------------------------------------------------ live dashboard (Server-Sent Events)
+
+_listeners = set()
+_listeners_lock = threading.Lock()
+MAX_LISTENERS = 20  # open dashboards; each holds a thread
+
+
+def publish(kind):
+    """Tell open dashboards that "bugs" or "community" changed; they reload that view."""
+    with _listeners_lock:
+        for q in _listeners:
+            try:
+                q.put_nowait(kind)
+            except queue.Full:
+                pass
+
+
+def local_day_range(day):
+    """[start, end) epoch seconds of a YYYY-MM-DD day in Slovakia, or None."""
+    try:
+        start = datetime.combine(date.fromisoformat(day), datetime.min.time(), LOCAL_ZONE).timestamp()
+    except (TypeError, ValueError):
+        return None
+    return int(start), int(start) + 86400
+
+
 def trip_run(trip_key):
     """
     (the same trip on any day, its date) from a community key, or None. Keys are
@@ -484,15 +515,17 @@ def trip_history(conn, trip_key):
     parts = trip_key.split("|")
     prefix = "|".join(parts[:3] if parts[0] == "sadzv" else parts[:-1]) + "|%"
     runs = {}
-    for key, delay_s in conn.execute(
-        """SELECT trip_key, delay_s FROM community_reports WHERE trip_key LIKE ? AND created_at>=?
+    for key, delay_s, report_kind in conn.execute(
+        """SELECT trip_key, delay_s, kind FROM community_reports WHERE trip_key LIKE ? AND created_at>=?
            AND reporter NOT IN (SELECT reporter FROM blocked_reporters)""",
         (prefix, now() - HISTORY_DAYS * 86400),
     ):
         other = trip_run(key)
         if other and other[0] == trip and other[1] != day and day_type(other[1]) == kind:
-            runs.setdefault(other[1], []).append(delay_s)
-    recent = [statistics.median(delays) for _, delays in sorted(runs.items(), reverse=True)[:HISTORY_RUNS]]
+            runs.setdefault(other[1], []).append((delay_s, report_kind in EXACT_KINDS))
+    # A run's delay: from the exact moments it left or passed stops when a phone recorded any.
+    recent = [statistics.median([d for d, exact in r if exact] or [d for d, _ in r])
+              for _, r in sorted(runs.items(), reverse=True)[:HISTORY_RUNS]]
     if len(recent) < HISTORY_MIN_RUNS:
         return None
     return {
@@ -510,7 +543,7 @@ def trip_delay(conn, trip_key):
            WHERE trip_key=? AND created_at>=? AND reporter NOT IN (SELECT reporter FROM blocked_reporters)""",
         (trip_key, now() - COMMUNITY_WINDOW_S),
     )]
-    gps = [r for r in rows if r["kind"] == "gps" and now() - r["created_at"] <= GPS_WINDOW_S]
+    gps = [r for r in rows if r["kind"] in PHONE_KINDS and now() - r["created_at"] <= GPS_WINDOW_S]
     result = aggregate_delay(gps or rows, now())
     if result:
         result["source"] = "gps" if gps else "riders"
@@ -962,6 +995,7 @@ class Handler(BaseHTTPRequestHandler):
         if email:
             queue_mail(email, f"[{code}] We got your report", render_template("user_ack", bug_values(bug)),
                        reply_to=setting("mail_reply_to"))
+        publish("bugs")
         self.send(201, {"id": bug["id"], "code": code}, headers=self.cors())
 
     def submit_report(self):
@@ -991,14 +1025,46 @@ class Handler(BaseHTTPRequestHandler):
                 )
             # A blocked reporter gets the same answer, so blocking is not obvious to them.
             result = trip_delay(conn, trip_key)
+        publish("community")
         self.send(201, {"delay": result, "yourDelaySeconds": delay}, headers=self.cors())
 
     # ---- admin API
+
+    def events(self):
+        """Stream "bugs"/"community" change events to an open dashboard (text/event-stream)."""
+        q = queue.Queue(maxsize=50)
+        with _listeners_lock:
+            if len(_listeners) >= MAX_LISTENERS:
+                return self.error(503, "Too many open dashboards")
+            _listeners.add(q)
+        self.close_connection = True
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            self.wfile.write(b"retry: 5000\n\n")
+            self.wfile.flush()
+            while True:
+                try:
+                    message = f"event: {q.get(timeout=20)}\ndata: {{}}\n\n"
+                except queue.Empty:
+                    message = ": ping\n\n"  # keeps proxies (Cloudflare) from closing an idle stream
+                self.wfile.write(message.encode())
+                self.wfile.flush()
+        except OSError:
+            pass  # dashboard closed
+        finally:
+            with _listeners_lock:
+                _listeners.discard(q)
 
     def admin_api(self, method, route, query):
         user = self.current_user()
         if not user:
             return self.error(401, "Sign in first")
+        if method == "GET" and route == "events":
+            return self.events()
         if method == "POST":
             # Cross-site forms cannot send JSON with a custom content type without a preflight.
             if "application/json" not in (self.headers.get("Content-Type") or ""):
@@ -1043,12 +1109,24 @@ class Handler(BaseHTTPRequestHandler):
             if parts[0] == "bugs" and len(parts) >= 2 and parts[1].isdigit():
                 return self.admin_bug(conn, user, method, int(parts[1]), parts[2] if len(parts) > 2 else "")
             if method == "GET" and route == "community/trips":
-                rows = conn.execute(
-                    """SELECT trip_key, line, MAX(created_at) last, COUNT(*) n FROM community_reports
-                       WHERE created_at>=? GROUP BY trip_key ORDER BY last DESC LIMIT 200""",
-                    (now() - 6 * 3600,),
-                ).fetchall()
-                trips = [dict(r, delay=trip_delay(conn, r["trip_key"])) for r in rows]
+                # Default: the last 6 hours; ?day=YYYY-MM-DD for any past day, ?line= to narrow it.
+                span = local_day_range(query["day"]) if query.get("day") else (now() - 6 * 3600, now() + 60)
+                if not span:
+                    return self.error(400, "day must be YYYY-MM-DD")
+                sql = """SELECT trip_key, line, MIN(created_at) first, MAX(created_at) last, COUNT(*) n,
+                         COUNT(DISTINCT reporter) riders FROM community_reports WHERE created_at>=? AND created_at<?"""
+                args = list(span)
+                if query.get("line"):
+                    sql += " AND line=?"
+                    args.append(clean(query["line"], 40))
+                rows = conn.execute(sql + " GROUP BY trip_key ORDER BY last DESC LIMIT 300", args).fetchall()
+                trips = []
+                for r in rows:
+                    last = conn.execute("""SELECT delay_s, stop_name FROM community_reports WHERE trip_key=?
+                                           ORDER BY created_at DESC LIMIT 1""", (r["trip_key"],)).fetchone()
+                    worst = conn.execute("SELECT MAX(delay_s) FROM community_reports WHERE trip_key=?", (r["trip_key"],)).fetchone()[0]
+                    trips.append(dict(r, delay=trip_delay(conn, r["trip_key"]), history=trip_history(conn, r["trip_key"]),
+                                      last_delay=last["delay_s"], last_stop=last["stop_name"], max_delay=worst))
                 return self.send(200, trips)
             if method == "GET" and route == "community/reports":
                 sql = "SELECT * FROM community_reports"

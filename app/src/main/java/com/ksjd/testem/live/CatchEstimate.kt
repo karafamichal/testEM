@@ -31,6 +31,20 @@ data class CatchEstimate(val walkSeconds: Int, val marginSeconds: Int) {
         const val DETOUR_FACTOR = 1.3
         private const val AT_STOP_WALK_S = 45
 
+        /** Share of the remaining walk to wait before checking the location again. */
+        const val RECHECK_SHARE = 0.75
+        const val MIN_RECHECK_MS = 30_000L
+        const val MAX_RECHECK_MS = 10 * 60_000L
+
+        /**
+         * When to look at the phone's location again while the user walks to the stop:
+         * 10 min away -> in 7.5 min. GPS stays off in between.
+         */
+        fun nextCheckMs(distanceMeters: Int): Long {
+            val walkMs = distanceMeters * DETOUR_FACTOR / WALK_METERS_PER_SECOND * 1000
+            return (walkMs * RECHECK_SHARE).toLong().coerceIn(MIN_RECHECK_MS, MAX_RECHECK_MS)
+        }
+
         fun from(distanceMeters: Int, secondsToBoarding: Int): CatchEstimate {
             val walk = (distanceMeters * DETOUR_FACTOR / WALK_METERS_PER_SECOND).toInt()
             return CatchEstimate(walk, secondsToBoarding - walk)

@@ -404,4 +404,10 @@
     <string name="journey_change_title">Prestúpte na autobus %1$s</string>
     <string name="journey_change_body">Vystúpte na zastávke %1$s. Teraz sledujeme váš ďalší autobus.</string>
     <string name="journey_alight_change">Vystúpte na zastávke %1$s a prestúpte na autobus %2$s</string>
+    <string name="whats_new_switch">Novinky po aktualizácii</string>
+    <string name="whats_new_switch_hint">Krátke zhrnutie raz po každej aktualizácii s odkazom na celý zoznam zmien</string>
+    <string name="whats_new_title">Čo je nové vo verzii %1$s</string>
+    <string name="whats_new_changelog">Celý zoznam zmien</string>
+    <string name="whats_new_ok">OK</string>
+    <string name="whats_new_body">• Automatické aktualizácie teraz naozaj zdieľajú, kde je váš autobus, vrátane presného okamihu, keď odchádza zo zastávky alebo ňou prechádza.\n• Plánovač nájde spojenia s prestupmi medzi mestskými a prímestskými autobusmi a ukáže, v ktorom meste je zastávka.\n• Sledujte celú cestu s prestupmi: aplikácia vám povie, kde vystúpiť, a potom sleduje váš ďalší autobus.\n• Nenašlo sa spojenie? Poskladajte si cestu sami, autobus po autobuse.\n• Meškania v detaile spoja sa obnovujú samy.\n• Kým idete na zastávku, poloha sa kontroluje len občas, čo šetrí batériu.</string>
 </resources>

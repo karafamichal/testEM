@@ -362,10 +362,14 @@ function tripParts(key) {
   const t = Number(ms);
   return { line, first, start: t ? new Date(t).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "" };
 }
-const kindLabel = { gps: "rider's phone", arrival: "bus is here", position: "tap" };
+const kindLabel = { gps: "rider's phone", departed: "left the stop (phone)", passed: "drove past (phone)", arrival: "at the stop", position: "tap" };
+const dayTypeLabel = { workday: "workdays", saturday: "Saturdays", sunday: "Sundays" };
+// Which buses the table shows: the last 6 hours (no day) or any day, optionally one line.
+let communityFilter = { day: "", line: "" };
 
 async function renderCommunity(selected) {
-  const [trips, stats] = await Promise.all([api("community/trips"), refreshCounts()]);
+  const params = new URLSearchParams(Object.entries(communityFilter).filter(([, v]) => v));
+  const [trips, stats] = await Promise.all([api("community/trips" + (params.size ? "?" + params : "")), refreshCounts()]);
   const selectedKey = selected ? decodeURIComponent(selected) : "";
   const reports = await api("community/reports" + (selectedKey ? "?trip=" + encodeURIComponent(selectedKey) : ""));
   view.innerHTML = `
@@ -377,21 +381,30 @@ async function renderCommunity(selected) {
     </div>
     <div class="section">
       <p class="muted" style="max-width:75ch;margin:0 0 14px">Riders who opted in say where their bus really is: with buttons on the follow notification, or automatically from their phone while riding (only the stop is sent). Phones on the bus from the last 3 minutes beat taps. Each rider counts once per bus; the newest reports weigh most, and reports far from the rest are ignored.</p>
-      <h2>Buses in the last 6 hours</h2>
+      <h2>${communityFilter.day ? "Buses on " + esc(communityFilter.day) : "Buses in the last 6 hours"}${communityFilter.line ? ", line " + esc(communityFilter.line) : ""}</h2>
+      <form class="row" id="c-filter" style="gap:8px;margin:0 0 12px;flex-wrap:wrap">
+        <label>Day <input type="date" name="day" value="${esc(communityFilter.day)}"></label>
+        <label>Line <input name="line" size="6" value="${esc(communityFilter.line)}" placeholder="all"></label>
+        <button class="btn" type="submit">Show</button>
+        ${communityFilter.day || communityFilter.line ? '<button class="btn quiet" type="button" id="c-reset">Last 6 hours</button>' : ""}
+      </form>
       ${trips.length ? `<div class="table-wrap"><table class="grid">
-        <thead><tr><th>Line</th><th>Trip</th><th>Delay now</th><th>Riders</th><th>Source</th><th>Last seen at</th><th>Last report</th></tr></thead>
+        <thead><tr><th>Line</th><th>Trip</th><th>Delay now</th><th>Last reported</th><th>Worst</th><th>Usually</th><th>Riders</th><th>Source</th><th>Last report</th></tr></thead>
         <tbody>${trips.map((t) => {
-          const p = tripParts(t.trip_key), d = delayText(t.delay?.delaySeconds);
+          const p = tripParts(t.trip_key), d = delayText(t.delay?.delaySeconds), l = delayText(t.last_delay), w = delayText(t.max_delay);
+          const h = t.history, u = h ? delayText(h.delaySeconds) : null;
           return `<tr class="click" data-trip="${esc(t.trip_key)}" aria-selected="${t.trip_key === selectedKey}" tabindex="0">
             <td><span class="plate line">${esc(t.line || p.line)}</span></td>
             <td>${esc(p.first)}<div class="muted small">departs ${esc(p.start)}</div></td>
-            <td><span class="delay ${d.cls}">${d.text}</span></td>
-            <td>${t.delay ? t.delay.reporters : 0} <span class="muted small">(${t.n} reports)</span></td>
-            <td>${t.delay?.source === "gps" ? "riders' phones" : "taps"}</td>
-            <td>${esc(t.delay?.lastStopName || "–")}</td>
+            <td>${t.delay ? `<span class="delay ${d.cls}">${d.text}</span>` : '<span class="muted">–</span>'}</td>
+            <td><span class="delay ${l.cls}">${l.text}</span><div class="muted small">at ${esc(t.last_stop || "–")}</div></td>
+            <td><span class="delay ${w.cls}">${w.text}</span></td>
+            <td>${h ? `<span class="delay ${u.cls}">${u.text}</span><div class="muted small">late ${h.lateRuns} of ${h.runs} ${dayTypeLabel[h.dayType] || ""}</div>` : '<span class="muted">–</span>'}</td>
+            <td>${t.riders} <span class="muted small">(${t.n} reports)</span></td>
+            <td>${t.delay ? (t.delay.source === "gps" ? "riders' phones" : "taps") : '<span class="muted">–</span>'}</td>
             <td>${ago(t.last)}</td></tr>`;
         }).join("")}</tbody></table></div>`
-        : `<div class="empty" style="padding:20px 0"><h2>No reports yet</h2><p>When a rider taps the buttons on the follow notification, the bus shows up here with its delay.</p></div>`}
+        : `<div class="empty" style="padding:20px 0"><h2>No reports${communityFilter.day ? " that day" : " yet"}</h2><p>When riders share where their bus is (buttons or their phone), the bus shows up here with its delay.</p></div>`}
     </div>
     <div class="section">
       <h2>${selectedKey ? "Reports for this bus" : "Latest reports"}</h2>
@@ -410,6 +423,13 @@ async function renderCommunity(selected) {
               <button class="btn danger" data-block="${esc(r.reporter)}" data-unblock="${r.blocked ? 1 : ""}" type="button">${r.blocked ? "Unblock" : "Block rider"}</button></td></tr>`;
         }).join("")}</tbody></table></div>` : `<p class="muted">No reports.</p>`}
     </div>`;
+  $("#c-filter").onsubmit = (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    communityFilter = { day: f.get("day") || "", line: (f.get("line") || "").trim() };
+    renderCommunity(selected);
+  };
+  $("#c-reset") && ($("#c-reset").onclick = () => { communityFilter = { day: "", line: "" }; renderCommunity(selected); });
   view.querySelectorAll("[data-trip]").forEach((tr) => {
     const go = () => location.hash = "community/" + encodeURIComponent(tr.dataset.trip);
     tr.onclick = go; tr.onkeydown = (e) => e.key === "Enter" && go();
@@ -645,7 +665,32 @@ async function renderTemplates(selected) {
   preview();
 }
 
-api("me").then((m) => { me = m; $("#me-name").textContent = m.username; route(); });
+api("me").then((m) => { me = m; $("#me-name").textContent = m.username; route(); liveUpdates(); });
+
+// New bug reports and rider reports appear without reloading. While you type (a reply,
+// a filter) the page is left alone and only the counters update.
+function liveUpdates() {
+  const events = new EventSource("/admin/api/events");
+  let timer;
+  const changed = (kind) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const page = location.hash.slice(1).split("/")[0] || "bugs";
+      const shown = kind === "community" ? page === "community" : page === "bugs" || page === "bug";
+      const typing = document.activeElement?.matches("input, textarea, select") ||
+        [...document.querySelectorAll("textarea")].some((t) => t.value.trim());
+      if (shown && !typing) {
+        const y = scrollY;
+        route().then(() => scrollTo(0, y));
+      } else {
+        refreshCounts();
+        if (kind === "bugs") toast("New bug report");
+      }
+    }, 1000);
+  };
+  events.addEventListener("bugs", () => changed("bugs"));
+  events.addEventListener("community", () => changed("community"));
+}
 </script>
 </body>
 </html>

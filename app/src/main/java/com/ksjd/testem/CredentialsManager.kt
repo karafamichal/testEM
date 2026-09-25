@@ -185,6 +185,12 @@ class CredentialsManager(context: Context) {
     fun getCommunityEnabled(): Boolean = getCommunityMode() != COMMUNITY_OFF
 
     /** Use the phone's location (on the phone only) to say whether the user will catch the bus. */
+    /** Opt-in: after an update, show what changed once (see WhatsNewDialog). */
+    fun getWhatsNewEnabled(): Boolean = prefs.getBoolean("whats_new_enabled", false)
+    fun saveWhatsNewEnabled(enabled: Boolean) = prefs.edit().putBoolean("whats_new_enabled", enabled).apply()
+    fun getWhatsNewSeenVersion(): Int = prefs.getInt("whats_new_seen", 0)
+    fun saveWhatsNewSeenVersion(versionCode: Int) = prefs.edit().putInt("whats_new_seen", versionCode).apply()
+
     fun getCatchEnabled(): Boolean = prefs.getBoolean("catch_enabled", false)
     fun saveCatchEnabled(enabled: Boolean) = prefs.edit().putBoolean("catch_enabled", enabled).apply()
 

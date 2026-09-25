@@ -1,4 +1,6 @@
 """Run: python3 test_hub.py (uses a throwaway database)."""
+import datetime
+import http.client
 import json
 import os
 import sqlite3
@@ -53,6 +55,13 @@ for day, delay in (("2026-09-22", 200), ("2026-09-23", 60), ("2026-09-23", 120),
 hist("sadzv|9|32|2026-09-24|2", 999)  # another trip
 h = hub.trip_history(hc, "sadzv|9|31|2026-09-25|2")
 assert h == {"delaySeconds": 200, "runs": 3, "lateRuns": 2, "dayType": "workday"}, h
+# a run with exact departure moments uses those, not the rough between-stop estimates
+hc.execute("INSERT INTO community_reports(created_at, trip_key, line, stop_index, stop_name, scheduled_ms, delay_s, reporter, kind) "
+           "VALUES (?,?,?,?,?,?,?,?,?)", (hub.now(), "sadzv|9|31|2026-09-21|2", "2", 0, "x", 0, 600, "r", "gps"))
+hc.execute("INSERT INTO community_reports(created_at, trip_key, line, stop_index, stop_name, scheduled_ms, delay_s, reporter, kind) "
+           "VALUES (?,?,?,?,?,?,?,?,?)", (hub.now(), "sadzv|9|31|2026-09-21|2", "2", 1, "x", 0, 30, "r", "departed"))
+h = hub.trip_history(hc, "sadzv|9|31|2026-09-25|2")
+assert h["runs"] == 4 and h["delaySeconds"] == 145, h  # 21st counts as 30 s, not 600
 
 # ---- templates escape user text, keep prepared HTML, fill every placeholder
 bug = {"id": 7, "title": "<script>x</script>", "description": "line1\n\n<b>line2</b>", "name": "Ann", "email": "a@b.sk",
@@ -239,6 +248,30 @@ send("position", "tap1", 4)
 assert send("position", "tap2", 4)["delay"]["source"] == "riders"
 pooled = send("gps", "phone1", 1)["delay"]
 assert pooled["source"] == "gps" and abs(pooled["delaySeconds"] - 60) <= 2 and pooled["reporters"] == 1, pooled
+
+# dashboard: trips of any day, narrowed by line; a bad day is refused
+def admin_get(path):
+    return json.loads(opener.open(urllib.request.Request(base + "/admin/api/" + path, headers={"Cookie": cookie})).read())
+today = datetime.datetime.now(hub.LOCAL_ZONE).date().isoformat()
+trips = admin_get(f"community/trips?day={today}&line=5")
+assert trips and all(t["line"] == "5" for t in trips) and "last_delay" in trips[0] and "max_delay" in trips[0], trips
+assert admin_get("community/trips?day=2020-01-01") == []
+try:
+    admin_get("community/trips?day=nope")
+    raise AssertionError("bad day accepted")
+except urllib.error.HTTPError as err:
+    assert err.status == 400
+
+# live dashboard: a new report reaches an open event stream
+stream = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=10)
+stream.request("GET", "/admin/api/events", headers={"Cookie": cookie})
+events = stream.getresponse()
+assert events.status == 200 and events.getheader("Content-Type") == "text/event-stream"
+assert events.fp.readline() == b"retry: 5000\n"
+events.fp.readline()
+send("gps", "phone2", 1)
+assert events.fp.readline() == b"event: community\n"
+stream.close()
 
 # keep-alive: a POST whose handler ignores the body must not corrupt the next request
 import http.client

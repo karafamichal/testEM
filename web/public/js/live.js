@@ -1,7 +1,7 @@
 // Departures, stop boards, trip sheet and "follow this bus" for the web client.
 import { t, lang } from './i18n.js';
 import { $, $$, esc, api, apiJson, store, config, clock, countdown, delayChip, delayInfo, plate, toast, openSheet, closeOverlay, log } from './core.js';
-import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, referenceAt, delayAt, RIDER_GPS_MAX_M } from './logic.js';
+import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, referenceAt, delayAt, nextCheckMs, stopPassDetector, RIDER_GPS_MAX_M } from './logic.js';
 
 /** Helping with bus positions: 'off' | 'buttons' | 'auto' (earlier versions had an on/off switch). */
 export const communityMode = () => store.get('communityMode', store.get('communityOn', false) ? 'buttons' : 'off');
@@ -48,10 +48,12 @@ export function renderDepartures(el, { guest } = {}) {
   el.innerHTML = `
     <header class="screen-head"><h1>${t('departures_title')}</h1>${guest ? `<button class="text-btn" data-signin>${t('sign_in')}</button>` : ''}</header>
     <div id="follow-slot-dep"></div>
+    <div id="journey-bar-dep">${journeyBarHtml()}</div>
     <div class="search"><input type="search" id="stop-q" placeholder="${esc(t('search_stop'))}" value="${esc(live.query)}" autocomplete="off" aria-label="${esc(t('search_stop'))}"></div>
     <div id="dep-results"></div>`;
   const q = $('#stop-q', el);
   q.oninput = () => { live.query = q.value; renderResults(); };
+  bindJourneyBar($('#journey-bar-dep', el));
   renderFollowSlot($('#follow-slot-dep', el));
   loadStops().then(renderResults);
 }
@@ -222,14 +224,28 @@ export function openTrip(ref, { boardingPlatformIds = [], alightOrder = null } =
   }).catch(() => { if (sheetTrip) Object.assign(sheetTrip, { loading: false, error: true }); renderTripSheet(); });
 }
 
+/** A planner bus as a trip: stops, times and the user's stops come from its cp.sk route page. */
+export const scheduledRef = (segment) => ({
+  line: lineNumber(segment.line), lineId: 0, routeNumber: '', tripNumber: 0,
+  destination: readableStop(segment.arrivalStop), scheduleUrl: segment.routeUrl, serviceDate: segment.serviceDate,
+});
+
 /** A bus from a planner result: stops and times from cp.sk. */
 export function openScheduledTrip(segment) {
   if (!segment.routeUrl) return;
-  openTrip({
-    line: lineNumber(segment.line), lineId: 0, routeNumber: '', tripNumber: 0,
-    destination: readableStop(segment.arrivalStop), scheduleUrl: segment.routeUrl, serviceDate: segment.serviceDate,
-  });
+  openTrip(scheduledRef(segment));
 }
+
+// Keep an open trip sheet fresh: riders' reports and the bus's position change all the time.
+setInterval(() => {
+  const s = sheetTrip;
+  if (!s || s.loading || s.error || document.hidden || sameRef(follow?.ref, s.ref)) return;
+  loadTrip(s.ref).then((detail) => {
+    if (sheetTrip !== s) return;
+    s.detail = detail;
+    renderTripSheet();
+  }).catch(() => {});
+}, 15000);
 
 /**
  * Trip with the best known position: a rider's phone on the bus, the bus's own GPS
@@ -291,7 +307,7 @@ function renderTripSheet(body = $('#sheet .sheet-body')) {
       const exp = p.expected[i];
       const shift = (stop.actualMs != null || detail.delaySeconds != null) && clock(exp) !== clock(stop.scheduledMs);
       return `<li class="${passed ? 'passed' : ''} ${next ? 'next' : ''} ${isAlight ? 'alight' : ''}">
-        <button ${following && !passed ? `data-alight="${stop.order}"` : 'disabled'}>
+        <button ${!passed ? `data-alight="${stop.order}"` : 'disabled'}>
           <span class="dot"></span><span class="stop-name">${esc(stop.name)}${isAlight ? `<small>${t('your_stop')}</small>` : ''}${stop.platform ? `<small class="stop-pf">${esc(t('platform', stop.platform))}</small>` : ''}</span>
           <span class="stop-time">${shift ? `<s>${clock(stop.scheduledMs)}</s>${clock(exp)}` : clock(stop.scheduledMs)}</span></button></li>`;
     }).join('')}</ol>`;
@@ -300,15 +316,21 @@ function renderTripSheet(body = $('#sheet .sheet-body')) {
     <div class="trip-head">${plate(s.ref.line, 'big')}<div><h3>${esc(detail?.destination || s.ref.destination)}</h3><div>${statusLine}</div></div></div>
     ${following
       ? `<p class="hint">${t('following_hint')}</p><button class="btn outline wide" data-unfollow>${t('unfollow')}</button>`
-      : `<button class="btn wide" data-follow ${detail?.stops?.length ? '' : 'disabled'}>${BUS_SVG}${t('follow')}</button>`}
+      : `<button class="btn wide" data-follow ${detail?.stops?.length ? '' : 'disabled'}>${BUS_SVG}${t('follow')}</button>
+         <button class="btn outline wide" data-add-journey ${detail?.stops?.length ? '' : 'disabled'}>${t('journey_add')}</button>
+         ${alight == null ? `<p class="hint small">${t('journey_pick_alight')}</p>` : ''}`}
+    <div data-journey-bar>${journeyBarHtml()}</div>
     ${timeline}`;
+  bindJourneyBar($('[data-journey-bar]', body));
   body.onclick = (e) => {
     if (e.target.closest('[data-follow]')) {
       startFollow({ ref: s.ref, boardingPlatformIds: s.boardingPlatformIds, alightOrder: s.alightOrder, detail: s.detail });
     }
     if (e.target.closest('[data-unfollow]')) stopFollow();
+    if (e.target.closest('[data-add-journey]')) addToDraft({ ref: s.ref, boardingPlatformIds: s.boardingPlatformIds, alightOrder: s.alightOrder });
     const a = e.target.closest('[data-alight]');
-    if (a) setAlight(Number(a.dataset.alight));
+    if (a && following) setAlight(Number(a.dataset.alight));
+    else if (a) s.alightOrder = s.alightOrder === Number(a.dataset.alight) ? null : Number(a.dataset.alight);
     renderTripSheet(body);
   };
   const next = $('.timeline li.next', body);
@@ -319,10 +341,9 @@ const ridersText = (n) => (n === 1 ? t('community_rider') : t('community_riders'
 
 // ------------------------------------------------------------------ follow a bus
 
-let follow = store.get('follow', null); // { ref, boardingPlatformIds, alightOrder, reporter, localDelay, pushId, startedAt }
+let follow = store.get('follow', null); // { ref, boardingPlatformIds, alightOrder, nextLegs, reporter, localDelay, pushId, startedAt }
 let followTimer = null;
 let fix = null; // latest position (stays on the phone)
-let geoWatch = null;
 let stopCoords = null;
 
 /** Buttons for riders who chose them, on any bus whose position nobody knows live. */
@@ -335,10 +356,44 @@ function saveFollow() {
   store.set('follow', persist);
 }
 
-export function startFollow({ ref, boardingPlatformIds, alightOrder, detail }) {
+// ---- journeys: several buses followed one after another (planner connections or built by hand)
+
+let draft = store.get('journeyDraft', []); // [{ ref, boardingPlatformIds, alightOrder }]
+function setDraft(list) { draft = list; store.set('journeyDraft', list); renderJourneyBars(); }
+function addToDraft(leg) { setDraft([...draft.filter((x) => !sameRef(x.ref, leg.ref)), leg]); }
+
+/** Follows [legs] as one journey: each bus until the user's stop, then the next one. */
+export function startJourney(legs) {
+  if (!legs.length) return;
+  const [first, ...rest] = legs;
+  startFollow({ ...first, nextLegs: rest });
+}
+
+function journeyBarHtml() {
+  if (!draft.length) return '';
+  return `<div class="journey-bar"><span>${esc(t('journey_draft', draft.map((l) => l.ref.line).join(' → ')))}</span>
+    <button class="text-btn" data-journey-clear>${t('journey_clear')}</button><button class="btn" data-journey-start>${t('journey_start')}</button></div>`;
+}
+function bindJourneyBar(el) {
+  if (!el) return;
+  el.onclick = (e) => {
+    if (e.target.closest('[data-journey-clear]')) setDraft([]);
+    if (e.target.closest('[data-journey-start]')) { startJourney(draft); setDraft([]); }
+  };
+}
+function renderJourneyBars() {
+  document.querySelectorAll('#journey-bar-dep, [data-journey-bar]').forEach((el) => { el.innerHTML = journeyBarHtml(); bindJourneyBar(el); });
+}
+
+export function startFollow({ ref, boardingPlatformIds, alightOrder, detail, nextLegs = [] }) {
   if (follow?.pushId) api('/api/unfollow', { id: follow.pushId });
+  stopPass = stopPassDetector();
+  lastArrivalStop = -1;
+  nextFixAt = 0;
+  lastRiderReportAt = 0;
+  lastRiderIndex = -1;
   follow = {
-    ref, boardingPlatformIds, alightOrder, detail,
+    ref, boardingPlatformIds, alightOrder, detail, nextLegs,
     // New random id per bus, so reports can't be linked across trips. (randomUUID is missing on older iOS.)
     reporter: [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join(''),
     localDelay: null, pushId: null, startedAt: Date.now(), note: '',
@@ -382,17 +437,31 @@ async function followTick() {
   try {
     const detail = await loadTrip(follow.ref, { withCoordinates: communityMode() === 'auto' });
     if (follow && detail.stops.length) follow.detail = detail;
+    // Journey legs from the planner learn where the user gets on and off from cp.sk's route page.
+    if (follow && !follow.boardingPlatformIds?.length && detail.boardingOrder) {
+      follow.boardingPlatformIds = [detail.boardingOrder];
+      follow.alightOrder ??= detail.alightOrder ?? null;
+      saveFollow();
+    }
   } catch (err) { log('W', 'follow', err.message); }
   if (!follow) return;
   const d = effectiveDetail(follow);
   if (d?.stops.length) {
     const p = tripProgress(d, follow);
     if (p.finished) {
+      const [next, ...rest] = follow.nextLegs || [];
+      if (next) {
+        // Changed buses: follow the next one (and move the push alerts over to it).
+        const push = !!follow.pushId;
+        toast(t('journey_change', next.ref.line, p.lastStopName));
+        startFollow({ ...next, nextLegs: rest });
+        if (push) subscribePush(true);
+        return;
+      }
       toast(t('follow_arrived', p.lastStopName));
       return stopFollow();
     }
-    updateGeo(p);
-    updateRiderGps();
+    updateLocation(p);
   }
   renderAllFollowSlots();
   if (sheetTrip && sameRef(sheetTrip.ref, follow.ref)) renderTripSheet();
@@ -405,13 +474,31 @@ setInterval(() => { if (follow && !document.hidden) renderAllFollowSlots(); }, 5
 
 // ---- catch estimate: location only while waiting, only while visible, never sent.
 
-function updateGeo(p) {
-  if (!catchOn() || p.onBoard || !('geolocation' in navigator)) return stopGeo();
-  if (geoWatch == null) {
-    geoWatch = navigator.geolocation.watchPosition((pos) => { fix = pos.coords; renderAllFollowSlots(); },
-      (err) => { if (err.code === 1) fix = { denied: true }; renderAllFollowSlots(); },
-      { enableHighAccuracy: true, maximumAge: 30000, timeout: 20000 });
-  }
+/**
+ * Walking to the stop: look at the location only now and then, sooner the closer the user
+ * is (nextCheckMs). At the stop (or on board, automatic mode) live GPS takes over.
+ */
+const NEAR_STOP_M = 150;
+let nextFixAt = 0;
+function updateLocation(p) {
+  const auto = communityMode() === 'auto' && config.hub && follow?.detail?.communityKey;
+  if ((!auto && !catchOn()) || !('geolocation' in navigator)) return stopGeo();
+  if (!p.onBoard) findStopCoords(p);
+  const toStop = () => (fix?.latitude != null && stopCoords?.lat != null ? distanceMeters(fix.latitude, fix.longitude, stopCoords.lat, stopCoords.lon) : null);
+  const atStop = p.onBoard || stopCoords?.none || (toStop() ?? Infinity) <= NEAR_STOP_M;
+  if (auto && atStop) return startRiderWatch();
+  if (riderWatch != null) { navigator.geolocation.clearWatch(riderWatch); riderWatch = null; }
+  if (p.onBoard || Date.now() < nextFixAt) return;
+  nextFixAt = Date.now() + 30000; // until this check answers
+  navigator.geolocation.getCurrentPosition((pos) => {
+    fix = pos.coords;
+    const m = toStop();
+    nextFixAt = Date.now() + (m == null ? 30000 : nextCheckMs(m));
+    renderAllFollowSlots();
+  }, (err) => { if (err.code === 1) fix = { denied: true }; renderAllFollowSlots(); },
+  { enableHighAccuracy: true, maximumAge: 20000, timeout: 20000 });
+}
+function findStopCoords(p) {
   if (!stopCoords) {
     stopCoords = { pending: true };
     const name = p.boardingStopName;
@@ -425,8 +512,6 @@ function updateGeo(p) {
   }
 }
 function stopGeo() {
-  if (geoWatch != null) navigator.geolocation.clearWatch(geoWatch);
-  geoWatch = null;
   if (riderWatch != null) navigator.geolocation.clearWatch(riderWatch);
   riderWatch = null;
 }
@@ -434,15 +519,10 @@ function stopGeo() {
 // ---- automatic mode: the rider's phone on the bus marks where it is (only the stop is sent).
 // A web app can use location only while it is open.
 
-let riderWatch = null, lastRiderIndex = -1, lastRiderReportAt = 0;
+let riderWatch = null, lastRiderIndex = -1, lastRiderReportAt = 0, stopPass = stopPassDetector(), lastArrivalStop = -1;
+const STOP_RADIUS_M = 40; // a bus standing this close to a stop is stopped there
 
-function updateRiderGps() {
-  const wanted = communityMode() === 'auto' && config.hub && follow?.detail?.communityKey && 'geolocation' in navigator;
-  if (!wanted) {
-    if (riderWatch != null) navigator.geolocation.clearWatch(riderWatch);
-    riderWatch = null;
-    return;
-  }
+function startRiderWatch() {
   if (riderWatch == null) {
     riderWatch = navigator.geolocation.watchPosition(onRiderFix, () => {}, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
   }
@@ -450,6 +530,7 @@ function updateRiderGps() {
 
 /** It says where the bus is only once the rider is on it: on the route, past their stop, moving. */
 function onRiderFix(pos) {
+  fix = pos.coords;
   const d = follow?.detail;
   if (!d?.stops?.length || d.stops.every((s) => s.lat == null)) return; // coordinates not loaded yet
   if (pos.coords.accuracy > 50) return;
@@ -457,17 +538,39 @@ function onRiderFix(pos) {
   const hit = snapToRoute(pos.coords.latitude, pos.coords.longitude, d.stops.map((s) => (s.lat != null ? [s.lat, s.lon] : null)), RIDER_GPS_MAX_M, p.position);
   if (!hit) return;
   const moving = (pos.coords.speed ?? 0) >= 3 || (lastRiderIndex >= 0 && hit.index > lastRiderIndex + 0.05);
-  const previous = lastRiderIndex;
   lastRiderIndex = Math.max(lastRiderIndex, hit.index);
-  if (hit.index < (p.boardingIndex ?? 0) + 0.05 || !moving) return;
+  const boarding = p.boardingIndex ?? 0;
+  const now = Date.now();
   const scheduled = d.stops.map((s) => s.scheduledMs);
-  follow.localDelay = { seconds: delayAt(hit.index, scheduled), at: Date.now(), fromGps: true };
+  const send = (stopIndex, scheduledMs, kind = 'gps') => {
+    lastRiderReportAt = now;
+    api('/api/hub/report', { tripKey: d.communityKey, line: follow.ref.line, stopIndex, stopName: d.stops[stopIndex].name,
+      scheduledMs, reporter: follow.reporter, kind });
+  };
+  // Standing within a few tens of metres of a stop: the bus is stopped there.
+  const nearest = Math.min(Math.max(Math.round(hit.index), 0), d.stops.length - 1);
+  const ns = d.stops[nearest];
+  const atStop = ns.lat != null && distanceMeters(pos.coords.latitude, pos.coords.longitude, ns.lat, ns.lon) <= STOP_RADIUS_M;
+  // Left (after standing there) or drove past a stop: the exact delay there (timetable times are departures).
+  const left = stopPass(hit.index, moving, now, atStop);
+  if (left && left[0] >= boarding && left[0] < d.stops.length) {
+    const [stop, at, stopped] = left;
+    follow.localDelay = { seconds: Math.round((at - scheduled[stop]) / 1000), at: now, fromGps: true };
+    renderAllFollowSlots();
+    // The hub takes "now" from its own clock, so shift the stop time by how long ago it left.
+    return send(stop, scheduled[stop] + (now - at), stopped ? 'departed' : 'passed');
+  }
+  // Stopped at a stop after the boarding one (so the rider is on the bus): it arrived there.
+  // The hub counts an early arrival as on time: the bus waits for its departure.
+  if (!moving && atStop && nearest > boarding && nearest > lastArrivalStop) {
+    lastArrivalStop = nearest;
+    return send(nearest, scheduled[nearest], 'arrival');
+  }
+  if (hit.index < boarding + 0.05 || !moving) return;
+  follow.localDelay = { seconds: delayAt(hit.index, scheduled, now), at: now, fromGps: true };
   renderAllFollowSlots();
-  if (Date.now() - lastRiderReportAt < 15000 && Math.floor(hit.index) === Math.floor(previous)) return;
-  lastRiderReportAt = Date.now();
-  const stopIndex = Math.min(Math.floor(hit.index), d.stops.length - 1);
-  api('/api/hub/report', { tripKey: d.communityKey, line: follow.ref.line, stopIndex, stopName: d.stops[stopIndex].name,
-    scheduledMs: referenceAt(hit.index, scheduled), reporter: follow.reporter, kind: 'gps' });
+  if (now - lastRiderReportAt < 15000) return; // between stops: every 15 s
+  send(Math.min(Math.floor(hit.index), d.stops.length - 1), referenceAt(hit.index, scheduled, now));
 }
 
 function catchLine(d, p) {
@@ -564,9 +667,12 @@ function followCardHtml() {
   const title = p.onBoard
     ? t('follow_next', p.nextStopName || d.destination, clock(p.nextExpectedMs))
     : t('follow_waiting', clock(p.boardingExpectedMs), p.boardingStopName);
-  const sub = p.onBoard
-    ? [p.currentStopName && t('follow_now_at', p.currentStopName), p.alightStopName && t('follow_get_off', p.alightStopName)].filter(Boolean).join(' · ')
-    : '';
+  const then = f.nextLegs?.[0] ? t('journey_then', f.nextLegs[0].ref.line, f.nextLegs[0].ref.destination) : '';
+  const sub = [
+    p.onBoard && p.currentStopName && t('follow_now_at', p.currentStopName),
+    p.onBoard && p.alightStopName && t('follow_get_off', p.alightStopName),
+    then,
+  ].filter(Boolean).join(' · ');
   const big = countdown(p.onBoard ? p.secondsToNext : p.secondsToBoarding);
   // Whole name ("Detva, aut.st."), shortened only when it would not fit on the button.
   const short = (n) => (n.length > 18 ? n.slice(0, 17).replace(/[, ]+$/, '') + '…' : n);

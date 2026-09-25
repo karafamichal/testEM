@@ -1,5 +1,9 @@
 package com.ksjd.testem.ui.screens
 
+import android.content.Intent
+import android.net.Uri
+import com.ksjd.testem.CredentialsManager
+
 import android.Manifest
 import android.graphics.BitmapFactory
 import android.os.Build
@@ -192,6 +196,17 @@ private fun AccountOverview(viewModel: AppViewModel, onOpen: (SettingsPage) -> U
         }
         Spacer(Modifier.height(16.dp))
         ListGroup {
+            val context = LocalContext.current
+            val prefs = remember { CredentialsManager(context) }
+            var whatsNew by remember { mutableStateOf(prefs.getWhatsNewEnabled()) }
+            val setWhatsNew: (Boolean) -> Unit = { on -> whatsNew = on; prefs.saveWhatsNewEnabled(on) }
+            ListRow(
+                stringResource(R.string.whats_new_switch),
+                subtitle = stringResource(R.string.whats_new_switch_hint),
+                onClick = { setWhatsNew(!whatsNew) },
+                trailing = { Switch(whatsNew, setWhatsNew) }
+            )
+            GroupDivider()
             SettingsLink(stringResource(R.string.bug_title), stringResource(R.string.bug_hint)) { onOpen(SettingsPage.BugReport) }
             GroupDivider()
             SettingsLink(stringResource(R.string.support_title), stringResource(R.string.support_hint)) { showSupport = true }
@@ -206,6 +221,30 @@ private fun AccountOverview(viewModel: AppViewModel, onOpen: (SettingsPage) -> U
         }
     }
 }
+
+/** Opt-in: what changed in this version, once after an update, with a link to the full changelog. */
+@Composable
+fun WhatsNewDialog() {
+    val context = LocalContext.current
+    val prefs = remember { CredentialsManager(context) }
+    var show by remember { mutableStateOf(prefs.getWhatsNewEnabled() && prefs.getWhatsNewSeenVersion() < BuildConfig.VERSION_CODE) }
+    if (!show) return
+    val close = { prefs.saveWhatsNewSeenVersion(BuildConfig.VERSION_CODE); show = false }
+    AlertDialog(
+        onDismissRequest = close,
+        title = { Text(stringResource(R.string.whats_new_title, BuildConfig.VERSION_NAME)) },
+        text = { Text(stringResource(R.string.whats_new_body), Modifier.verticalScroll(rememberScrollState())) },
+        confirmButton = { TextButton(onClick = close) { Text(stringResource(R.string.whats_new_ok)) } },
+        dismissButton = {
+            TextButton(onClick = {
+                close()
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(CHANGELOG_URL))) }
+            }) { Text(stringResource(R.string.whats_new_changelog)) }
+        }
+    )
+}
+
+private const val CHANGELOG_URL = "https://github.com/karafamichal/testEM/releases/latest"
 
 /** A short note, then the support page in the browser. */
 @Composable

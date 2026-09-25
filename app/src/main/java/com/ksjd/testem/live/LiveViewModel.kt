@@ -272,6 +272,15 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
             }
+            // Keep the open sheet fresh: riders' reports and the bus's position change all the time.
+            while (isActive) {
+                delay(TRIP_REFRESH_MS)
+                val detail = runCatching { repo.getTrip(sheet.ref) }.getOrNull() ?: continue
+                _state.update { state ->
+                    val open = state.trip?.takeIf { it.ref == sheet.ref && it.detail != null } ?: return@update state
+                    state.copy(trip = open.copy(detail = detail))
+                }
+            }
         }
     }
 
@@ -282,5 +291,6 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val BOARD_REFRESH_MS = 15_000L
+        private const val TRIP_REFRESH_MS = 15_000L
     }
 }

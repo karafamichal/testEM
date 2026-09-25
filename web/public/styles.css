@@ -212,6 +212,8 @@ input[type="color"] { width: 32px; height: 32px; border: 0; background: none; pa
 .track-bus { position: absolute; top: 0; width: 34px; height: 34px; margin-left: -17px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; transition: left 1s linear; box-shadow: 0 0 0 3px var(--surface); }
 .track-bus svg { width: 20px; height: 20px; }
 .follow-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.journey-bar { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; margin: 8px 0; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+.journey-bar > span { flex: 1; min-width: 0; font-weight: 600; }
 .chip { border: 1.5px solid var(--line); background: var(--surface); border-radius: 999px; padding: 8px 14px; font-weight: 600; font-size: 14px; color: var(--text); display: inline-flex; align-items: center; gap: 6px; }
 .follow-actions .chip { border-color: var(--accent-text); color: var(--accent-text); }
 .follow-foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
@@ -278,6 +280,7 @@ input[type="color"] { width: 32px; height: 32px; border: 0; background: none; pa
 .chip:has(input:checked) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .connections { list-style: none; margin: 14px 16px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .connection { background: var(--surface); border-radius: 14px; padding: 12px 14px; }
+.connection > .btn { margin-top: 10px; }
 .conn-head { display: flex; align-items: center; gap: 10px; }
 .conn-times { font: 700 22px/1 var(--display); flex: 1; }
 .segs { list-style: none; margin: 8px 0 0; padding: 0; }

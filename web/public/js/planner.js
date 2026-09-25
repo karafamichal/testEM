@@ -2,19 +2,24 @@
 import { t } from './i18n.js';
 import { $, esc, apiJson, store, plate, toast } from './core.js';
 import { readableStop, lineNumber } from './logic.js';
-import { openScheduledTrip } from './live.js';
+import { openScheduledTrip, scheduledRef, startJourney } from './live.js';
 
-const CITIES = [['slovensko', () => t('city_slovakia')], ['banskabystrica', () => 'B. Bystrica'], ['zvolen', () => 'Zvolen']];
+// "All of Slovakia" is cp.sk's combined timetable (trains, intercity and city buses), so
+// connections that change from a city bus to an intercity one are found.
+const ALL = 'vlakbusmhd';
+const CITIES = [[ALL, () => t('city_slovakia')], ['banskabystrica', () => 'B. Bystrica'], ['zvolen', () => 'Zvolen']];
+// Before 2.6 "Slovakia" was the intercity-only timetable; its stop ids differ, so saved stops are looked up again.
+const upgrade = (r) => (r.city === 'slovensko' ? { ...r, city: ALL, fromSug: null, toSug: null } : r);
 const SWAP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>';
 
 const p = {
-  city: store.get('plannerCity', 'slovensko'), from: '', to: '', fromSug: null, toSug: null, time: '', direct: false,
+  city: upgrade({ city: store.get('plannerCity', ALL) }).city, from: '', to: '', fromSug: null, toSug: null, time: '', direct: false,
   results: [], cursor: null, loading: false, loadingMore: false, error: '', searched: false,
 };
 let root = null;
 let onOpenStop = () => {};
 
-const routes = (key) => store.get(key, []);
+const routes = (key) => store.get(key, []).map(upgrade);
 const sameRoute = (a, b) => a.from.toLowerCase() === b.from.toLowerCase() && a.to.toLowerCase() === b.to.toLowerCase();
 
 export function renderPlanner(el, { openStop, guest } = {}) {
@@ -76,7 +81,8 @@ function connectionHtml(c, ci) {
   return `<li class="connection">
     <div class="conn-head"><span class="conn-times">${esc(c.departureTime)} – ${esc(c.arrivalTime)}</span><span class="hint">${esc(c.totalDuration)}</span>
       <button class="icon-btn" data-share="${ci}" aria-label="${esc(t('share'))}">⤴</button></div>
-    <ol class="segs">${segs}</ol></li>`;
+    <ol class="segs">${segs}</ol>
+    ${c.segments.filter((s) => s.routeUrl).length > 1 ? `<button class="btn wide" data-journey="${ci}">${t('journey_follow')}</button>` : ''}</li>`;
 }
 
 const shareText = (c) => `${c.departureTime} – ${c.arrivalTime} (${c.totalDuration})\n` +
@@ -139,6 +145,14 @@ function bind(el) {
       if (navigator.share) navigator.share({ text }).catch(() => {});
       else navigator.clipboard?.writeText(text).then(() => toast(t('copied')));
       return;
+    }
+    const journey = e.target.closest('[data-journey]');
+    if (journey) {
+      // Every bus of the connection, one after another: get-off alert, then the next bus.
+      const legs = p.results[Number(journey.dataset.journey)].segments.filter((s) => s.routeUrl)
+        .map((s) => ({ ref: scheduledRef(s), boardingPlatformIds: [], alightOrder: null }));
+      startJourney(legs);
+      return toast(t('journey_started'));
     }
     const trip = e.target.closest('[data-trip]');
     if (trip) {

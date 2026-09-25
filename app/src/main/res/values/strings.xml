@@ -392,4 +392,11 @@
     <string name="journey_change_title">Change to bus %1$s</string>
     <string name="journey_change_body">Get off at %1$s. Now following your next bus.</string>
     <string name="journey_alight_change">Get off at %1$s and change to bus %2$s</string>
+    <string name="whats_new_switch">What’s new after updates</string>
+    <string name="whats_new_switch_hint">A short summary once after each update, with a link to the full changelog</string>
+    <string name="whats_new_title">What’s new in %1$s</string>
+    <string name="whats_new_changelog">Full changelog</string>
+    <string name="whats_new_ok">OK</string>
+    <!-- Update for every release (shown once after updating, when the user opted in). -->
+    <string name="whats_new_body">• Automatic updates now really share where your bus is, including the exact moment it leaves or passes each stop.\n• The planner finds connections with changes between city and intercity buses, and shows which town each stop is in.\n• Follow a whole journey with changes: the app tells you where to get off and then follows your next bus.\n• No connection found? Build your own journey bus by bus.\n• Delays in the trip view refresh by themselves.\n• While you walk to the stop, your location is checked only now and then, which saves battery.</string>
 </resources>

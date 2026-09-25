@@ -131,6 +131,45 @@ export function tripProgress(detail, trip, now = Date.now()) {
 export const WALK_METERS_PER_SECOND = 1.3;
 export const DETOUR_FACTOR = 1.3;
 
+/**
+ * Walking to the stop: when to look at the location again (GPS off in between).
+ * 10 min away -> in 7.5 min; never sooner than 30 s or later than 10 min.
+ */
+export const RECHECK_SHARE = 0.75;
+export function nextCheckMs(distance) {
+  const walkMs = ((distance * DETOUR_FACTOR) / WALK_METERS_PER_SECOND) * 1000;
+  return Math.min(10 * 60000, Math.max(30000, Math.trunc(walkMs * RECHECK_SHARE)));
+}
+
+/**
+ * When the bus left or drove past each stop, from the rider's fixes. Timetable times are
+ * departures, so that moment is what the delay is measured at:
+ * - crossing a stop while moving: passed it or left it; interpolated between the two fixes;
+ * - stopped just past it: it leaves when it moves again (between the last two fixes).
+ * Returns onFix(index, moving, atMs, atStop) -> [stop, leftAtMs, stoppedThere] | null
+ * (atStop: the fix is within a few tens of metres of a stop).
+ */
+export function stopPassDetector() {
+  let lastIndex = -1, lastAt = 0, waitingAt = -1, stoppedBefore = false;
+  return (index, moving, atMs, atStop = false) => {
+    let passed = null;
+    if (lastIndex >= 0) {
+      const stop = Math.floor(index);
+      if (stop > Math.floor(lastIndex) && index > lastIndex) {
+        const at = lastAt + Math.round(((stop - lastIndex) / (index - lastIndex)) * (atMs - lastAt));
+        if (moving) { passed = [stop, at, stoppedBefore]; waitingAt = -1; } else waitingAt = stop;
+      } else if (waitingAt >= 0 && moving) {
+        passed = [waitingAt, Math.round((lastAt + atMs) / 2), true];
+        waitingAt = -1;
+      }
+    }
+    stoppedBefore = !moving && atStop;
+    if (index >= lastIndex) lastIndex = index; // GPS jitter backwards keeps the furthest point
+    lastAt = atMs;
+    return passed;
+  };
+}
+
 export function catchEstimate(distance, secondsToBoarding) {
   const walkSeconds = Math.trunc((distance * DETOUR_FACTOR) / WALK_METERS_PER_SECOND);
   const marginSeconds = secondsToBoarding - walkSeconds;
