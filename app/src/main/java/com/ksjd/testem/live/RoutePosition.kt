@@ -13,6 +13,8 @@ object RoutePosition {
     const val RIDER_GPS_MAX_M = 80.0
     /** Positions older than this are ignored (sadzv sometimes keeps positions for months). */
     const val FRESH_MS = 2 * 60_000L
+    /** Share of a stop-to-stop hop a point may be off its straight line (see [snap]). */
+    const val HOP_SLACK = 0.1
 
     /**
      * Fractional stop index (2.4 = 40 % of the way from stop 2 to stop 3) and the distance
@@ -41,7 +43,9 @@ object RoutePosition {
             val px = ax + t * dx
             val py = ay + t * dy
             val d = sqrt(px * px + py * py)
-            if (d > maxMeters) continue
+            // Stops are joined by straight lines, but roads bend: between intercity stops km apart
+            // the road can run hundreds of metres off that line. Allow 10 % of the hop.
+            if (d > maxOf(maxMeters, sqrt(len2) * HOP_SLACK)) continue
             val index = (i + t).toFloat()
             // Being two or more stops away from where the bus should be costs like 150 m per stop.
             val cost = d + (expectedIndex?.let { (abs(index - it) - 2f).coerceAtLeast(0f) * 150.0 } ?: 0.0)

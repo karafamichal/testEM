@@ -36,6 +36,7 @@ assert.equal(snapToRoute(48.5825, 19.1272, route, RIDER_GPS_MAX_M), null, 'rider
 const loop = [[48.570, 19.125], [48.580, 19.125], [48.590, 19.125], [48.580, 19.125], [48.570, 19.125]];
 assert.ok(Math.abs(snapToRoute(48.575, 19.125, loop, 300, 0.4).index - 0.5) < 0.05);
 assert.ok(Math.abs(snapToRoute(48.575, 19.125, loop, 300, 3.6).index - 3.5) < 0.05);
+assert.ok(Math.abs(snapToRoute(48.65, 19.1268, [[48.70, 19.12], [48.60, 19.12]], RIDER_GPS_MAX_M).index - 0.5) < 0.05); // 500 m off an 11 km hop: a bending road
 const sched = [0, 3, 6, 9].map((m) => T0 + m * 60000);
 assert.equal(delayAt(1.5, sched, T0 + 6 * 60000), 90);
 assert.equal(delayAt(2, sched, T0 + 5 * 60000), 0); // waiting at a stop before its departure: on time

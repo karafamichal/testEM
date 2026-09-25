@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -195,12 +196,19 @@ class TripTrackerService : Service() {
     private fun updateRiderTracking(current: TrackedTrip, detail: TripDetail) {
         val wanted = prefs.getCommunityMode() == COMMUNITY_AUTO && HubClient.isConfigured &&
             detail.communityKey != null && Locations.hasPrecise(this)
-        if (!wanted) return stopRiderTracking()
+        if (!wanted) {
+            if (riderListener != null || prefs.getCommunityMode() == COMMUNITY_AUTO) {
+                Log.i(GPS_TAG, "off: hub=${HubClient.isConfigured} key=${detail.communityKey != null} precise=${Locations.hasPrecise(this)}")
+            }
+            return stopRiderTracking()
+        }
         if (routeCoords == null && !routeCoordsLoading) {
             routeCoordsLoading = true
             scope.launch {
-                routeCoords = runCatching { repo.withCoordinates(current.ref, detail) }.getOrNull()
+                routeCoords = runCatching { repo.withCoordinates(current.ref, detail) }
+                    .onFailure { Log.w(GPS_TAG, "stop coordinates failed", it) }.getOrNull()
                     ?.stops?.map { s -> s.lat?.let { it to s.lon!! } }
+                Log.i(GPS_TAG, "stop coordinates: ${routeCoords?.count { it != null }} of ${detail.stops.size}")
                 routeCoordsLoading = false
             }
         }
@@ -211,7 +219,8 @@ class TripTrackerService : Service() {
             @Suppress("MissingPermission")
             manager.requestLocationUpdates(android.location.LocationManager.GPS_PROVIDER, 5_000L, 10f, listener, android.os.Looper.getMainLooper())
             riderListener = listener
-        }
+            Log.i(GPS_TAG, "listening")
+        }.onFailure { Log.w(GPS_TAG, "location updates refused", it) }
     }
 
     private fun stopRiderTracking() {
@@ -227,15 +236,17 @@ class TripTrackerService : Service() {
     private fun onRiderFix(fix: android.location.Location) {
         val current = trip ?: return
         val detail = lastDetail ?: return
-        val coords = routeCoords ?: return
+        val coords = routeCoords ?: return Log.i(GPS_TAG, "fix: no stop coordinates yet").let { }
         val key = detail.communityKey ?: return
-        if (!fix.hasAccuracy() || fix.accuracy > 50f) return
+        if (!fix.hasAccuracy() || fix.accuracy > 50f) return Log.i(GPS_TAG, "fix: accuracy ${fix.accuracy} m").let { }
         val p = TripProgress.from(withLocalDelay(detail), current)
-        val (index, _) = RoutePosition.snap(fix.latitude, fix.longitude, coords, RoutePosition.RIDER_GPS_MAX_M, p.position) ?: return
+        val (index, meters) = RoutePosition.snap(fix.latitude, fix.longitude, coords, RoutePosition.RIDER_GPS_MAX_M, p.position)
+            ?: return Log.i(GPS_TAG, "fix: off the route").let { }
         val boarding = (p.boardingIndex ?: 0).toFloat()
         val moving = (fix.hasSpeed() && fix.speed >= 3f) || (lastRiderIndex >= 0f && index > lastRiderIndex + 0.05f)
         val previous = lastRiderIndex
         lastRiderIndex = maxOf(lastRiderIndex, index)
+        Log.i(GPS_TAG, "fix: at %.2f (%.0f m off), boarding %.0f, speed %.1f".format(index, meters, boarding, fix.speed))
         if (index < boarding + 0.05f || !moving) return
         val now = System.currentTimeMillis()
         val scheduled = detail.stops.map { it.scheduledMs }
@@ -250,7 +261,7 @@ class TripTrackerService : Service() {
             runCatching {
                 HubClient.reportPosition(key, current.ref.line, stopIndex, detail.stops[stopIndex].name,
                     RoutePosition.referenceAt(index, scheduled, now), reporterId, kind = "gps")
-            }.getOrNull()?.let { pooled -> lastDetail = lastDetail?.copy(community = pooled) }
+            }.onFailure { Log.w(GPS_TAG, "report failed", it) }.getOrNull()?.let { pooled -> lastDetail = lastDetail?.copy(community = pooled) }
         }
     }
 
@@ -611,6 +622,7 @@ class TripTrackerService : Service() {
         private const val REFRESH_MS = 15_000L
         private const val MAX_TRACKING_MS = 3L * 60 * 60 * 1000
         private const val STEPS_PER_HOP = 100
+        private const val GPS_TAG = "RiderGps"
 
         fun intent(context: Context, trip: TrackedTrip): Intent =
             Intent(context, TripTrackerService::class.java)

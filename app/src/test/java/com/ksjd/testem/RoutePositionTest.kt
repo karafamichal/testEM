@@ -45,6 +45,15 @@ class RoutePositionTest {
     }
 
     @Test
+    fun longHopAllowsBendingRoad() {
+        // 11 km between two intercity stops; the road runs 500 m beside the straight line.
+        val hop = listOf(48.70 to 19.12, 48.60 to 19.12)
+        assertEquals(0.5f, RoutePosition.snap(48.65, 19.1268, hop, RoutePosition.RIDER_GPS_MAX_M)!!.first, 0.05f)
+        // A short town hop (1 km) keeps the tight limit.
+        assertEquals(null, RoutePosition.snap(48.655, 19.1268, listOf(48.65 to 19.12, 48.66 to 19.12), RoutePosition.RIDER_GPS_MAX_M))
+    }
+
+    @Test
     fun delayFromPosition() {
         // Halfway between stop 1 (t0+3 min) and 2 (t0+6 min) = t0+4:30; seen at t0+6 min -> 90 s late.
         assertEquals(90, RoutePosition.delayAt(1.5f, sched, t0 + 6 * 60_000L))
