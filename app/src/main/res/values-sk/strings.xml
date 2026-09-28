@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">testEM</string>
+    <string name="app_name">Plan&amp;Ride</string>
 
     <!-- Všeobecné -->
     <string name="back">Späť</string>
@@ -10,18 +10,15 @@
     <string name="update_button">Zmeniť</string>
 
     <!-- Karty -->
-    <string name="tab_ticket">Lístok</string>
     <string name="tab_departures">Odchody</string>
     <string name="tab_planner">Trasa</string>
     <string name="tab_history">História</string>
     <string name="tab_account">Účet</string>
 
     <!-- Prihlásenie a zámok -->
-    <string name="auth_browse_public">Pozrieť odchody a cestovné poriadky bez prihlásenia</string>
-    <string name="auth_sign_in">Prihlásiť sa</string>
     <string name="login_title">Prihlásenie</string>
     <string name="login_subtitle">Použite e-mail a heslo k svojmu účtu na sadzv.qrbus.me.</string>
-    <string name="login_unofficial_note">testEM je neoficiálna aplikácia a nie je spojená s dopravcom.</string>
+    <string name="login_unofficial_note">Plan&amp;Ride je neoficiálna aplikácia a nie je spojená s dopravcom.</string>
     <string name="email_label">E-mail alebo meno</string>
     <string name="password_label">Heslo</string>
     <string name="password_show">Zobraziť heslo</string>
@@ -40,7 +37,7 @@
     <string name="pin_save_button">Uložiť PIN</string>
     <string name="unlock_title">Odomknúť</string>
     <string name="unlock_subtitle">Zadajte PIN alebo použite odtlačok prsta či tvár.</string>
-    <string name="unlock_prompt_title">Odomknúť testEM</string>
+    <string name="unlock_prompt_title">Odomknúť Plan&amp;Ride</string>
     <string name="unlock_prompt_subtitle">Potvrďte, že ste to vy</string>
     <string name="unlock_prompt_use_pin">Použiť PIN</string>
     <string name="pin_label">PIN</string>
@@ -194,10 +191,6 @@
         <item quantity="many">zostáva %d dňa</item>
         <item quantity="other">zostáva %d dní</item>
     </plurals>
-    <string name="logout">Odhlásiť sa</string>
-    <string name="logout_title">Odhlásiť sa?</string>
-    <string name="logout_message">Uložený e-mail a heslo sa z tohto telefónu odstránia.</string>
-    <string name="logout_confirm">Odhlásiť sa</string>
 
     <!-- Nastavenia -->
     <string name="settings_title">Nastavenia</string>
@@ -213,12 +206,12 @@
     <string name="settings_developer">Pre vývojárov</string>
     <string name="settings_developer_hint">Stav pripojenia a surový token</string>
 
-    <string name="reminders_intro">testEM približne dvakrát denne skontroluje váš účet a upozorní vás, keď treba niečo urobiť.</string>
+    <string name="reminders_intro">Plan&amp;Ride približne dvakrát denne skontroluje váš účet a upozorní vás, keď treba niečo urobiť.</string>
     <string name="reminders_low_credit">Nízky kredit</string>
     <string name="reminders_low_credit_hint">Keď kredit klesne pod %1$s</string>
     <string name="reminders_expiry">Koniec platnosti</string>
     <string name="reminders_expiry_hint">7 dní a 1 deň pred koncom platnosti lístka, karty alebo zľavy</string>
-    <string name="reminders_permission_needed">Upozornenia pre testEM sú vypnuté. Povoľte ich v nastaveniach systému.</string>
+    <string name="reminders_permission_needed">Upozornenia pre Plan&amp;Ride sú vypnuté. Povoľte ich v nastaveniach systému.</string>
     <string name="low_credit_threshold_title">Hranica nízkeho kreditu</string>
     <string name="low_credit_threshold_label">Suma (EUR)</string>
     <string name="low_credit_threshold_description">Platí pre upozornenie pri lístku aj pre pripomienky.</string>
@@ -255,7 +248,7 @@
     <string name="developer_polling_hint">Po vypnutí sa nové kódy nebudú načítavať</string>
     <string name="developer_phase">Stav pripojenia</string>
     <string name="developer_last_code">Posledný nový kód</string>
-    <string name="developer_version">testEM %1$s</string>
+    <string name="developer_version">Plan&amp;Ride %1$s</string>
     <string name="token_info_title">Aktuálny token</string>
     <string name="token_waiting">Zatiaľ žiadny token.</string>
     <string name="token_hex_label">HEX: %1$s</string>
@@ -350,7 +343,7 @@
     <string name="bug_logs_hint">Posledné riadky záznamu tejto aplikácie a posledný pád. Heslá a tokeny sú odstránené.</string>
     <string name="bug_logs_show">Zobraziť, čo sa odošle</string>
     <string name="bug_logs_hide">Skryť záznamy</string>
-    <string name="bug_consent">Súhlasím, že toto hlásenie, meno a e-mail vyššie, model zariadenia, verzia aplikácie a (ak sú priložené) záznamy sa odošlú vývojárovi testEM na opravu chyby a odpoveď.</string>
+    <string name="bug_consent">Súhlasím, že toto hlásenie, meno a e-mail vyššie, model zariadenia, verzia aplikácie a (ak sú priložené) záznamy sa odošlú vývojárovi Plan&amp;Ride na opravu chyby a odpoveď.</string>
     <string name="bug_send">Odoslať hlásenie</string>
     <string name="bug_sending">Odosiela sa…</string>
     <string name="bug_sent_title">Hlásenie %1$s odoslané</string>
@@ -372,9 +365,9 @@
     <string name="arrival_alert_custom_label">Minúty (1–60)</string>
     <string name="catch_location_allow">Povoliť</string>
     <string name="community_bus_leaving">Autobus odchádza</string>
-    <string name="support_title">Podporiť testEM</string>
+    <string name="support_title">Podporiť Plan&amp;Ride</string>
     <string name="support_hint">Pomôžte, aby aplikácia zostala zadarmo a zlepšovala sa</string>
-    <string name="support_body">testEM je zadarmo a s otvoreným kódom, vzniká vo voľnom čase. Ak vám uľahčuje cestovanie, môžete ďalšiu prácu na projekte podporiť malým príspevkom. Je to úplne dobrovoľné a v aplikácii to nič nemení.</string>
+    <string name="support_body">Plan&amp;Ride je zadarmo a s otvoreným kódom, vzniká vo voľnom čase. Ak vám uľahčuje cestovanie, môžete ďalšiu prácu na projekte podporiť malým príspevkom. Je to úplne dobrovoľné a v aplikácii to nič nemení.</string>
     <string name="support_open">Otvoriť stránku podpory</string>
     <string name="support_later">Teraz nie</string>
     <string name="community_mode_off">Vypnuté</string>
@@ -409,5 +402,86 @@
     <string name="whats_new_title">Čo je nové vo verzii %1$s</string>
     <string name="whats_new_changelog">Celý zoznam zmien</string>
     <string name="whats_new_ok">OK</string>
-    <string name="whats_new_body">• Automatické aktualizácie teraz naozaj zdieľajú, kde je váš autobus, vrátane presného okamihu, keď odchádza zo zastávky alebo ňou prechádza.\n• Plánovač nájde spojenia s prestupmi medzi mestskými a prímestskými autobusmi a ukáže, v ktorom meste je zastávka.\n• Sledujte celú cestu s prestupmi: aplikácia vám povie, kde vystúpiť, a potom sleduje váš ďalší autobus.\n• Nenašlo sa spojenie? Poskladajte si cestu sami, autobus po autobuse.\n• Meškania v detaile spoja sa obnovujú samy.\n• Kým idete na zastávku, poloha sa kontroluje len občas, čo šetrí batériu.</string>
+    <!-- 2.6: optional account, home, regular rides, suggestions -->
+    <string name="tab_home">Domov</string>
+    <string name="welcome_title">Vitajte v Plan&amp;Ride</string>
+    <string name="welcome_body">Odchody naživo, vyhľadávač spojení a sledovanie autobusu fungujú aj bez účtu.</string>
+    <string name="welcome_account_title">Zobrazte si tu aj lístok</string>
+    <string name="welcome_skip">Pokračovať bez účtu</string>
+    <string name="welcome_skip_hint">Účet môžete pridať neskôr v Nastaveniach.</string>
+    <string name="pin_setup_cancel">Zrušiť a odstrániť účet</string>
+    <string name="pin_locked_out">Priveľa nesprávnych PIN. Skúste znova o %1$d s.</string>
+    <string name="locked_title">Zamknuté</string>
+    <string name="locked_body">Odomknite PIN kódom alebo odtlačkom prsta a uvidíte lístok a účet.</string>
+    <string name="ticket_locked_title">Zobraziť lístok</string>
+    <string name="ticket_locked_body">Ťuknite a odomknite PIN kódom alebo odtlačkom</string>
+    <string name="home_add_account_hint">Máte účet na sadzv.qrbus.me? Pridajte ho a uvidíte tu lístok aj kredit.</string>
+    <string name="home_journeys">Moje cesty</string>
+    <string name="home_journey_remove">Odstrániť cestu</string>
+    <string name="home_following">Sledujete</string>
+    <string name="home_journey_underway">Prebieha</string>
+    <string name="home_journey_in">o %1$s</string>
+    <string name="day_today">Dnes</string>
+    <string name="day_tomorrow">Zajtra</string>
+    <string name="account_section">Účet</string>
+    <string name="account_add">Pridať účet</string>
+    <string name="account_add_hint">Lístok, kredit a história zo sadzv.qrbus.me</string>
+    <string name="account_locked">Účet je zamknutý. Odomknite ho a uvidíte kartu, kredit a históriu.</string>
+    <string name="account_remove">Odstrániť účet z telefónu</string>
+    <string name="account_remove_hint">Odhlási, zabudne heslo aj PIN</string>
+    <string name="account_remove_title">Odstrániť účet?</string>
+    <string name="account_remove_message">Z telefónu sa odstráni e-mail, heslo, PIN a uložené údaje o účte. Odchody, vyhľadávač, uložené cesty a obľúbené zastávky zostanú.</string>
+    <string name="account_remove_confirm">Odstrániť</string>
+    <string name="lock_now">Zamknúť teraz</string>
+    <string name="settings_reminders_hint_guest">Upozornenia pri sledovaní autobusu</string>
+    <string name="planner_save_journey">Uložiť do mojich ciest</string>
+    <string name="planner_unsave_journey">Odstrániť z mojich ciest</string>
+    <string name="board_other_carrier">Iný dopravca</string>
+    <string name="board_timetable">Cestovný poriadok</string>
+    <string name="rides_title">Pravidelné jazdy</string>
+    <string name="rides_empty">Vyhľadajte spojenie, ktorým jazdíte často, a ťuknite na ňom na ikonu opakovania. Aplikácia potom v zvolené dni sama začne sledovať ten autobus.</string>
+    <string name="rides_next">Najbližšie: %1$s %2$s</string>
+    <string name="rides_no_next">Žiadne ďalšie jazdy</string>
+    <string name="rides_paused">Pozastavené</string>
+    <string name="rides_every_day">Každý deň</string>
+    <string name="rides_workdays">Pracovné dni</string>
+    <string name="rides_weekends">Víkendy</string>
+    <string name="rides_dates_only">Vybrané dni</string>
+    <string name="rides_intro">Pred každým odchodom aplikácia nájde autobus na daný deň a začne ho sledovať, so živým upozornením aj vašimi pripomienkami.</string>
+    <string name="rides_lines">Linky: %1$s</string>
+    <string name="rides_departs">Odchod %1$s</string>
+    <string name="rides_days">Dni</string>
+    <string name="rides_range">Len v období</string>
+    <string name="rides_from">Od</string>
+    <string name="rides_until">Do</string>
+    <string name="rides_dates">Aj v tieto dni</string>
+    <string name="rides_add_date">Pridať dátum</string>
+    <string name="rides_lead">Začať sledovať pred odchodom</string>
+    <string name="rides_enabled">Zapnuté</string>
+    <string name="rides_pick_days">Vyberte aspoň jeden deň alebo dátum.</string>
+    <string name="rides_exact_needed">Povoľte budíky pre Plan&amp;Ride, aby sledovanie začalo načas. Inak dostanete upozornenie, na ktoré treba ťuknúť.</string>
+    <string name="rides_delete">Odstrániť túto jazdu</string>
+    <string name="rides_save">Uložiť</string>
+    <string name="rides_repeat">Opakovať túto jazdu pravidelne</string>
+    <string name="rides_channel">Pravidelné jazdy</string>
+    <string name="rides_due_title">%1$s</string>
+    <string name="rides_due_body">Váš autobus o %1$s. Ťuknite a sledujte ho.</string>
+    <string name="rides_busy_title">%1$s sa nesleduje</string>
+    <string name="rides_busy_body">Už ste sledovali iný autobus.</string>
+    <string name="rides_finding">Hľadám váš autobus o %1$s…</string>
+    <string name="rides_missing_title">%1$s: autobus sa nenašiel</string>
+    <string name="rides_missing_body">Dnes nejde spoj o %1$s. Pozrite si vyhľadávač.</string>
+    <string name="analytics_switch">Štatistiky používania</string>
+    <string name="analytics_switch_hint">Anonymné používanie aplikácie cez Google Firebase Analytics, aby sme vedeli, čo zlepšiť. Bez údajov z účtu a polohy.</string>
+    <string name="privacy_policy_title">Zásady ochrany súkromia</string>
+    <string name="privacy_policy_hint">Čo aplikácia kam posiela a vaše práva</string>
+    <string name="feature_title">Navrhnúť funkciu</string>
+    <string name="feature_hint">Máte nápad pre aplikáciu? Napíšte nám</string>
+    <string name="feature_summary">Váš nápad v pár slovách</string>
+    <string name="feature_description">Čo by mala aplikácia robiť a ako by vám to pomohlo?</string>
+    <string name="feature_consent">Súhlasím, že tento návrh, meno a e-mail vyššie, model zariadenia a verzia aplikácie sa odošlú vývojárovi Plan&amp;Ride na posúdenie a odpoveď.</string>
+    <string name="feature_send">Odoslať návrh</string>
+    <string name="feature_sent_title">Návrh %1$s odoslaný</string>
+    <string name="feature_sent_body">Ďakujeme za nápad. Ak ste nechali e-mail, ozveme sa, keď bude novinka.</string>
+    <string name="whats_new_body">• testEM je teraz Plan&amp;Ride, s novou ikonou.\n• Bez účtu: odchody, vyhľadávač a sledovanie autobusu fungujú aj bez prihlásenia. Účet sadzv.qrbus.me pridáte alebo odstránite kedykoľvek v Nastaveniach.\n• S účtom sa aplikácia otvorí hneď; lístok, kredit a história zostanú skryté, kým neodomknete PIN kódom alebo odtlačkom.\n• Označte spojenie hviezdičkou a zobrazí sa pod lístkom, pripravené na sledovanie.\n• Pravidelné jazdy: vyberte dni a dátumy a aplikácia pred odchodom sama začne sledovať váš autobus.\n• Vo vyhľadávači si vyberiete aj dátum, nielen čas.\n• Odchody ukazujú aj medzimestské autobusy iných dopravcov (Arriva, Slovak Lines, FlixBus a ďalší).\n• GPS beží len keď treba: cestou sa poloha overí každé 1–3 min a živé GPS sa zapne na zastávke 4 min pred autobusom (skôr, ak zvykne ísť skôr).\n• Presnejšie rozpoznanie, či autobus na zastávke zastavil alebo prešiel.\n• V Nastaveniach môžete navrhnúť funkciu.\n• Nová stránka par.karafa.net s novinkami, podporou a zásadami ochrany súkromia; anonymné štatistiky používania sa dajú vypnúť v Nastaveniach.\n• Heslo sa ukladá šifrované a hádanie PIN je obmedzené.</string>
 </resources>

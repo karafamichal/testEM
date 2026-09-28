@@ -283,6 +283,48 @@ for _ in range(2):
     res = kc.getresponse()
     assert res.status == 200 and json.loads(res.read())["username"] == "karafamichal", "next request on the same connection works"
 kc.close()
+# ---- suggestions are listed apart from bugs; a title cannot break an email header
+def app_post(data, key="dev-key"):
+    req = urllib.request.Request(base + "/api/v1/bugs", data=json.dumps(data).encode(),
+                                 headers={"Content-Type": "application/json", "X-App-Key": key})
+    try:
+        res = opener.open(req)
+    except urllib.error.HTTPError as err:
+        res = err
+    return res.status, json.loads(res.read() or b"{}")
+
+
+assert app_post({"consent": True, "description": "x"}, key="wrong")[0] == 401
+status, idea = app_post({"consent": True, "kind": "feature", "title": "Dark map\r\nBcc: evil@example.com", "logs": "secret log"})
+assert status == 201, idea
+status, bug = app_post({"consent": True, "kind": "bug", "description": "Crash on start"})
+ideas = json.loads(call("/admin/api/bugs?kind=feature&status=all", cookie=cookie)[2])
+bugs = json.loads(call("/admin/api/bugs?status=all", cookie=cookie)[2])
+assert [b["id"] for b in ideas] == [idea["id"]] and idea["id"] not in [b["id"] for b in bugs] and bug["id"] in [b["id"] for b in bugs]
+saved = json.loads(call("/admin/api/bugs/%d" % idea["id"], cookie=cookie)[2])
+assert "\n" not in saved["title"] and "\r" not in saved["title"] and saved["logs"] == "" and saved["category"] == "feature", saved
+stats = json.loads(call("/admin/api/stats", cookie=cookie)[2])
+assert stats["ideas"]["new"] == 1, stats
+headers = call("/dashboard", cookie=cookie)[1]
+assert "frame-ancestors" in headers["Content-Security-Policy"]
+assert hub.trusted_proxy("10.1.2.3") and hub.trusted_proxy("::1") and not hub.trusted_proxy("172.217.0.1") and not hub.trusted_proxy("x")
+
+# ---- website: public pages in two languages, edited and reset from the dashboard
+status, headers, body = call("/")
+assert status == 200 and b'lang="sk"' in body and b"Plan&amp;Ride" in body and "frame-ancestors" in headers["Content-Security-Policy"]
+assert call("/en/privacy")[0] == 200 and b"privacy policy" in call("/en/privacy")[2]
+assert call("/support/")[0] == 200 and call("/nope")[0] == 404 and call("/mark.png")[0] == 200
+assert call("/admin/api/site")[0] == 401, "editing needs a signed-in admin"
+pages = json.loads(call("/admin/api/site", cookie=cookie)[2])
+assert len(pages) == 8 and not any(p["custom"] for p in pages)
+assert b"Draft" in json.loads(call("/admin/api/site/support/en/preview", {"html": "<h1>Draft</h1>"}, cookie)[2])["html"].encode()
+assert b"Draft" not in call("/en/support")[2], "a preview is not published"
+assert call("/admin/api/site/support/en/save", {"html": "<h1>New support</h1>"}, cookie)[0] == 200
+assert b"New support" in call("/en/support")[2] and b"New support" not in call("/support")[2]
+assert call("/admin/api/site/support/en/reset", {}, cookie)[0] == 200
+assert b"New support" not in call("/en/support")[2]
+assert call("/admin/api/site/support/de/save", {"html": "x"}, cookie)[0] == 404
+
 server.shutdown()
 print("ok")
 

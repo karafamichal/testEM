@@ -36,6 +36,10 @@ data class TicketState(
 }
 
 data class AppState(
+    /** A SADZV account is saved on this phone. Without one the app is departures and planner only. */
+    val hasAccount: Boolean = false,
+    /** The welcome screen was answered (account added or skipped). */
+    val onboarded: Boolean = false,
     val isLoggedIn: Boolean = false,
     val isLoading: Boolean = false,
     val loginError: String = "",
@@ -45,6 +49,7 @@ data class AppState(
     val selectedThemeId: String = "",
     val amoledEnabled: Boolean = false,
     val isPinSet: Boolean = false,
+    /** Ticket and account details may be shown (PIN or biometrics given, or no PIN at all). */
     val isAppUnlocked: Boolean = false,
     val biometricEnabled: Boolean = true,
     val lockTimeoutSeconds: Int = 0,
@@ -74,11 +79,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var lastBackgroundTimeMs = 0L
     private var fromSuggestionJob: Job? = null
     private var toSuggestionJob: Job? = null
+    /** Route of the results on screen (the fields may have been edited since). */
+    private var searchedRoute: SavedRoute? = null
 
     init {
         val presets = prefs.getThemePresets(DefaultThemePresets.all)
+        val hasAccount = prefs.hasAccount()
+        // The PIN guards the account only: without an account there is nothing to lock.
+        if (!hasAccount && prefs.isPinSet()) prefs.clearPin()
         val pinSet = prefs.isPinSet()
         _appState.value = AppState(
+            hasAccount = hasAccount,
+            onboarded = prefs.isOnboarded(),
             email = prefs.getEmail(),
             password = prefs.getPassword(),
             themePresets = presets,
@@ -99,8 +111,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         _timetableState.update {
-            it.copy(savedRoutes = prefs.getSavedRoutes(), recentRoutes = prefs.getRecentRoutes())
+            it.copy(
+                savedRoutes = prefs.getSavedRoutes(),
+                recentRoutes = prefs.getRecentRoutes(),
+                savedJourneys = prefs.getSavedJourneys(),
+                rides = prefs.getRecurringRides()
+            )
         }
+    }
+
+    // ============================================================ onboarding
+
+    /** "Use without an account" on the welcome screen; an account can be added later in Settings. */
+    fun skipOnboarding() {
+        prefs.markOnboarded()
+        _appState.update { it.copy(onboarded = true, loginError = "") }
     }
 
     // ================================================================ login
@@ -128,8 +153,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             result.onSuccess { snapshot ->
                 session = newSession
                 prefs.saveCredentials(emailTrimmed, password)
+                prefs.markOnboarded()
                 _appState.update {
-                    it.copy(isLoggedIn = true, isLoading = false, email = emailTrimmed, password = password)
+                    it.copy(
+                        isLoggedIn = true, isLoading = false, email = emailTrimmed, password = password,
+                        hasAccount = true, onboarded = true
+                    )
                 }
                 applyAccount(snapshot)
                 startPolling()
@@ -143,32 +172,44 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** The server stopped accepting the saved password: go back to login with the email kept. */
+    /**
+     * The server stopped accepting the saved password: forget it (email kept) and show the
+     * sign-in form. The PIN stays, so signing in again doesn't ask for a new one.
+     */
     fun returnToLogin() {
         stopPolling()
         session = null
-        val email = _appState.value.email
-        prefs.saveCredentials(email, "")
-        _appState.update { it.copy(isLoggedIn = false, isLoading = false, password = "") }
+        prefs.saveCredentials(_appState.value.email, "")
+        _appState.update { it.copy(isLoggedIn = false, isLoading = false, password = "", hasAccount = false) }
         _ticketState.value = TicketState()
     }
 
-    fun logout() {
+    /**
+     * Removes the account from this phone: credentials, cached account data, reminders
+     * and the PIN (which only protected the account). The app keeps working without it.
+     */
+    fun removeAccount() {
         stopPolling()
         session = null
         prefs.clearCredentials()
+        prefs.clearPin()
         Reminders.cancel(app)
         _appState.update {
-            it.copy(isLoggedIn = false, isLoading = false, loginError = "", email = "", password = "")
+            it.copy(
+                isLoggedIn = false, isLoading = false, loginError = "", email = "", password = "",
+                hasAccount = false, isPinSet = false, isAppUnlocked = true
+            )
         }
         _ticketState.value = TicketState()
     }
+
+    fun clearLoginError() = _appState.update { it.copy(loginError = "") }
 
     // ============================================================== polling
 
     fun startPolling() {
         val current = session ?: return
-        if (pollingJob?.isActive == true) return
+        if (pollingJob?.isActive == true || !_appState.value.isAppUnlocked) return
         pollingJob = viewModelScope.launch {
             current.pollTokens(object : TicketSession.Listener {
                 override fun onPhase(phase: TicketPhase) {
@@ -281,11 +322,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val state = _appState.value
         if (state.isPinSet && lastBackgroundTimeMs != 0L) {
             val timeoutMs = state.lockTimeoutSeconds * 1000L
-            if (timeoutMs == 0L || System.currentTimeMillis() - lastBackgroundTimeMs >= timeoutMs) {
-                _appState.update { it.copy(isAppUnlocked = false) }
-            }
+            if (timeoutMs == 0L || System.currentTimeMillis() - lastBackgroundTimeMs >= timeoutMs) lock()
         }
-        if (state.isLoggedIn && _ticketState.value.phase == TicketPhase.Paused) startPolling()
+        val now = _appState.value
+        if (now.isLoggedIn && now.isAppUnlocked && _ticketState.value.phase == TicketPhase.Paused) startPolling()
+    }
+
+    /** Hides the ticket and account again (the rest of the app stays usable). */
+    fun lock() {
+        if (!_appState.value.isPinSet) return
+        _appState.update { it.copy(isAppUnlocked = false) }
+        if (pollingJob?.isActive == true) stopPolling(TicketPhase.Paused)
+    }
+
+    private fun onUnlocked() {
+        _appState.update { it.copy(isAppUnlocked = true) }
+        if (_appState.value.isLoggedIn && pollingJob?.isActive != true) startPolling()
     }
 
     fun onAppBackgrounded() {
@@ -310,11 +362,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun verifyPin(pin: String): Boolean {
         val ok = pin.isNotBlank() && prefs.verifyPin(pin)
-        if (ok) _appState.update { it.copy(isAppUnlocked = true) }
+        if (ok) onUnlocked()
         return ok
     }
 
-    fun unlockWithBiometrics() = _appState.update { it.copy(isAppUnlocked = true) }
+    /** Wrong PINs lock entry for a while; 0 when a PIN may be tried now. */
+    fun pinLockedUntil(): Long = prefs.pinLockedUntil().takeIf { it > System.currentTimeMillis() } ?: 0L
+
+    fun unlockWithBiometrics() = onUnlocked()
 
     fun setBiometricEnabled(enabled: Boolean) {
         prefs.saveBiometricEnabled(enabled)
@@ -379,6 +434,72 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setTimetableTime(time: String) = _timetableState.update { it.copy(timeInput = time) }
+
+    /** ISO date, "" = today. */
+    fun setTimetableDate(date: String) = _timetableState.update { it.copy(dateInput = date) }
+
+    // ------------------------------------------------------------ saved journeys
+
+    fun isJourneySaved(connection: TimetableConnection): Boolean =
+        _timetableState.value.savedJourneys.any { it.sameAs(connection) }
+
+    /** Star / unstar a result; starred ones show under the ticket on the home tab. */
+    fun toggleSaveJourney(connection: TimetableConnection) {
+        val saved = _timetableState.value.savedJourneys
+        val updated = if (saved.any { it.sameAs(connection) }) {
+            saved.filterNot { it.sameAs(connection) }
+        } else {
+            val route = searchedRoute ?: currentRoute() ?: return
+            // Journeys that already ended are of no use on the home tab.
+            val now = System.currentTimeMillis()
+            (saved.filter { it.arrivalMs == 0L || it.arrivalMs > now } +
+                SavedJourney(java.util.UUID.randomUUID().toString(), route, connection))
+                .sortedBy { it.departureMs }
+                .takeLast(20)
+        }
+        prefs.saveSavedJourneys(updated)
+        _timetableState.update { it.copy(savedJourneys = updated) }
+    }
+
+    fun removeSavedJourney(id: String) {
+        val updated = _timetableState.value.savedJourneys.filterNot { it.id == id }
+        prefs.saveSavedJourneys(updated)
+        _timetableState.update { it.copy(savedJourneys = updated) }
+    }
+
+    /** Opens the planner on a route at a given time and date and searches. */
+    fun searchAt(route: SavedRoute, time: String, date: String = "") {
+        _timetableState.update { it.copy(timeInput = time, dateInput = date) }
+        applyRoute(route, search = true)
+    }
+
+    // ------------------------------------------------------------ recurring rides
+
+    /** A ride from a planner result, prefilled for the editor: same stops, time and lines, workdays. */
+    fun rideFrom(connection: TimetableConnection): RecurringRide? {
+        val route = searchedRoute ?: currentRoute() ?: return null
+        return RecurringRide(
+            id = java.util.UUID.randomUUID().toString(),
+            route = route,
+            time = connection.segments.firstOrNull()?.departureTime?.let { t -> parseClock(t)?.toString() } ?: return null,
+            lines = connection.segments.map { it.line.trim().substringAfterLast(' ') },
+            days = RecurringRide.WORKDAYS
+        )
+    }
+
+    fun saveRide(ride: RecurringRide) {
+        val updated = _timetableState.value.rides.filterNot { it.id == ride.id } + ride
+        prefs.saveRecurringRides(updated)
+        _timetableState.update { it.copy(rides = updated) }
+        com.ksjd.testem.rides.RideScheduler.reschedule(app)
+    }
+
+    fun deleteRide(id: String) {
+        val updated = _timetableState.value.rides.filterNot { it.id == id }
+        prefs.saveRecurringRides(updated)
+        _timetableState.update { it.copy(rides = updated) }
+        com.ksjd.testem.rides.RideScheduler.reschedule(app)
+    }
 
     fun setTimetableDirectOnly(directOnly: Boolean) = _timetableState.update { it.copy(directOnly = directOnly) }
 
@@ -527,6 +648,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val route = currentRoute() ?: return
         val state = _timetableState.value
         rememberRecentRoute(route)
+        searchedRoute = route
         viewModelScope.launch {
             _timetableState.update {
                 it.copy(
@@ -550,7 +672,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         timeInput = time,
                         directOnly = state.directOnly,
                         fromSuggestion = route.from,
-                        toSuggestion = route.to
+                        toSuggestion = route.to,
+                        dateInput = state.dateInput
                     )
                 )
             }

@@ -1,5 +1,6 @@
 package com.ksjd.testem.ui.screens
 
+import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
 import androidx.compose.foundation.border
@@ -25,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.EventRepeat
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Star
@@ -53,6 +55,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +76,10 @@ import com.ksjd.testem.live.TrackedTrip
 import com.ksjd.testem.live.TripTracking
 import com.ksjd.testem.live.scheduledTripRef
 import com.ksjd.testem.R
+import com.ksjd.testem.RecurringRide
+import com.ksjd.testem.SK_ZONE
+import com.ksjd.testem.ui.theme.TransitTheme
+import java.time.LocalDate
 import com.ksjd.testem.SavedRoute
 import com.ksjd.testem.TimetableConnection
 import com.ksjd.testem.TimetableSegment
@@ -91,11 +100,21 @@ import java.util.Calendar
 fun PlannerScreen(
     viewModel: AppViewModel,
     onOpenStop: (stopName: String, line: String, time: String) -> Unit,
-    onOpenTrip: (segment: TimetableSegment, line: String) -> Unit,
-    onExitGuest: (() -> Unit)?
+    onOpenTrip: (segment: TimetableSegment, line: String) -> Unit
 ) {
     val state by viewModel.timetableState.collectAsState()
     val listState = rememberLazyListState()
+    // A regular ride being edited (new ones come from a result's Repeat button).
+    var editing by remember { mutableStateOf<Pair<RecurringRide, Boolean>?>(null) }
+    editing?.let { (ride, isNew) ->
+        RideEditorDialog(
+            initial = ride,
+            isNew = isNew,
+            onSave = { viewModel.saveRide(it); editing = null },
+            onDelete = { viewModel.deleteRide(ride.id); editing = null },
+            onDismiss = { editing = null }
+        )
+    }
 
     LaunchedEffect(listState) {
         snapshotFlow {
@@ -112,16 +131,16 @@ fun PlannerScreen(
         item {
             ScreenHeader(
                 title = stringResource(R.string.planner_title),
-                subtitle = stringResource(R.string.planner_subtitle),
-                actions = {
-                    if (onExitGuest != null) TextButton(onClick = onExitGuest) { Text(stringResource(R.string.auth_sign_in)) }
-                }
+                subtitle = stringResource(R.string.planner_subtitle)
             )
         }
         item { SearchForm(state, viewModel) }
 
         if (state.savedRoutes.isNotEmpty() || state.recentRoutes.isNotEmpty()) {
             item { RouteShortcuts(state, viewModel) }
+        }
+        if (state.connections.isEmpty()) {
+            item { RidesList(state.rides) { editing = it to false } }
         }
 
         if (state.errorMessage.isNotBlank()) {
@@ -133,7 +152,14 @@ fun PlannerScreen(
         if (state.connections.isNotEmpty()) {
             item { SectionLabel(stringResource(R.string.timetables_results_title)) }
             items(state.connections, key = { it.id }) { connection ->
-                ConnectionCard(connection, onOpenStop, onOpenTrip)
+                ConnectionCard(
+                    connection = connection,
+                    saved = state.savedJourneys.any { it.sameAs(connection) },
+                    onToggleSave = { viewModel.toggleSaveJourney(connection) },
+                    onRepeat = { viewModel.rideFrom(connection)?.let { editing = it to true } },
+                    onOpenStop = onOpenStop,
+                    onOpenTrip = onOpenTrip
+                )
             }
             item {
                 Box(
@@ -213,10 +239,14 @@ private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
         }
         Spacer(Modifier.height(12.dp))
 
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             FilterChip(
-                selected = state.timeInput.isBlank(),
-                onClick = { viewModel.setTimetableTime("") },
+                selected = state.timeInput.isBlank() && state.dateInput.isBlank(),
+                onClick = { viewModel.setTimetableTime(""); viewModel.setTimetableDate("") },
                 label = { Text(stringResource(R.string.planner_now)) }
             )
             FilterChip(
@@ -239,8 +269,28 @@ private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
                     )
                 }
             )
-            Spacer(Modifier.weight(1f))
-            Text(stringResource(R.string.planner_direct), style = MaterialTheme.typography.bodyMedium)
+            FilterChip(
+                selected = state.dateInput.isNotBlank(),
+                onClick = {
+                    val today = LocalDate.now(SK_ZONE)
+                    val current = runCatching { LocalDate.parse(state.dateInput) }.getOrNull() ?: today
+                    DatePickerDialog(context, { _, y, m, d ->
+                        val picked = LocalDate.of(y, m + 1, d)
+                        viewModel.setTimetableDate(if (picked == today) "" else picked.toString())
+                    }, current.year, current.monthValue - 1, current.dayOfMonth).apply {
+                        datePicker.minDate = System.currentTimeMillis() - 1000
+                    }.show()
+                },
+                label = {
+                    Text(
+                        runCatching { LocalDate.parse(state.dateInput) }.getOrNull()
+                            ?.let { rideDay(it.atStartOfDay(SK_ZONE)) } ?: stringResource(R.string.day_today)
+                    )
+                }
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.planner_direct), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             Switch(checked = state.directOnly, onCheckedChange = viewModel::setTimetableDirectOnly)
         }
         Spacer(Modifier.height(12.dp))
@@ -368,6 +418,9 @@ private fun routeLabel(route: SavedRoute): String = "${readableStop(route.fromTe
 @Composable
 private fun ConnectionCard(
     connection: TimetableConnection,
+    saved: Boolean,
+    onToggleSave: () -> Unit,
+    onRepeat: () -> Unit,
     onOpenStop: (String, String, String) -> Unit,
     onOpenTrip: (TimetableSegment, String) -> Unit
 ) {
@@ -389,6 +442,17 @@ private fun ConnectionCard(
                     modifier = Modifier.weight(1f)
                 )
                 Text(connection.totalDuration, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Star: keep it on the home tab. Repeat: follow it by itself on chosen days.
+                IconButton(onClick = onToggleSave) {
+                    Icon(
+                        if (saved) Icons.Outlined.Star else Icons.Outlined.StarOutline,
+                        stringResource(if (saved) R.string.planner_unsave_journey else R.string.planner_save_journey),
+                        tint = if (saved) TransitTheme.colors.amber else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onRepeat) {
+                    Icon(Icons.Outlined.EventRepeat, stringResource(R.string.rides_repeat), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 IconButton(onClick = {
                     val intent = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, shareText)
                     context.startActivity(Intent.createChooser(intent, shareTitle))

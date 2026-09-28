@@ -1,0 +1,94 @@
+<h1>Zásady ochrany súkromia Plan&amp;Ride</h1>
+<p><em>Platné od 28. septembra 2026. Doplnené v ten istý deň: webová verzia (bod 8).</em></p>
+<p>Plan&amp;Ride je bezplatná aplikácia s otvoreným kódom pre verejnú dopravu na Slovensku, pre Android. Vyvíjajú ju Michal Karafa a Michal Jablonský (ksjd), ktorí spoločne zodpovedajú za údaje opísané nižšie. Kontakt: <strong>ksjd.apps@gmail.com</strong>.</p>
+<p>Plan&amp;Ride je neoficiálna aplikácia. Nevytvoril ju žiadny dopravca a nie je s dopravcami spojená.</p>
+<p>Tieto zásady sa týkajú aplikácie pre Android aj webovej verzie pre iPhone (rozdiely webovej verzie sú v bode 8). Stručne:</p>
+<ul><li>Heslo k účtu sa ukladá len vo vašom zariadení a poloha ho nikdy neopustí. (Webová verzia heslo pri prihlásení posiela cez náš server, ale neukladá ho.)</li>
+<li>Plan&amp;Ride nezobrazuje reklamy a vaše údaje nikto nedostane na predaj ani reklamu.</li>
+<li>Čokoľvek nám príde (hlásenia chýb, návrhy, pomoc s polohou autobusov), pošle sa len vtedy, keď sa tak rozhodnete.
+</li></ul>
+<h2>Čo aplikácia posiela a kam</h2>
+<h3>1. Váš účet sadzv.qrbus.me (nepovinný)</h3>
+<p>Plan&amp;Ride môžete používať bez účtu. Ak pridáte účet sadzv.qrbus.me, aby ste videli lístok:</p>
+<ul><li>E-mail a heslo sa ukladajú <strong>len vo vašom telefóne</strong>. Heslo je zašifrované kľúčom v zabezpečenom hardvéri telefónu (Android Keystore).</li>
+<li>Aplikácia ich posiela <strong>len na sadzv.qrbus.me</strong>, aby vás prihlásila. Odtiaľ načíta kód lístka, karty, kredit, platnosť a históriu lístkov, rovnako ako vám ich ukazuje web dopravcu.</li>
+<li>Posledné údaje o účte zostávajú v telefóne, aby aplikácia fungovala aj offline. Chráni ich váš PIN alebo odtlačok.</li>
+<li>Heslo ani údaje z účtu nikdy nedostávame.</li>
+<li><em>Nastavenia → Odstrániť účet z telefónu</em> vymaže e-mail, heslo, PIN aj uložené údaje o účte.
+</li></ul>
+<p>sadzv.qrbus.me s týmito údajmi narába podľa vlastných zásad.</p>
+<h3>2. Cestovné poriadky a odchody naživo</h3>
+<p>Aby aplikácia ukázala zastávky, odchody, polohy autobusov a spojenia, načítava verejné údaje priamo zo <strong>sadzv.qrbus.me</strong> a <strong>cp.sk</strong>. Tieto služby dostanú to, čo hľadáte (názvy zastávok, odkiaľ a kam, dátum a čas), a vašu IP adresu, ako pri každej webovej stránke. Účet sa pritom nepoužíva.</p>
+<h3>3. Vaša poloha</h3>
+<p>Poloha je nepovinná a používa sa len v telefóne, na:</p>
+<ul><li>zastávky v okolí, keď ťuknete <em>Nájsť zastávky v okolí</em>;</li>
+<li><em>Stihnem to?</em>: chôdzu z miesta, kde ste, na zastávku autobusu, ktorý sledujete;</li>
+<li><em>Automatickú</em> pomoc s polohou autobusov (pozri bod 4): určenie, kde na trase je autobus, ktorým idete.
+</li></ul>
+<p><strong>Vaša poloha sa nikdy neposiela</strong> nám ani nikomu inému. Pri sledovaní autobusu sa poloha cestou na zastávku overí len každé 1 až 3 minúty. Nepretržité GPS beží len na zastávke, od pár minút pred príchodom autobusu, alebo počas jazdy.</p>
+<h3>4. Pomoc s polohou autobusov (nepovinná, predvolene vypnutá)</h3>
+<p>Mnohé autobusy nehlásia, kde sú, a cestujúci môžu pomôcť. V <em>Nastavenia → Komunita a poloha</em> si môžete vybrať <em>Tlačidlá</em> (ťuknete <em>Autobus je tu</em>) alebo <em>Automaticky</em>. Plan&amp;Ride potom posiela nášmu serveru (emhub):</p>
+<ul><li>ktorý autobus: linku, číslo spoja a dátum, alebo linku, prvú zastávku a čas odchodu;</li>
+<li>na ktorej zastávke je alebo ktorou prešiel, a čas podľa cestovného poriadku;</li>
+<li>náhodný identifikátor, nový pre každý sledovaný autobus;</li>
+<li>že hlásenie je z Androidu.
+</li></ul>
+<p>Server zaznamená, kedy hlásenie prišlo. Nikdy nedostane vašu polohu ani nič, čo by súviselo s vami alebo vaším účtom. Hlásenia všetkých cestujúcich sa spájajú do aktuálneho meškania autobusu a do toho, koľko spoj zvyčajne mešká. Na tento účel ich uchovávame.</p>
+<h3>5. Hlásenia chýb a návrhy funkcií (nepovinné)</h3>
+<p>Keď z <em>Nastavení</em> pošlete hlásenie chyby alebo návrh, a len po zaškrtnutí súhlasu, náš server dostane:</p>
+<ul><li>čo ste napísali, a kategóriu;</li>
+<li>vaše meno a e-mail, ak ich vyplníte;</li>
+<li>model zariadenia, verziu Androidu a verziu aplikácie;</li>
+<li>len pri chybách, ak necháte zapnuté <em>Priložiť záznamy</em>: posledné riadky záznamov tejto aplikácie a posledný pád. Heslá, tokeny a iné dlhé tajné hodnoty sa pred odoslaním odstránia. Záznamy si môžete pred odoslaním pozrieť.
+</li></ul>
+<p>Používame ich na opravu problému alebo posúdenie nápadu a na odpoveď, ak ste nechali e-mail. Dostanete potvrdzujúci e-mail a odpovede k hláseniu. Hlásenia uchovávame, kým na nich pracujeme. Napíšte nám a vaše vymažeme.</p>
+<h3>6. Štatistiky používania (Google Firebase Analytics)</h3>
+<p>Aby sme videli, ktoré funkcie sa používajú a čo zlepšiť, Plan&amp;Ride používa <strong>Google Firebase Analytics</strong>. Zbiera:</p>
+<ul><li>ako sa aplikácia používa: otvorenia, relácie, aktualizácie a čas v aplikácii;</li>
+<li>identifikátor inštalácie aplikácie vytvorený pre Firebase;</li>
+<li>model zariadenia, verziu Androidu, jazyk, verziu aplikácie;</li>
+<li>krajinu alebo región odhadnutý z IP adresy. Google samotnú IP adresu neukladá.
+</li></ul>
+<p>Firebase Analytics v Plan&amp;Ride:</p>
+<ul><li>nepoužíva váš reklamný identifikátor;</li>
+<li>nedostáva údaje z účtu, polohu ani nič, čo zadávate.
+</li></ul>
+<p>Google tieto údaje spracúva pre nás podľa <a href="https://policies.google.com/privacy">Zásad ochrany súkromia Google</a> a <a href="https://firebase.google.com/terms/data-processing-terms">podmienok spracúvania údajov Firebase</a>. Uchováva ich počas doby nastavenej v našom Analytics.</p>
+<p>Kedykoľvek to môžete vypnúť: <em>Nastavenia → Štatistiky používania</em>.</p>
+<h3>7. Upozornenia, budíky a telefón</h3>
+<p>Všetko ostatné zostáva v telefóne:</p>
+<ul><li>uložené cesty, pravidelné jazdy, obľúbené zastávky;</li>
+<li>nastavenia, PIN (uložený len ako osolený pomalý hash);</li>
+<li>pripomienky a upozornenia sledovania.
+</li></ul>
+<p>Údaje aplikácie sa nezálohujú do cloudu Androidu ani neprenášajú pri presune do nového zariadenia.</p>
+<h3>8. Webová verzia (pre iPhone)</h3>
+<p>Webová verzia beží v prehliadači, pridaná na plochu. Funguje rovnako ako aplikácia pre Android, s týmito rozdielmi:</p>
+<ul><li><strong>Prihlásenie ide cez náš webový server.</strong> Prehliadač sa nevie prihlásiť na sadzv.qrbus.me priamo, preto náš webový server odovzdá váš e-mail a heslo na sadzv.qrbus.me a vzniknutú reláciu drží v pamäti najviac 6 hodín, aby načítal kód lístka. Heslo neukladá. Vo vašom zariadení je heslo uložené len zašifrované vaším PIN kódom, v úložisku prehliadača.</li>
+<li><strong>Cestovné poriadky a odchody naživo</strong> sa tiež načítavajú cez náš webový server (ten sa za vás pýta sadzv.qrbus.me a cp.sk).</li>
+<li><strong>Upozornenia pre sledovaný autobus:</strong> ak ich zapnete, náš webový server si pamätá autobus, vaše zastávky, jazyk a adresu pre upozornenia vášho prehliadača (vydanú službou upozornení Apple, Google alebo Mozilla), kým autobus nedorazí, najviac 3 hodiny.</li>
+<li><strong>Pravidelné jazdy:</strong> náš webový server uchováva vaše jazdy (zastávky, časy, dni a dátumy, ako skoro začať) spolu s adresou pre upozornenia vášho prehliadača, aby našiel váš autobus a upozornil vás, aj keď je aplikácia zatvorená. Zostanú, kým ich neodstránite; odstránením všetkých sa zmaže aj záznam.</li>
+<li>Hlásenia chýb a návrhy odovzdá náš webový server do emhubu, namiesto modelu zariadenia s údajmi o prehliadači.</li>
+<li>Webová verzia <strong>nezbiera štatistiky používania</strong> (bez Firebase Analytics).</li>
+<li>Poloha sa používa len v prehliadači a nikam sa neposiela, rovnako ako v aplikácii.</li>
+</ul>
+<h2>Kde beží náš server</h2>
+<p>Naše servery (emhub a webový server webovej verzie) bežia na serveroch, ktoré prevádzkujú vývojári. Pripája sa k nemu cez Cloudflare, ktorý prenáša spojenie (šifrované cez HTTPS) a pritom vidí IP adresy. Záznamy servera vrátane IP adries slúžia len na bezpečnosť a riešenie problémov a uchovávajú sa obmedzený čas.</p>
+<p>Všetky spojenia z aplikácie používajú HTTPS.</p>
+<h2>Právny základ (GDPR)</h2>
+<ul><li><strong>Váš súhlas:</strong> hlásenia chýb a návrhy, a pomoc s polohou autobusov. Kedykoľvek ho môžete odvolať. Prestaňte posielať alebo funkciu vypnite.</li>
+<li><strong>Náš oprávnený záujem</strong> na fungovaní a zlepšovaní aplikácie: anonymné štatistiky, ktoré môžete vypnúť, a bezpečnostné záznamy.</li>
+<li>Váš účet sa používa len vo vašom zariadení (a vo webovej verzii prechádza pri prihlásení cez náš webový server), na službu, o ktorú žiadate.</li>
+<li><strong>Poskytnutie služby, o ktorú žiadate:</strong> upozornenia a pravidelné jazdy vo webovej verzii, ktoré môžete kedykoľvek odstrániť.
+</li></ul>
+<h2>Vaše práva</h2>
+<p>Máte právo:</p>
+<ul><li>vidieť, čo o vás máme, dať to opraviť alebo vymazať, a obmedziť spracúvanie alebo namietať proti nemu;</li>
+<li>dostať svoje údaje v prenosnej podobe;</li>
+<li>odvolať súhlas.
+</li></ul>
+<p>Napíšte na <strong>ksjd.apps@gmail.com</strong>. Keďže pri hlásení bez e-mailu nevieme, kto ho poslal, uveďte kód hlásenia (napríklad EM-0042) alebo čo ste napísali. Sťažnosť môžete podať aj <a href="https://dataprotection.gov.sk">Úradu na ochranu osobných údajov SR</a>.</p>
+<h2>Deti</h2>
+<p>Plan&amp;Ride je bežná aplikácia pre dopravu, nie je určená deťom do 13 rokov. Ich osobné údaje vedome nezbierame.</p>
+<h2>Zmeny</h2>
+<p>Ak sa tieto zásady zmenia, nová verzia bude zverejnená tu s novým dátumom platnosti. O dôležitých zmenách sa dozviete aj v okne <em>Čo je nové</em> v aplikácii.</p>

@@ -37,9 +37,10 @@ class StopPassDetectorTest {
     }
 
     @Test
-    fun locationRecheck_isThreeQuartersOfTheWalk() {
-        // ~460 m is 460 * 1.3 / 1.3 = 460 s walk -> 345 s.
-        assertEquals(345_000L, CatchEstimate.nextCheckMs(460))
+    fun locationRecheck_isThreeQuartersOfTheWalk_every1to3Minutes() {
+        // 120 m is a 120 s walk -> 90 s; 460 m (345 s) is capped at 3 min.
+        assertEquals(90_000L, CatchEstimate.nextCheckMs(120))
+        assertEquals(180_000L, CatchEstimate.nextCheckMs(460))
         assertEquals(CatchEstimate.MIN_RECHECK_MS, CatchEstimate.nextCheckMs(10))
         assertEquals(CatchEstimate.MAX_RECHECK_MS, CatchEstimate.nextCheckMs(20_000))
     }

@@ -72,6 +72,8 @@ data class TimetableState(
     val fromInput: String = "",
     val toInput: String = "",
     val timeInput: String = "",
+    /** ISO date to search on, "" = today. */
+    val dateInput: String = "",
     val directOnly: Boolean = false,
     val fromSuggestions: List<CpStopSuggestion> = emptyList(),
     val toSuggestions: List<CpStopSuggestion> = emptyList(),
@@ -85,7 +87,10 @@ data class TimetableState(
     val connections: List<TimetableConnection> = emptyList(),
     val errorMessage: String = "",
     val savedRoutes: List<SavedRoute> = emptyList(),
-    val recentRoutes: List<SavedRoute> = emptyList()
+    val recentRoutes: List<SavedRoute> = emptyList(),
+    /** Starred connections, shown on the home tab. */
+    val savedJourneys: List<SavedJourney> = emptyList(),
+    val rides: List<RecurringRide> = emptyList()
 )
 
 /** A from/to pair the user saved or searched recently. */

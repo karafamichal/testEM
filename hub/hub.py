@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-emhub: bug reports + community bus delays for testEM.
+emhub: bug reports + community bus delays for testEM, and the Plan&Ride website.
 
 One stdlib-only process:
+  /, /privacy, /support, /changelog (and /en/...)   public website, pages edited in the dashboard
   /api/v1/*      public API used by the Android app and the web app (X-App-Key)
   /login, /auth  admin sign-in (local password or Authentik via OIDC)
   /dashboard     admin dashboard (bugs, community tracking, settings)
@@ -14,6 +15,7 @@ import base64
 import hashlib
 import hmac
 import html
+import ipaddress
 import json
 import os
 import queue
@@ -38,11 +40,13 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "1.5.1"
+VERSION = "1.7.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
 PUBLIC_URL = ENV("HUB_PUBLIC_URL", "http://localhost:8080").rstrip("/")
+# Older hostnames the dashboard may still be opened on (e.g. after a domain move), comma-separated.
+ORIGINS = {PUBLIC_URL} | {o.strip().rstrip("/") for o in ENV("HUB_EXTRA_ORIGINS", "").split(",") if o.strip()}
 DB_PATH = ENV("HUB_DB", str(HERE / "hub.db"))
 APP_KEYS = {k.strip() for k in ENV("HUB_APP_KEYS", "dev-key").split(",") if k.strip()}
 # Email and Authentik settings are edited in the dashboard (Settings) and stored in the
@@ -66,7 +70,9 @@ SECURE_COOKIES = PUBLIC_URL.startswith("https://")
 SESSION_DAYS = 14
 
 BUG_STATUSES = ["new", "triaged", "in_progress", "resolved", "closed"]
-BUG_CATEGORIES = ["crash", "ticket", "departures", "planner", "tracking", "account", "other"]
+BUG_CATEGORIES = ["crash", "ticket", "departures", "planner", "tracking", "account", "feature", "other"]
+# A report is a bug or a feature suggestion; the dashboard lists them separately.
+BUG_KINDS = ("bug", "feature")
 
 # Community delay: how far back reports count, and how fast they fade.
 COMMUNITY_WINDOW_S = 45 * 60
@@ -165,6 +171,14 @@ CREATE TABLE IF NOT EXISTS email_templates (
   updated_at INTEGER NOT NULL,
   updated_by TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS site_pages (
+  name TEXT NOT NULL,
+  lang TEXT NOT NULL,
+  html TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (name, lang)
+);
 CREATE TABLE IF NOT EXISTS invites (
   token_hash TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -189,6 +203,9 @@ def init_db():
         # 1.3.0: report kind (tap, arrival, rider phone GPS).
         if "kind" not in {r[1] for r in conn.execute("PRAGMA table_info(community_reports)")}:
             conn.execute("ALTER TABLE community_reports ADD COLUMN kind TEXT NOT NULL DEFAULT 'position'")
+        # 1.6.0: feature suggestions next to bug reports.
+        if "kind" not in {r[1] for r in conn.execute("PRAGMA table_info(bugs)")}:
+            conn.execute("ALTER TABLE bugs ADD COLUMN kind TEXT NOT NULL DEFAULT 'bug'")
         # 1.1.0: per-admin "sign in with Authentik only".
         if "oidc_only" not in {r[1] for r in conn.execute("PRAGMA table_info(users)")}:
             conn.execute("ALTER TABLE users ADD COLUMN oidc_only INTEGER NOT NULL DEFAULT 0")
@@ -257,6 +274,9 @@ def check_password(password, stored):
         return False
 
 
+DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
+
+
 def token_hash(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -301,6 +321,7 @@ class RateLimiter:
 
 
 login_limiter = RateLimiter(10, 15 * 60)
+user_login_limiter = RateLimiter(20, 60 * 60)  # per username: many addresses guessing one account
 bug_limiter = RateLimiter(10, 60 * 60)
 report_limiter = RateLimiter(1200, 60 * 60)  # per IP: phones on mobile data share addresses
 reporter_limiter = RateLimiter(300, 60 * 60)  # per rider: GPS every 15 s is 240 an hour
@@ -426,6 +447,79 @@ def sample_values(name, user):
     values.update(username="newadmin" if name == "invite" else user["username"], invited_by=user["username"],
                   invite_url=PUBLIC_URL + "/invite?token=example", expires_hours=INVITE_HOURS, smtp=smtp_label())
     return values
+
+
+# ------------------------------------------------------------------ website
+
+# name: (path, {lang: (menu label, page title, description)}). Slovak at /path, English at /en/path.
+SITE_PAGES = {
+    "home": ("", {
+        "sk": ("Domov", "Plan&Ride: autobusy na Slovensku naživo", "Odchody naživo, vyhľadávač spojení a sledovanie autobusu so živým upozornením."),
+        "en": ("Home", "Plan&Ride: every bus in Slovakia, live", "Live departures, a journey planner and following your bus with a live notification."),
+    }),
+    "changelog": ("changelog", {
+        "sk": ("Čo je nové", "Čo je nové v Plan&Ride", "Zmeny v každej verzii aplikácie Plan&Ride."),
+        "en": ("What's new", "What's new in Plan&Ride", "What changed in each version of Plan&Ride."),
+    }),
+    "support": ("support", {
+        "sk": ("Podpora", "Podpora Plan&Ride", "Ako nahlásiť chybu, navrhnúť funkciu a kontakt."),
+        "en": ("Support", "Plan&Ride support", "How to report a bug, suggest a feature, and contact us."),
+    }),
+    "privacy": ("privacy", {
+        "sk": ("Súkromie", "Zásady ochrany súkromia Plan&Ride", "Čo aplikácia Plan&Ride posiela kam a vaše práva."),
+        "en": ("Privacy", "Plan&Ride privacy policy", "What the Plan&Ride app sends where, and your rights."),
+    }),
+}
+SITE_LANGS = ("sk", "en")
+SITE_WORDS = {"sk": {"nav": "Hlavná ponuka", "admin": "Správa", "other": "English"},
+              "en": {"nav": "Main menu", "admin": "Admin", "other": "Slovensky"}}
+
+
+def site_url(name, lang):
+    path = SITE_PAGES[name][0]
+    return ("/en/" if lang == "en" else "/") + path
+
+
+def site_route(path):
+    """(page, lang) for a website path, or None."""
+    lang = "sk"
+    if path == "/en" or path.startswith("/en/"):
+        lang, path = "en", path[3:]
+    path = path.strip("/")
+    for name, (page_path, _) in SITE_PAGES.items():
+        if path == page_path:
+            return name, lang
+    return None
+
+
+def site_default(name, lang):
+    return (HERE / "site" / f"{name}.{lang}.html").read_text(encoding="utf-8")
+
+
+def site_source(name, lang):
+    with db() as conn:
+        row = conn.execute("SELECT html FROM site_pages WHERE name=? AND lang=?", (name, lang)).fetchone()
+    return row["html"] if row else site_default(name, lang)
+
+
+def render_site(name, lang, content=None):
+    """A whole page: the shared layout around the page's (edited or default) content."""
+    label, title, description = SITE_PAGES[name][1][lang]
+    other = "en" if lang == "sk" else "sk"
+    current = ' aria-current="page"'
+    nav = "".join(
+        f'<a href="{site_url(n, lang)}"{current if n == name else ""}>{html.escape(p[1][lang][0])}</a>'
+        for n, p in SITE_PAGES.items()
+    )
+    words = SITE_WORDS[lang]
+    values = {
+        "lang": lang, "title": title, "description": description, "nav": nav, "nav_label": words["nav"],
+        "home_url": site_url("home", lang), "url_sk": PUBLIC_URL + site_url(name, "sk"), "url_en": PUBLIC_URL + site_url(name, "en"),
+        "lang_switch": f'<a href="{site_url(name, other)}" hreflang="{other}" lang="{other}">{words["other"]}</a>',
+        "admin_label": words["admin"], "year": datetime.now(LOCAL_ZONE).year,
+        "content": site_source(name, lang) if content is None else content,
+    }
+    return render_template("", values, (HERE / "site" / "layout.html").read_text(encoding="utf-8"))
 
 
 # ------------------------------------------------------------------ community delays
@@ -636,6 +730,27 @@ def clean(value, limit):
     return str(value or "").strip()[:limit]
 
 
+def one_line(value, limit):
+    """Titles and names end up in email headers: no line breaks or control characters."""
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", clean(value, limit)).strip()
+
+
+# Dashboard pages: scripts and styles are inline, fonts come from Google, the only other
+# requests go back to emhub itself. Blocks injected external scripts and data leaving.
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+       "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-src 'self'; "
+       "frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'")
+
+
+def trusted_proxy(address):
+    """cloudflared and the web server reach emhub over the LAN or loopback."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback
+
+
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -655,7 +770,7 @@ class Handler(BaseHTTPRequestHandler):
         # cloudflared sets CF-Connecting-IP; only trust it when the hop itself is local/LAN.
         direct = self.client_address[0]
         forwarded = self.headers.get("CF-Connecting-IP") or self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        if forwarded and (direct.startswith(("127.", "10.", "192.168.", "172.")) or direct == "::1"):
+        if forwarded and trusted_proxy(direct):
             return forwarded
         return direct
 
@@ -672,6 +787,9 @@ class Handler(BaseHTTPRequestHandler):
         if content_type == "text/html":
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Security-Policy", CSP)
+        if SECURE_COOKIES:
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
         for key, value in (headers or {}).items():
             if isinstance(value, list):
                 for v in value:
@@ -773,8 +891,11 @@ class Handler(BaseHTTPRequestHandler):
     # ---- pages & auth
 
     def pages(self, method, path, query):
-        if method == "GET" and path == "/":
-            return self.redirect("/dashboard" if self.current_user() else "/login")
+        page = site_route(path)
+        if method == "GET" and page:
+            return self.send(200, render_site(*page), "text/html")
+        if method == "GET" and path == "/mark.png":
+            return self.static("mark.png", "image/png")
         if method == "GET" and path == "/login":
             return self.static("login.html")
         if method == "GET" and path == "/dashboard":
@@ -854,11 +975,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def password_login(self):
         form = dict(urllib.parse.parse_qsl(self.read_body(10_000).decode()))
-        if not login_limiter.allow(self.client_ip()):
+        username = form.get("username", "").strip()[:60]
+        if not login_limiter.allow(self.client_ip()) or not user_login_limiter.allow(username.lower()):
             return self.redirect("/login?error=rate")
         with db() as conn:
-            user = conn.execute("SELECT * FROM users WHERE username=?", (form.get("username", "").strip(),)).fetchone()
-            if not user or not check_password(form.get("password", ""), user["password_hash"]):
+            user = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+            # A missing user costs the same scrypt as a wrong password.
+            ok = check_password(form.get("password", ""), user["password_hash"] if user else DUMMY_HASH)
+            if not user or not ok:
                 return self.redirect("/login?error=invalid")
             if user["oidc_only"]:
                 return self.redirect("/login?error=oidc_only")
@@ -941,7 +1065,8 @@ class Handler(BaseHTTPRequestHandler):
     def public_api(self, method, route, query):
         if route == "health":
             return self.send(200, {"ok": True, "version": VERSION}, headers=self.cors())
-        if self.headers.get("X-App-Key", "") not in APP_KEYS:
+        given = self.headers.get("X-App-Key", "")
+        if not any(hmac.compare_digest(given.encode(), k.encode()) for k in APP_KEYS):
             return self.error(401, "Missing or wrong app key", cors=True)
         if method == "POST" and route == "bugs":
             return self.submit_bug()
@@ -962,25 +1087,29 @@ class Handler(BaseHTTPRequestHandler):
         data = self.json_body(limit=1_200_000)
         if data.get("consent") is not True:
             return self.error(400, "Consent is required", cors=True)
+        kind = data.get("kind") if data.get("kind") in BUG_KINDS else "bug"
         description = clean(data.get("description"), 10_000)
-        logs = clean(data.get("logs"), 1_000_000)
-        email = clean(data.get("email"), 200)
+        logs = clean(data.get("logs"), 1_000_000) if kind == "bug" else ""
+        email = one_line(data.get("email"), 200)
+        title = one_line(data.get("title"), 140)
         # Only the logs are essential; name, email, summary and text are all optional.
-        if not description and not logs:
+        if kind == "feature" and not description and not title:
+            return self.error(400, "Describe your idea", cors=True)
+        if kind == "bug" and not description and not logs:
             return self.error(400, "Describe the problem or attach logs", cors=True)
-        title = clean(data.get("title"), 140) or (description.splitlines()[0][:80] if description else "")
-        title = title or f"Logs from {clean(data.get('platform'), 20) or 'app'}"
+        title = title or one_line(description.splitlines()[0] if description else "", 80)
+        title = title or f"Logs from {one_line(data.get('platform'), 20) or 'app'}"
         if email and not EMAIL_RE.match(email):
             return self.error(400, "Email address looks wrong", cors=True)
-        category = data.get("category") if data.get("category") in BUG_CATEGORIES else "other"
+        category = "feature" if kind == "feature" else data.get("category") if data.get("category") in BUG_CATEGORIES else "other"
         t = now()
         with db() as conn:
             cur = conn.execute(
                 """INSERT INTO bugs(created_at, updated_at, status, category, title, description, name, email,
-                   platform, app_version, device, logs, consent_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (t, t, "new", category, title, description, clean(data.get("name"), 120), email,
-                 clean(data.get("platform"), 20), clean(data.get("appVersion"), 40), clean(data.get("device"), 200),
-                 logs, t),
+                   platform, app_version, device, logs, consent_at, kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (t, t, "new", category, title, description, one_line(data.get("name"), 120), email,
+                 one_line(data.get("platform"), 20), one_line(data.get("appVersion"), 40), one_line(data.get("device"), 200),
+                 logs, t, kind),
             )
             bug = conn.execute("SELECT * FROM bugs WHERE id=?", (cur.lastrowid,)).fetchone()
             conn.execute(
@@ -991,7 +1120,8 @@ class Handler(BaseHTTPRequestHandler):
         admin_to = setting("admin_email") or ",".join(
             r["email"] for r in db().execute("SELECT email FROM users WHERE email<>''")
         )
-        queue_mail(admin_to, f"[{code}] New bug: {title}", render_template("admin_new_bug", bug_values(bug)))
+        what = "New suggestion" if kind == "feature" else "New bug"
+        queue_mail(admin_to, f"[{code}] {what}: {title}", render_template("admin_new_bug", bug_values(bug)))
         if email:
             queue_mail(email, f"[{code}] We got your report", render_template("user_ack", bug_values(bug)),
                        reply_to=setting("mail_reply_to"))
@@ -1070,7 +1200,7 @@ class Handler(BaseHTTPRequestHandler):
             if "application/json" not in (self.headers.get("Content-Type") or ""):
                 return self.error(415, "JSON only")
             origin = self.headers.get("Origin")
-            if origin and origin.rstrip("/") != PUBLIC_URL:
+            if origin and origin.rstrip("/") not in ORIGINS:
                 return self.error(403, "Wrong origin")
         parts = route.strip("/").split("/")
         with db() as conn:
@@ -1083,17 +1213,19 @@ class Handler(BaseHTTPRequestHandler):
                     "publicUrl": PUBLIC_URL,
                 })
             if method == "GET" and route == "stats":
-                counts = {r["status"]: r["n"] for r in conn.execute("SELECT status, COUNT(*) n FROM bugs GROUP BY status")}
+                counts = {r["status"]: r["n"] for r in conn.execute("SELECT status, COUNT(*) n FROM bugs WHERE kind='bug' GROUP BY status")}
+                ideas = {r["status"]: r["n"] for r in conn.execute("SELECT status, COUNT(*) n FROM bugs WHERE kind='feature' GROUP BY status")}
                 active = conn.execute(
                     "SELECT COUNT(DISTINCT trip_key) FROM community_reports WHERE created_at>=?", (now() - COMMUNITY_WINDOW_S,)
                 ).fetchone()[0]
                 reports_today = conn.execute(
                     "SELECT COUNT(*) FROM community_reports WHERE created_at>=?", (now() - 86400,)
                 ).fetchone()[0]
-                return self.send(200, {"bugs": counts, "activeTrips": active, "reportsToday": reports_today})
+                return self.send(200, {"bugs": counts, "ideas": ideas, "activeTrips": active, "reportsToday": reports_today})
             if method == "GET" and route == "bugs":
-                sql, args = "SELECT id, created_at, updated_at, status, category, title, name, email, platform FROM bugs", []
-                where = []
+                sql, args = "SELECT id, created_at, updated_at, status, category, title, name, email, platform, kind FROM bugs", []
+                where = ["kind=?"]
+                args.append(query.get("kind") if query.get("kind") in BUG_KINDS else "bug")
                 if query.get("status") in BUG_STATUSES:
                     where.append("status=?")
                     args.append(query["status"])
@@ -1288,6 +1420,31 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, {"ok": True})
                 if method == "POST" and action == "reset":
                     conn.execute("DELETE FROM email_templates WHERE name=?", (name,))
+                    return self.send(200, {"ok": True})
+            if method == "GET" and route == "site":
+                edited = {(r["name"], r["lang"]): dict(r) for r in conn.execute("SELECT name, lang, updated_at, updated_by FROM site_pages")}
+                return self.send(200, [
+                    {"name": n, "lang": lang, "label": p[1][lang][0], "url": site_url(n, lang), "custom": (n, lang) in edited,
+                     "updated_at": edited.get((n, lang), {}).get("updated_at"), "updated_by": edited.get((n, lang), {}).get("updated_by")}
+                    for n, p in SITE_PAGES.items() for lang in SITE_LANGS
+                ])
+            if parts[0] == "site" and len(parts) >= 3 and parts[1] in SITE_PAGES and parts[2] in SITE_LANGS:
+                name, lang = parts[1], parts[2]
+                action = parts[3] if len(parts) > 3 else ""
+                if method == "GET" and not action:
+                    return self.send(200, {"name": name, "lang": lang, "html": site_source(name, lang), "default": site_default(name, lang)})
+                if method == "POST" and action == "preview":
+                    return self.send(200, {"html": render_site(name, lang, str(self.json_body(400_000).get("html", "")))})
+                if method == "POST" and action == "save":
+                    source = str(self.json_body(400_000).get("html", ""))
+                    if not source.strip():
+                        return self.error(400, "The page is empty")
+                    conn.execute("""INSERT INTO site_pages(name, lang, html, updated_at, updated_by) VALUES (?,?,?,?,?)
+                                    ON CONFLICT(name, lang) DO UPDATE SET html=excluded.html, updated_at=excluded.updated_at,
+                                    updated_by=excluded.updated_by""", (name, lang, source, now(), user["username"]))
+                    return self.send(200, {"ok": True})
+                if method == "POST" and action == "reset":
+                    conn.execute("DELETE FROM site_pages WHERE name=? AND lang=?", (name, lang))
                     return self.send(200, {"ok": True})
             if method == "POST" and route == "mail/test":
                 to = user["email"] or setting("admin_email")

@@ -151,7 +151,9 @@
   <div class="rail-brand"><strong>emhub</strong><span>testEM operations</span></div>
   <nav>
     <a href="#bugs" data-nav="bugs">Bugs <span class="count" id="count-new" hidden></span></a>
+    <a href="#ideas" data-nav="ideas">Suggestions <span class="count" id="count-ideas" hidden></span></a>
     <a href="#community" data-nav="community">Community</a>
+    <a href="#site" data-nav="site">Website</a>
     <a href="#settings" data-nav="settings">Settings</a>
   </nav>
   <div class="rail-foot">
@@ -210,12 +212,14 @@ function delayText(sec) {
 async function route() {
   const [page, arg] = location.hash.slice(1).split("/");
   document.querySelectorAll("[data-nav]").forEach((a) =>
-    a.setAttribute("aria-current", (a.dataset.nav === ({ bug: "bugs", templates: "settings" }[page] || page || "bugs")) ? "page" : "false"));
+    a.setAttribute("aria-current", (a.dataset.nav === ({ bug: "bugs", idea: "ideas", templates: "settings" }[page] || page || "bugs")) ? "page" : "false"));
   try {
     if (page === "community") return await renderCommunity(arg);
     if (page === "settings") return await renderSettings(arg);
     if (page === "templates") return await renderTemplates(arg);
-    return await renderBugs(page === "bug" ? Number(arg) : null);
+    if (page === "site") return await renderSite(arg);
+    if (page === "ideas" || page === "idea") return await renderBugs(page === "idea" ? Number(arg) : null, "feature");
+    return await renderBugs(page === "bug" ? Number(arg) : null, "bug");
   } catch (e) {
     if (e.message !== "signed out") view.innerHTML = `<div class="empty"><h2>Couldn't load this page</h2><p>${esc(e.message)}</p></div>`;
   }
@@ -227,19 +231,23 @@ async function refreshCounts() {
   const n = s.bugs.new || 0;
   const el = $("#count-new");
   el.textContent = n; el.hidden = !n;
+  const ideas = $("#count-ideas"), i = (s.ideas || {}).new || 0;
+  ideas.textContent = i; ideas.hidden = !i;
   return s;
 }
 
 // ------------------------------------------------------------------ bugs
 
-async function renderBugs(selectedId) {
-  const params = new URLSearchParams();
+// kind: "bug" (Bugs) or "feature" (Suggestions); both are reports with the same detail view.
+async function renderBugs(selectedId, kind = "bug") {
+  const ideas = kind === "feature";
+  const params = new URLSearchParams({ kind });
   if (bugFilter.status !== "all") params.set("status", bugFilter.status);
   if (bugFilter.q) params.set("q", bugFilter.q);
   const [bugs] = await Promise.all([api("bugs?" + params), refreshCounts()]);
   const filters = [["open", "Open"], ...STATUSES.map((s) => [s, label(s)]), ["all", "All"]];
   view.innerHTML = `
-    <div class="page-head"><h1>Bugs</h1><span class="muted small">${bugs.length} shown</span></div>
+    <div class="page-head"><h1>${ideas ? "Suggestions" : "Bugs"}</h1><span class="muted small">${bugs.length} shown</span></div>
     <div class="split ${selectedId ? "has-detail" : ""}">
       <div class="list">
         <div class="filters">
@@ -247,17 +255,17 @@ async function renderBugs(selectedId) {
           <input class="input" type="search" placeholder="Search title, text, name or email" value="${esc(bugFilter.q)}" aria-label="Search bugs">
         </div>
         ${bugs.length ? bugs.map((b) => `
-          <a class="bug-row" href="#bug/${b.id}" aria-current="${b.id === selectedId}">
+          <a class="bug-row" href="#${ideas ? "idea" : "bug"}/${b.id}" aria-current="${b.id === selectedId}">
             <span class="plate">${b.code}</span>
             <span class="t">${esc(b.title)}</span>
             <span class="m"><span class="status ${b.status}">${label(b.status)}</span><span>${esc(b.category)}</span><span>${esc(b.platform)}</span><span>${ago(b.updated_at)}</span></span>
-          </a>`).join("") : `<div class="empty"><h2>No reports here</h2><p>Reports sent from the app and the web version appear in this list. Try another filter.</p></div>`}
+          </a>`).join("") : `<div class="empty"><h2>No ${ideas ? "suggestions" : "reports"} here</h2><p>${ideas ? "Feature ideas" : "Reports"} sent from the app and the web version appear in this list. Try another filter.</p></div>`}
       </div>
-      <section class="detail" id="detail">${selectedId ? "" : `<div class="empty"><h2>Pick a report</h2><p>Select a bug on the left to read it, look at the logs and reply to the reporter.</p></div>`}</section>
+      <section class="detail" id="detail">${selectedId ? "" : `<div class="empty"><h2>Pick a report</h2><p>Select ${ideas ? "a suggestion" : "a bug"} on the left to read it${ideas ? "" : ", look at the logs"} and reply to the reporter.</p></div>`}</section>
     </div>`;
-  view.querySelectorAll("[data-status]").forEach((b) => b.onclick = () => { bugFilter.status = b.dataset.status; renderBugs(selectedId); });
+  view.querySelectorAll("[data-status]").forEach((b) => b.onclick = () => { bugFilter.status = b.dataset.status; renderBugs(selectedId, kind); });
   const search = $(".filters input", view);
-  search.oninput = () => { clearTimeout(search.t); search.t = setTimeout(() => { bugFilter.q = search.value.trim(); renderBugs(selectedId).then(() => { const s = $(".filters input"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }); }, 300); };
+  search.oninput = () => { clearTimeout(search.t); search.t = setTimeout(() => { bugFilter.q = search.value.trim(); renderBugs(selectedId, kind).then(() => { const s = $(".filters input"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }); }, 300); };
   if (selectedId) await renderBug(selectedId);
 }
 
@@ -276,7 +284,7 @@ async function renderBug(id) {
   const mailNote = (m) => m.mail_status ? `<span class="${m.mail_status.startsWith("failed") ? "mail-failed" : ""}">email ${esc(m.mail_status)}</span>` : "";
   const kindLabel = { reply: "Reply to reporter", note: "Internal note", status: "Status change", system: "System" };
   detail.innerHTML = `
-    <a class="btn quiet back" href="#bugs">Back to list</a>
+    <a class="btn quiet back" href="#${bug.kind === "feature" ? "ideas" : "bugs"}">Back to list</a>
     <div class="detail-head"><span class="plate big">${bug.code}</span><h2>${esc(bug.title)}</h2></div>
     <dl class="meta">
       <div><dt>Reporter</dt><dd>${esc(bug.name || "No name given")}</dd></div>
@@ -333,7 +341,7 @@ async function renderBug(id) {
   }
   $("#status").onchange = async (e) => {
     await api(`bugs/${id}/status`, { status: e.target.value, notify: $("#notify")?.checked });
-    toast("Status set to " + label(e.target.value)); renderBugs(id);
+    toast("Status set to " + label(e.target.value)); renderBugs(id, bug.kind);
   };
   const body = $("#body");
   const act = (btn, fn) => btn && (btn.onclick = async () => {
@@ -343,9 +351,9 @@ async function renderBug(id) {
   });
   act($("#send"), async () => {
     await api(`bugs/${id}/reply`, { body: body.value, status: $("#reply-status").value });
-    toast("Reply sent to " + bug.email); renderBugs(id);
+    toast("Reply sent to " + bug.email); renderBugs(id, bug.kind);
   });
-  act($("#note"), async () => { await api(`bugs/${id}/note`, { body: body.value }); toast("Note added"); renderBugs(id); });
+  act($("#note"), async () => { await api(`bugs/${id}/note`, { body: body.value }); toast("Note added"); renderBugs(id, bug.kind); });
   act($("#preview"), async () => {
     const { html } = await api("preview", { bugId: id, body: body.value });
     const frame = $("#preview-frame"); frame.srcdoc = html; frame.hidden = false;
@@ -609,6 +617,65 @@ async function renderSettings(flag) {
   $("#test-mail").onclick = run($("#test-mail"), async () => { const r = await api("mail/test", {}); toast("Test email sent to " + r.to); });
 }
 
+// ------------------------------------------------------------------ website pages
+
+async function renderSite(selected) {
+  const list = await api("site");
+  const current = list.find((x) => `${x.name}.${x.lang}` === selected) || list[0];
+  const key = `${current.name}/${current.lang}`;
+  const page = await api("site/" + key);
+  view.innerHTML = `
+    <div class="page-head"><h1>Website</h1><span class="muted small">The public Plan&amp;Ride pages. Slovak at /…, English at /en/….</span></div>
+    <div class="split templates">
+      <div class="list">
+        ${list.map((x) => `<a class="bug-row" href="#site/${x.name}.${x.lang}" aria-current="${x === current}">
+          <span class="plate line">${x.lang.toUpperCase()}</span>
+          <span class="t">${esc(x.label)}</span>
+          <span class="m">${x.custom ? `Edited${x.updated_by ? " by " + esc(x.updated_by) : ""} ${ago(x.updated_at)}` : "Default"}</span></a>`).join("")}
+      </div>
+      <section class="detail">
+        <h2 style="font-size:24px">${esc(current.label)} <span class="muted small">(${current.lang.toUpperCase()})</span></h2>
+        <p class="muted small">The page content in HTML; the header, menu and footer are added around it.
+          Useful: <code>&lt;h1&gt;</code> title, <code>&lt;h2&gt;</code>/<code>&lt;h3&gt;</code> sections, <code>&lt;p class="lead"&gt;</code> intro,
+          <code>&lt;a class="btn"&gt;</code> button, <code>&lt;div class="features"&gt;&lt;div class="card"&gt;</code> feature cards.
+          Live at <a href="${esc(current.url)}" target="_blank" rel="noopener">${esc(me.publicUrl + current.url)}</a>.</p>
+        <div class="editor">
+          <textarea id="tpl" spellcheck="false" aria-label="Page HTML">${esc(page.html)}</textarea>
+          <iframe id="tpl-preview" class="preview" title="Preview" sandbox></iframe>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" id="tpl-save" type="button">Publish</button>
+          <button class="btn danger" id="tpl-reset" type="button" ${current.custom ? "" : "disabled"}>Reset to default</button>
+          <span class="muted small" id="tpl-state"></span>
+        </div>
+      </section>
+    </div>`;
+  const area = $("#tpl"), frame = $("#tpl-preview"), state = $("#tpl-state");
+  const preview = async () => {
+    try { frame.srcdoc = (await api(`site/${key}/preview`, { html: area.value })).html; } catch (e) { state.textContent = e.message; }
+  };
+  area.oninput = () => {
+    state.textContent = area.value === page.html ? "" : "Unpublished changes";
+    clearTimeout(area.t);
+    area.t = setTimeout(preview, 400);
+  };
+  area.onkeydown = (e) => { // Tab indents instead of leaving the editor
+    if (e.key !== "Tab" || e.shiftKey) return;
+    e.preventDefault();
+    area.setRangeText("  ", area.selectionStart, area.selectionEnd, "end");
+    area.oninput();
+  };
+  const sel = `${current.name}.${current.lang}`;
+  $("#tpl-save").onclick = run($("#tpl-save"), async () => { await api(`site/${key}/save`, { html: area.value }); toast("Page published"); renderSite(sel); });
+  $("#tpl-reset").onclick = run($("#tpl-reset"), async () => {
+    if (!confirm("Replace your edits with the default page?")) return;
+    await api(`site/${key}/reset`, {});
+    toast("Page reset");
+    renderSite(sel);
+  });
+  preview();
+}
+
 // ------------------------------------------------------------------ email templates
 
 async function renderTemplates(selected) {
@@ -676,7 +743,7 @@ function liveUpdates() {
     clearTimeout(timer);
     timer = setTimeout(() => {
       const page = location.hash.slice(1).split("/")[0] || "bugs";
-      const shown = kind === "community" ? page === "community" : page === "bugs" || page === "bug";
+      const shown = kind === "community" ? page === "community" : ["bugs", "bug", "ideas", "idea"].includes(page);
       const typing = document.activeElement?.matches("input, textarea, select") ||
         [...document.querySelectorAll("textarea")].some((t) => t.value.trim());
       if (shown && !typing) {
@@ -684,7 +751,7 @@ function liveUpdates() {
         route().then(() => scrollTo(0, y));
       } else {
         refreshCounts();
-        if (kind === "bugs") toast("New bug report");
+        if (kind === "bugs") toast("New report");
       }
     }, 1000);
   };

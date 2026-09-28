@@ -1,7 +1,7 @@
 // Shared helpers for the web client: DOM, storage, API, formatting, sheets, logs.
 import { t, lang } from './i18n.js';
 
-export const VERSION = '2.7.1';
+export const VERSION = '2.8.1';
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -16,7 +16,7 @@ export function log(level, ...parts) {
 addEventListener('error', (e) => log('E', 'uncaught', e.error || e.message));
 addEventListener('unhandledrejection', (e) => log('E', 'unhandled rejection', e.reason));
 export const collectLogs = () =>
-  `testEM web ${VERSION}\n${navigator.userAgent}\nlanguage ${lang()}, standalone ${matchMedia('(display-mode: standalone)').matches || navigator.standalone === true}\n\n` +
+  `Plan&Ride web ${VERSION}\n${navigator.userAgent}\nlanguage ${lang()}, standalone ${matchMedia('(display-mode: standalone)').matches || navigator.standalone === true}\n\n` +
   logLines.join('\n').replace(/("?(password|pin|sessionId)"?\s*[:=]\s*)"?[^",\s]+"?/gi, '$1[removed]');
 
 // ------------------------------------------------------------------ storage (always safe)

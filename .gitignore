@@ -40,3 +40,9 @@ google-services.json
 # Build output
 .kotlin/
 **/build/
+
+# emhub runtime files
+hub/*.db
+__pycache__/
+# CLI builds (the IDE locks app/build)
+/app/build-cli

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}}</title>
+<meta name="description" content="{{description}}">
+<link rel="icon" href="/mark.png">
+<link rel="alternate" hreflang="sk" href="{{url_sk}}">
+<link rel="alternate" hreflang="en" href="{{url_en}}">
+<link rel="stylesheet" href="/brand.css">
+<style>
+  /* Plan&Ride colours: the logo's green on white; emhub's own pages keep their blue. */
+  :root { --sign: #13914A; --accent: #13914A; --ink: #1B1F27; --paper: #F6F8F7; --surface: #FFFFFF; --line: #DDE3DF; --muted: #5C6670; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --sign: #3CC77A; --accent: #3CC77A; --ink: #E9EEEB; --paper: #0F1512; --surface: #17201B; --line: #2A372F; --muted: #9AA8A0; }
+    /* The logo's bus is black: give it its white ground back. */
+    :root:not([data-theme="light"]) .brand img, :root:not([data-theme="light"]) .hero img { background: #fff; border-radius: 8px; padding: 4px; }
+    :root:not([data-theme="light"]) .hero img { border-radius: 20px; padding: 16px; }
+    :root:not([data-theme="light"]) .btn:not(.quiet) { color: #0F1512; }
+  }
+  body { min-height: 100dvh; display: flex; flex-direction: column; }
+  .wrap { width: 100%; max-width: 860px; margin: 0 auto; padding: 0 16px; }
+  header.site { background: var(--surface); border-bottom: 1px solid var(--line); }
+  header.site .wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-family: var(--display); font-weight: 700; font-size: 24px; }
+  .brand img { height: 32px; width: auto; }
+  .brand b { color: var(--accent); }
+  nav.site { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+  nav.site a { color: var(--ink); text-decoration: none; padding: 6px 10px; border-radius: 6px; font-weight: 500; }
+  nav.site a[aria-current="page"] { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  .lang { font-size: 14px; color: var(--muted); }
+  .lang a { color: var(--muted); }
+  main { flex: 1; padding: 32px 0 48px; }
+  main h1 { font-size: 40px; margin: 0 0 12px; }
+  main h2 { font-size: 26px; margin: 32px 0 8px; }
+  main h3 { font-size: 20px; margin: 22px 0 6px; }
+  main p, main li { max-width: 68ch; }
+  main ul { padding-left: 22px; }
+  main li { margin: 4px 0; }
+  main code { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 0.92em; }
+  main hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+  .hero { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; }
+  .hero img { width: 200px; height: auto; }
+  .lead { font-size: 19px; color: var(--muted); }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0 8px; }
+  .btn { text-decoration: none; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 28px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .card h3 { margin: 0 0 4px; font-size: 19px; }
+  .card p { margin: 0; color: var(--muted); }
+  footer.site { border-top: 1px solid var(--line); background: var(--surface); font-size: 14px; color: var(--muted); }
+  footer.site .wrap { display: flex; gap: 16px; flex-wrap: wrap; padding-top: 16px; padding-bottom: 16px; }
+  footer.site a { color: var(--muted); }
+  footer.site .admin { margin-left: auto; }
+  @media (max-width: 600px) {
+    .hero { grid-template-columns: 1fr; }
+    .hero img { width: 140px; order: -1; }
+    main h1 { font-size: 32px; }
+    nav.site { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="{{home_url}}"><img src="/mark.png" alt="" width="49" height="32"><span>Plan<b>&amp;</b>Ride</span></a>
+    <nav class="site" aria-label="{{nav_label}}">{{{nav}}}</nav>
+    <span class="lang">{{{lang_switch}}}</span>
+  </div>
+</header>
+<main><div class="wrap">
+{{{content}}}
+</div></main>
+<footer class="site">
+  <div class="wrap">
+    <span>© {{year}} Plan&amp;Ride</span>
+    <a href="mailto:ksjd.apps@gmail.com">ksjd.apps@gmail.com</a>
+    <a href="https://github.com/karafamichal/testEM">GitHub</a>
+    <a class="admin" href="/login">{{admin_label}}</a>
+  </div>
+</footer>
+</body>
+</html>

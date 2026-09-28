@@ -122,6 +122,56 @@ class LiveRepository(context: Context) {
         }.sortedBy { it.secondsUntil }
     }
 
+    /**
+     * The whole board for a stop: sadzv's live departures plus other carriers' intercity buses
+     * from cp.sk's timetable (Slovak Lines, Arriva, FlixBus, …) that sadzv doesn't know.
+     * Fails only when both sources fail.
+     */
+    suspend fun getBoard(stop: LiveStop): List<LiveDeparture> {
+        val live = runCatching { getDepartures(stop) }
+        val other = runCatching { otherCarriers(stop, live.getOrDefault(emptyList())) }
+        if (live.isFailure && other.isFailure) throw live.exceptionOrNull()!!
+        return (live.getOrDefault(emptyList()) + other.getOrDefault(emptyList())).sortedBy { it.secondsUntil }
+    }
+
+    /** cp.sk stop per sadzv stop (null = none nearby), and its board with when it was fetched. */
+    private val cpStops = mutableMapOf<Int, com.ksjd.testem.CpStopSuggestion?>()
+    private val cpBoards = mutableMapOf<Int, Pair<Long, List<com.ksjd.testem.CpTimetableService.BoardRow>>>()
+
+    private suspend fun otherCarriers(stop: LiveStop, live: List<LiveDeparture>): List<LiveDeparture> = withContext(Dispatchers.IO) {
+        val cpStop = if (synchronized(cpStops) { stop.id in cpStops }) synchronized(cpStops) { cpStops[stop.id] }
+        else cp.intercityStopNear(stop.name, stop.lat, stop.lon).also { synchronized(cpStops) { cpStops[stop.id] = it } }
+        cpStop ?: return@withContext emptyList()
+        val now = System.currentTimeMillis()
+        // The timetable doesn't change: every 2 min is plenty (the board refreshes every 15 s).
+        val rows = synchronized(cpBoards) { cpBoards[stop.id] }?.takeIf { now - it.first < CP_BOARD_MS }?.second
+            ?: cp.intercityBoard(cpStop).also { synchronized(cpBoards) { cpBoards[stop.id] = now to it } }
+        rows.filter { row -> row.atMs > now - 60_000L && live.none { sameBus(it, row) } }.map { row ->
+            LiveDeparture(
+                line = row.line,
+                lineId = 0L,
+                destination = row.destination.split(",").map { it.trim() }.filter { it.isNotEmpty() }.joinToString(", "),
+                platformNumber = row.platform,
+                routeNumber = "",
+                tripNumber = 0,
+                plannedSecondOfDay = row.minutes * 60,
+                secondsUntil = ((row.atMs - now) / 1000L).toInt(),
+                isRealtime = false,
+                isCancelled = false,
+                delaySeconds = null,
+                fetchedAtMs = now,
+                fromTimetable = true,
+                operator = row.operator
+            )
+        }
+    }
+
+    /** sadzv and cp.sk write lines differently ("606106" vs "106"): same minute and matching line. */
+    private fun sameBus(d: LiveDeparture, row: com.ksjd.testem.CpTimetableService.BoardRow): Boolean {
+        val gap = abs(d.plannedSecondOfDay / 60 - row.minutes).let { minOf(it, 1440 - it) }
+        return gap <= 1 && (d.line == row.line || d.line.endsWith(row.line) || row.line.endsWith(d.line))
+    }
+
     suspend fun getVehicles(): List<LiveVehicle> = withContext(Dispatchers.IO) {
         val root = JsonParser.parseString(get("getAllRtdVehicles")).asJsonObject
         val vehicles = root.getAsJsonArray("vehicles") ?: JsonArray()
@@ -152,7 +202,14 @@ class LiveRepository(context: Context) {
      * sadzv's delay, the timetable.
      */
     suspend fun getTrip(ref: TripRef): TripDetail = withContext(Dispatchers.IO) {
-        val base = if (ref.isScheduleOnly) timetableTrip(ref) else liveTrip(ref)
+        val base = when {
+            ref.isScheduleOnly -> timetableTrip(ref)
+            // Another carrier's bus from cp.sk's board: sadzv knows nothing about it.
+            ref.lineId == 0L -> timetableFallback(ref)?.let { t ->
+                t.copy(line = ref.line, destination = ref.destination.ifBlank { t.destination }, alightOrder = null, fromTimetable = true)
+            } ?: TripDetail(ref.line, ref.destination, emptyList(), null)
+            else -> liveTrip(ref)
+        }
         positioned(ref, base.copy(communityKey = communityKey(ref, base)))
     }
 
@@ -305,13 +362,15 @@ class LiveRepository(context: Context) {
      */
     private suspend fun timetableFallback(ref: TripRef): TripDetail? {
         if (ref.fromStopId == 0 || ref.plannedSecondOfDay < 0) return null
-        val key = "${ref.lineId}-${ref.tripNumber}-${ref.plannedSecondOfDay}-${LocalDate.now(zone)}"
+        val key = "${ref.lineId}-${ref.line}-${ref.tripNumber}-${ref.plannedSecondOfDay}-${LocalDate.now(zone)}"
         synchronized(fallbackCache) { fallbackCache[key] }?.let { (detail, at) ->
             if (detail != null || System.currentTimeMillis() - at < 10 * 60_000L) return detail
         }
         val stop = stopById(ref.fromStopId) ?: return null
         val segment = runCatching {
-            cp.findTrip(stop.name, stop.lat, stop.lon, ref.line, ref.plannedSecondOfDay / 60 % (24 * 60), cityFor(stop.lat, stop.lon))
+            cp.findTrip(stop.name, stop.lat, stop.lon, ref.line, ref.plannedSecondOfDay / 60 % (24 * 60),
+                // Other carriers' buses (lineId 0) are on the intercity timetable, not a city one.
+                if (ref.lineId == 0L) "slovensko" else cityFor(stop.lat, stop.lon))
         }.getOrNull()
         val detail = segment?.let { s ->
             runCatching {
@@ -489,6 +548,7 @@ class LiveRepository(context: Context) {
 
         private val JSON = "application/json; charset=utf-8".toMediaType()
         private const val STOPS_CACHE_MS = 24L * 60 * 60 * 1000
+        private const val CP_BOARD_MS = 2 * 60_000L
 
         fun normalize(value: String): String {
             val stripped = Normalizer.normalize(value, Normalizer.Form.NFD)

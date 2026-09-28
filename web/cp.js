@@ -3,46 +3,13 @@
 //  - cp.sk planner (stop suggestions, connections, paging, route pages)
 // All times the browser gets are epoch ms; Slovak wall-clock conversion happens here.
 import { parse } from 'node-html-parser';
-import { readableStop, tripProgress, snapToRoute, delayAt, BUS_GPS_MAX_M, GPS_FRESH_MS } from './public/js/logic.js';
+import { readableStop, tripProgress, snapToRoute, delayAt, BUS_GPS_MAX_M, GPS_FRESH_MS, localToEpoch, todayLocal, addDays, isoDate } from './public/js/logic.js';
+
+export { localToEpoch, todayLocal };
 
 const LIVE = 'https://sadzv.qrbus.me/index';
 const TZ = 'Europe/Bratislava';
 const UA = 'Mozilla/5.0';
-
-// ---------------------------------------------------------------- time zone
-
-const tzFormat = new Intl.DateTimeFormat('en-US', {
-  timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
-  hour: '2-digit', minute: '2-digit', second: '2-digit',
-});
-
-function tzParts(ms) {
-  return Object.fromEntries(tzFormat.formatToParts(new Date(ms)).map((p) => [p.type, Number(p.value)]));
-}
-
-function offsetMs(ms) {
-  const p = tzParts(ms);
-  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(ms / 1000) * 1000;
-}
-
-/** Slovak local date/time -> epoch ms (month is 1-based). */
-export function localToEpoch(year, month, day, hour, minute) {
-  const guess = Date.UTC(year, month - 1, day, hour, minute);
-  return guess - offsetMs(guess - offsetMs(guess));
-}
-
-/** Today's date in Slovakia as {year, month, day}. */
-export function todayLocal(ms = Date.now()) {
-  const p = tzParts(ms);
-  return { year: p.year, month: p.month, day: p.day };
-}
-
-function addDays({ year, month, day }, n) {
-  const d = new Date(Date.UTC(year, month - 1, day + n));
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
-}
-
-const isoDate = ({ year, month, day }) => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
 // ---------------------------------------------------------------- fetch helpers
 
@@ -259,11 +226,65 @@ async function departureBoard(city, stop, time) {
   const url = `https://cp.sk${prefixFor(city)}/odchody/`;
   const form = new URLSearchParams({ From: stop.text, FromHidden: hidden(stop), PositionFromHidden: position(stop), Date: '', Time: time, IsArr: 'False' });
   const html = await fetchText(url, { method: 'POST', body: form, headers: { Referer: url, 'Content-Type': 'application/x-www-form-urlencoded' } });
-  return parse(html).querySelectorAll('tr.dep-row-first').map((row) => ({
-    line: lineNo(text(row.querySelector('.code h3'))),
-    minutes: clockMinutes(row.getAttribute('data-datetime')),
-    destination: parse(row.getAttribute('data-stationname') || '').text.trim(),
-  })).filter((r) => r.minutes != null);
+  return parse(html).querySelectorAll('tr.dep-row-first').map((row) => {
+    // data-datetime="28.09.2026 18:05:00", Slovak local time; the carrier is on the second row.
+    const m = /(\d{1,2})\.(\d{1,2})\.(\d{4}) (\d{1,2}):(\d{2})/.exec(row.getAttribute('data-datetime') || '');
+    const second = row.nextElementSibling?.classList.contains('dep-row-second') ? row.nextElementSibling : null;
+    return {
+      line: lineNo(text(row.querySelector('.code h3'))),
+      minutes: clockMinutes(row.getAttribute('data-datetime')),
+      destination: parse(row.getAttribute('data-stationname') || '').text.trim(),
+      platform: text(row.querySelectorAll('span[title]').find((x) => /^nást/i.test(x.getAttribute('title') || ''))),
+      operator: text(second?.querySelector('span[title="dopravce"]')),
+      atMs: m ? localToEpoch(+m[3], +m[2], +m[1], +m[4], +m[5]) : 0,
+    };
+  }).filter((r) => r.minutes != null);
+}
+
+// ---------------------------------------------------------------- other carriers on a stop's board
+
+const cpStops = new Map(); // sadzv stop id -> cp.sk intercity stop | null
+const cpBoards = new Map(); // sadzv stop id -> { at, rows }
+
+/** sadzv and cp.sk write lines differently ("606106" vs "106"): same minute and matching line. */
+function sameBus(d, row) {
+  const gap = minutesGap(Math.floor(d.plannedSecondOfDay / 60), row.minutes);
+  return gap <= 1 && (d.line === row.line || d.line.endsWith(row.line) || row.line.endsWith(d.line));
+}
+
+/**
+ * Intercity buses of every carrier (Slovak Lines, Arriva, FlixBus, ...) at a sadzv stop, from
+ * cp.sk's timetable, minus the ones sadzv already shows live. Same as the Android app.
+ */
+export async function otherCarriers(stop, live) {
+  if (!cpStops.has(stop.id)) {
+    if (cpStops.size > 2000) cpStops.clear();
+    cpStops.set(stop.id, await nearestCpStop('slovensko', stop).catch(() => null));
+  }
+  const cpStop = cpStops.get(stop.id);
+  if (!cpStop) return [];
+  const now = Date.now();
+  let cached = cpBoards.get(stop.id);
+  // The timetable doesn't change: every 2 min is plenty (boards refresh every 15 s).
+  if (!cached || now - cached.at > 2 * 60000) {
+    cached = { at: now, rows: await departureBoard('slovensko', cpStop, '') };
+    if (cpBoards.size > 500) cpBoards.clear();
+    cpBoards.set(stop.id, cached);
+  }
+  return cached.rows.filter((r) => r.atMs > now - 60000 && !live.some((d) => sameBus(d, r))).map((r) => ({
+    line: r.line, lineId: 0, destination: readableStop(r.destination), platformNumber: r.platform, routeNumber: '', tripNumber: 0,
+    plannedSecondOfDay: r.minutes * 60, departsAtMs: r.atMs, isRealtime: false, isCancelled: false, delaySeconds: null,
+    fromTimetable: true, operator: r.operator,
+  }));
+}
+
+/** The whole board for a stop: sadzv's live departures plus other carriers. Fails only when both fail. */
+export async function getBoard(platformIds, stop) {
+  const [live, other] = await Promise.allSettled([getDepartures(platformIds), stop ? otherCarriers(stop, []) : Promise.resolve([])]);
+  if (live.status === 'rejected' && other.status === 'rejected') throw live.reason;
+  const liveRows = live.status === 'fulfilled' ? live.value : [];
+  const otherRows = other.status === 'fulfilled' ? other.value.filter((r) => !liveRows.some((d) => sameBus(d, { ...r, minutes: r.plannedSecondOfDay / 60 }))) : [];
+  return [...liveRows, ...otherRows].sort((a, b) => a.departsAtMs - b.departsAtMs);
 }
 
 /**
@@ -271,8 +292,8 @@ async function departureBoard(city, stop, time) {
  * the same line within 2 minutes, then that bus's route via a direct connection to
  * cp.sk's own name for its final stop.
  */
-export async function findTimetableTrip(stop, line, plannedMinutes) {
-  for (const city of [...new Set([cityFor(stop.lat, stop.lon), 'slovensko'])]) {
+export async function findTimetableTrip(stop, line, plannedMinutes, intercityOnly = false) {
+  for (const city of [...new Set([intercityOnly ? 'slovensko' : cityFor(stop.lat, stop.lon), 'slovensko'])]) {
     const cpStop = await nearestCpStop(city, stop);
     if (!cpStop) continue;
     const rows = (await departureBoard(city, cpStop, hhmm(plannedMinutes - 3)).catch(() => []))
@@ -293,13 +314,14 @@ const fallbackCache = new Map(); // key -> { trip, at }; misses retried after 10
 
 async function timetableFallback(ref) {
   if (!ref.fromStopId || !(ref.plannedSecondOfDay >= 0)) return null;
-  const key = `${ref.lineId}-${ref.tripNumber}-${ref.plannedSecondOfDay}-${isoDate(todayLocal())}`;
+  const key = `${ref.lineId}-${ref.line}-${ref.tripNumber}-${ref.plannedSecondOfDay}-${isoDate(todayLocal())}`;
   const cached = fallbackCache.get(key);
   if (cached && (cached.trip || Date.now() - cached.at < 10 * 60000)) return cached.trip;
   const stop = (await getStops()).find((s) => s.id === ref.fromStopId);
   let trip = null;
   if (stop) {
-    const seg = await findTimetableTrip(stop, ref.line, Math.floor(ref.plannedSecondOfDay / 60) % 1440).catch(() => null);
+    // Other carriers' buses (lineId 0) are on the intercity timetable, not a city one.
+    const seg = await findTimetableTrip(stop, ref.line, Math.floor(ref.plannedSecondOfDay / 60) % 1440, !ref.lineId).catch(() => null);
     if (seg) trip = await getScheduledTrip({ line: ref.line, destination: ref.destination, scheduleUrl: seg.routeUrl, serviceDate: seg.serviceDate }).catch(() => null);
   }
   if (fallbackCache.size > 2000) fallbackCache.clear();
@@ -308,6 +330,13 @@ async function timetableFallback(ref) {
 }
 
 export async function getLiveTrip(ref) {
+  // Another carrier's bus from cp.sk's board: sadzv knows nothing about it.
+  if (!ref.lineId) {
+    const timetable = await timetableFallback(ref);
+    return timetable
+      ? { ...timetable, line: ref.line, destination: ref.destination || timetable.destination, alightOrder: null, fromTimetable: true, positionSource: 'timetable' }
+      : { line: ref.line, destination: ref.destination, stops: [], delaySeconds: null, positionSource: 'timetable' };
+  }
   const root = await livePost('getPlatformsDataWithHistory', {
     lineId: ref.lineId, lineNumber: ref.line, tripNumber: ref.tripNumber, routeNumber: ref.routeNumber, organizationSystemEntityId: 0,
   });

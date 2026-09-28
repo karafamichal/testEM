@@ -327,3 +327,24 @@ details summary { color: var(--accent-text); font-weight: 600; cursor: pointer; 
 .dialog .row-title { font-weight: 600; }
 .dialog .hint, .dialog .btn.wide { margin-left: 16px; margin-right: 16px; width: calc(100% - 32px); }
 .toast { position: fixed; left: 50%; bottom: calc(var(--safe-bottom) + 86px); transform: translateX(-50%); z-index: 80; background: var(--text); color: var(--bg); padding: 11px 16px; border-radius: 12px; font-size: 14px; max-width: calc(100vw - 32px); }
+
+/* ---- 2.8: optional account, home, regular rides */
+#tabbar .ico-home { display: none; }
+#tabbar.no-account .ico-home { display: block; }
+#tabbar.no-account .ico-qr { display: none; }
+.pad { padding: 0 16px; }
+.locked-stub { display: flex; align-items: center; gap: 14px; width: calc(100% - 32px); margin: 6px 16px 0; padding: 18px 16px; background: var(--surface); border: 0; border-radius: 18px; text-align: left; color: var(--text); }
+.locked-icon { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 14px; background: color-mix(in srgb, var(--accent) 18%, var(--surface)); font-size: 28px; }
+.empty.locked .btn { margin-top: 12px; }
+.journey { display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 14px; }
+.journey .row-main { gap: 2px; }
+.journey-lines { display: flex; gap: 6px; margin-top: 4px; }
+.journey-actions { display: flex; align-items: center; gap: 4px; }
+.preview-board { display: block; width: calc(100% - 32px); margin: 0 16px 10px; padding: 8px 0 4px; background: var(--surface); border: 0; border-radius: 14px; text-align: left; color: var(--text); }
+.preview-name { display: block; padding: 2px 14px 4px; font-size: 13px; color: var(--muted); }
+.preview-board .board.compact { margin: 0; }
+.dialog-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.ride-editor { max-height: 88dvh; overflow-y: auto; }
+.ride-editor .chips { border: 0; padding: 0; margin: 0; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.conn-head .icon-btn.star.on { color: var(--amber); }

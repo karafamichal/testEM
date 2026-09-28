@@ -1,4 +1,4 @@
-// Unofficial web client for sadzv.qrbus.me (EMtest).
+// Plan&Ride web version (testEM internally), unofficial client for sadzv.qrbus.me.
 // Serves the PWA static files AND acts as a same-origin proxy to qrbus,
 // because a browser cannot talk to qrbus directly (CORS + cross-site cookies).
 //
@@ -10,7 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as transit from './cp.js';
-import { startFollowing, stopFollowing, vapidPublicKey } from './push.js';
+import { startFollowing, stopFollowing, vapidPublicKey, syncRides } from './push.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -526,8 +526,35 @@ setInterval(() => {
 // HTTP API
 // ---------------------------------------------------------------------------
 const app = express();
+app.disable('x-powered-by');
 // Bug reports carry logs, so allow more than the 100 kB default.
 app.use(express.json({ limit: '1.5mb' }));
+
+// Security headers. Scripts only from this server; inline styles are used for bar heights etc.
+app.use((req, res, next) => {
+  res.set({
+    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'same-origin',
+    'X-Frame-Options': 'DENY',
+    'Strict-Transport-Security': 'max-age=31536000',
+  });
+  next();
+});
+
+/** Fixed-window counter per key. ponytail: in memory, resets on restart; fine for one process. */
+function limiter(limit, windowMs) {
+  const hits = new Map();
+  return (key) => {
+    const now = Date.now();
+    const h = hits.get(key);
+    if (!h || now - h.start > windowMs) { hits.set(key, { start: now, count: 1 }); if (hits.size > 50000) hits.clear(); return true; }
+    return ++h.count <= limit;
+  };
+}
+// Sign-ins go to sadzv with the user's password: keep guessing through this server slow.
+const loginLimit = limiter(10, 15 * 60 * 1000);
 
 function sendError(res, err) {
   const status = err instanceof HttpError ? err.status : 500;
@@ -536,6 +563,7 @@ function sendError(res, err) {
 
 app.post('/api/login', async (req, res) => {
   try {
+    if (!loginLimit(clientIp(req))) return res.status(429).json({ success: false, error: 'Too many sign-in attempts. Try again in a few minutes.' });
     const { email, password, serial } = req.body || {};
     if (!email || !password) {
       return res.status(400).json({ success: false, error: 'Email and password are required' });
@@ -621,10 +649,13 @@ const asTripRef = (b) => ({
 });
 
 app.get('/api/live/stops', wrap(() => transit.getStops()));
-app.post('/api/live/departures', wrap((req) => {
+app.post('/api/live/departures', wrap(async (req) => {
   const ids = (req.body?.platformIds || []).map(Number).filter(Number.isFinite).slice(0, 20);
   if (!ids.length) throw Object.assign(new Error('platformIds required'), { status: 400 });
-  return transit.getDepartures(ids);
+  // With the stop, other carriers' intercity buses from cp.sk join the board.
+  const stopId = Number(req.body?.stopId);
+  const stop = stopId ? (await transit.getStops()).find((x) => x.id === stopId) : null;
+  return transit.getBoard(ids, stop);
 }));
 app.post('/api/live/trip', wrap(async (req) => {
   const ref = asTripRef(req.body || {});
@@ -657,6 +688,20 @@ app.post('/api/follow', wrap((req) => {
 }));
 app.post('/api/unfollow', wrap((req) => ({ ok: stopFollowing(String(req.body?.id || '')) })));
 
+// Regular rides: the server keeps them with the phone's push subscription, finds that day's
+// bus before each departure, starts the alerts for it and tells the phone.
+app.post('/api/rides', wrap((req) => {
+  const b = req.body || {};
+  if (!b.subscription?.endpoint) throw Object.assign(new Error('Push subscription required'), { status: 400 });
+  return syncRides({
+    subscription: b.subscription,
+    rides: Array.isArray(b.rides) ? b.rides.slice(0, 30) : [],
+    lang: b.lang === 'en' ? 'en' : 'sk',
+    arriveLeadMinutes: Math.min(60, Math.max(1, Math.round(Number(b.arriveLeadMinutes) || 2))),
+    community: !!b.community,
+  }, hubRequest);
+}));
+
 // ---------------------------------------------------------------------------
 // emhub proxy: bug reports and community delays.
 // ---------------------------------------------------------------------------
@@ -672,7 +717,12 @@ async function hubRequest(route, { method = 'GET', body, clientIp } = {}) {
   if (!res.ok) throw Object.assign(new Error(json.error || `emhub HTTP ${res.status}`), { status: res.status });
   return json;
 }
-const clientIp = (req) => req.get('CF-Connecting-IP') || req.socket.remoteAddress || '';
+// cloudflared adds CF-Connecting-IP; trust it only when the request comes from the tunnel on this host/LAN.
+const clientIp = (req) => {
+  const direct = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  const trusted = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1$)/.test(direct);
+  return (trusted && req.get('CF-Connecting-IP')) || direct;
+};
 
 app.post('/api/hub/bugs', wrap((req) =>
   hubRequest('bugs', { method: 'POST', body: { ...req.body, platform: 'web' }, clientIp: clientIp(req) })));
@@ -702,6 +752,6 @@ app.use(
 );
 
 app.listen(PORT, () => {
-  console.log(`testEM web client listening on http://localhost:${PORT}`);
+  console.log(`Plan&Ride web (testEM) listening on http://localhost:${PORT}`);
   console.log(`Proxying to ${BASE_URL}`);
 });

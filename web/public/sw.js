@@ -1,6 +1,6 @@
 // Service worker: caches the app shell so the PWA launches offline, and shows
 // "follow this bus" push alerts. API requests (/api/*) are always network.
-const CACHE = 'testem-shell-v20-2.7.1';
+const CACHE = 'testem-shell-v22-2.8.1';
 const SHELL = [
   '/',
   '/index.html',
@@ -11,6 +11,7 @@ const SHELL = [
   '/js/logic.js',
   '/js/live.js',
   '/js/planner.js',
+  '/js/rides.js',
   '/qrcode.min.js',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
@@ -58,8 +59,9 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('push', (event) => {
   let data = {};
-  try { data = event.data.json(); } catch { data = { title: 'testEM', body: event.data?.text() || '' }; }
-  event.waitUntil(self.registration.showNotification(data.title || 'testEM', {
+  try { data = event.data.json(); } catch { data = { title: 'Plan&Ride', body: event.data?.text() || '' }; }
+  event.waitUntil(self.registration.showNotification(data.title || 'Plan&Ride', {
+    data: { url: data.url || '/' },
     body: data.body || '',
     tag: data.tag,
     icon: '/icons/icon-192.png',
@@ -71,9 +73,13 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil(
+    // Where the notification leads: the followed bus on the home tab, or a regular ride.
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const url = event.notification.data?.url || '/';
       const open = list.find((c) => new URL(c.url).origin === self.location.origin);
-      return open ? open.focus() : self.clients.openWindow('/');
+      if (!open) return self.clients.openWindow(url);
+      open.postMessage({ type: 'open', url });
+      return open.focus();
     })
   );
 });

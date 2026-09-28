@@ -2,6 +2,8 @@
 
 Backend and admin dashboard for testEM:
 
+- **The Plan&Ride website**: Home, What's new (the changelog), Support and Privacy policy, in Slovak (`/`, `/changelog`, `/support`, `/privacy`) and English (`/en/...`). Admins edit the pages under *Website* in the dashboard, with a live preview; *Reset* restores the default from `site/`. The admin sign-in is at `/login`.
+- **Feature suggestions** (`kind: "feature"`), listed under *Suggestions* in the dashboard, apart from bugs.
 - **Bug reports** from the Android app and the web version: the report, optional name and email, and the app's logs, sent only after the user ticks the consent box.
 - **Email**: new reports go to the admin inbox, the reporter gets a confirmation, and admins reply from the dashboard. All emails are HTML templates in `emails/` with `{{placeholders}}`.
 - **Community delays** for intercity buses, which have no live position. Riders who opted in tap where the bus really is, and everyone following that bus sees the pooled delay.
@@ -26,6 +28,10 @@ The first start creates the admin from `HUB_BOOTSTRAP_USER` / `HUB_BOOTSTRAP_PAS
 **More admins**: under **Settings → Admins**, enter a username and email and press **Send invitation**. They get an email with a one-time link (valid 72 hours) to choose their own password, then they're signed in. Until then the account can't be used. If the email can't be sent, the dashboard shows the link so you can pass it on yourself; **Resend** makes a new link and the old one stops working.
 
 Self-check: `python3 test_hub.py`.
+
+## Website
+
+Each page is an HTML fragment: `site/<page>.<lang>.html` is the default, an edited version is stored in the database (`site_pages`). `site/layout.html` adds the header, menu, language switch and footer around it. Page titles and menu labels are in `SITE_PAGES` in `hub.py`. When the site moves to a new address, set `HUB_PUBLIC_URL` to it and list the old one in `HUB_EXTRA_ORIGINS` so the dashboard keeps working there.
 
 ## Authentik
 
@@ -65,7 +71,7 @@ Apps send `X-App-Key` (one of `HUB_APP_KEYS`). An app key ships inside the app, 
 
 | Method | Path | Body / query |
 | --- | --- | --- |
-| POST | `/api/v1/bugs` | `consent: true`, plus `description` and/or `logs`; optional `title`, `category`, `name`, `email`, `platform`, `appVersion`, `device` |
+| POST | `/api/v1/bugs` | `consent: true`, plus `description` and/or `logs` (a suggestion, `kind: "feature"`: `description` or `title`; logs are dropped); optional `kind` (`bug`/`feature`), `title`, `category`, `name`, `email`, `platform`, `appVersion`, `device` |
 | POST | `/api/v1/community/reports` | `tripKey`, `line`, `stopIndex`, `stopName`, `scheduledMs`, `reporter` |
 | GET | `/api/v1/community/delay?trip=<tripKey>` | → `{ delay: { delaySeconds, reporters, updatedAt, lastStopName } \| null }` |
 | GET | `/api/v1/health` | no key needed |

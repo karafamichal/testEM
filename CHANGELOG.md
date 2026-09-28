@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.6.0
+
+### New
+- **testEM is now Plan&Ride**, with a new icon. (The package name stays `com.ksjd.testem`, so it updates in place.)
+- **No account needed.** Departures, the planner and following a bus work without signing in. On first start you can add your sadzv.qrbus.me account or skip; add or remove it any time in *Settings*. Removing it also removes the PIN.
+- **Opens straight away with an account.** The ticket, credit, history and account details stay hidden until you unlock with your PIN or fingerprint. Tap the ticket to unlock. *Lock now* is in *Account*.
+- **My journeys** (report EM-0008): star a connection in the planner and it shows on the home tab under the ticket, with a *Follow* button. Your favourite stops' next buses follow below.
+- **Regular rides:** tap the repeat icon on a connection, then pick days of the week, a date range, extra dates and how early to start. Before each departure the app finds that day's bus and starts following it by itself. On Android 12+, allow alarms for it to start on time.
+- **Pick a date in the planner**, not only a time.
+- **Other carriers on the departure board:** intercity buses of every carrier from the cp.sk timetable (Arriva, Slovak Lines, FlixBus and more), next to the operator's live ones. Tap one to see its stops and follow it.
+- **Suggest a feature** from *Settings*. Suggestions have their own list in emhub.
+- **Website:** [par.karafa.net](https://par.karafa.net) with what's new, support and the privacy policy. *Full changelog* and *Settings → Privacy policy* open it.
+- **Usage statistics** switch in *Settings*: anonymous usage via Firebase Analytics, which no longer uses the advertising ID.
+
+### Improved
+- **GPS only when needed.** On the way to the stop the location is checked every 1–3 min. Live GPS starts at the stop from 4 min before the bus, or earlier by as much as the bus is early or usually runs early. *Will I catch it?* counts with that earlier time too.
+- **Stopped or drove past** (report EM-0007): a stop is judged only once the bus has left the stop's area. A bus that halts a little before or after the stop point now counts as stopped. Phones now also report while the bus stands.
+- The walk to the stop is found for planner buses too (their stops come from cp.sk).
+
+### Security
+- The sadzv.qrbus.me password is stored encrypted with a key in the Android Keystore.
+- The PIN uses a slow hash (PBKDF2). After 5 wrong PINs, entry locks for 30 s, doubling each time up to an hour.
+- App data is excluded from cloud backups and device transfers.
+
 ## 2.3.0
 
 ### New

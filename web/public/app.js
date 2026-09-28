@@ -1,9 +1,11 @@
-// testEM web client: entry point. Ticket, account, history, settings, PIN lock, bug reports.
+// Plan&Ride web version (testEM internally): entry point. Home, account, history, settings,
+// PIN lock, bug reports and suggestions. The account is optional, like in the Android app.
 import { t, lang, setLang, applyI18n } from './js/i18n.js';
-import { $, $$, esc, api, apiJson, store, config, loadConfig, clock, dateText, money, toMs, toast, openPage, closeOverlay, switchRow, collectLogs, log, VERSION } from './js/core.js';
-import { historyInsights, historyToCsv } from './js/logic.js';
+import { $, $$, esc, api, apiJson, store, config, loadConfig, clock, dateText, money, toMs, toast, openPage, closeOverlay, switchRow, collectLogs, log, plate, countdown, VERSION } from './js/core.js';
+import { historyInsights, historyToCsv, nextRideDeparture, pickRideConnection, readableStop, lineNumber, todayLocal } from './js/logic.js';
 import * as live from './js/live.js';
-import { renderPlanner } from './js/planner.js';
+import { renderPlanner, searchAt, savedJourneys, journeyTimes, removeJourney } from './js/planner.js';
+import { rides, rideDayText, resyncRides } from './js/rides.js';
 
 const POLL_MS = 25000;
 const RETRY_MS = 3000;
@@ -12,7 +14,7 @@ const s = {
   creds: null, // in memory only once decrypted
   sessionId: null, serial: '', account: null,
   lastBase64: null, lastTokenAt: 0, pollTimer: null, polling: false, reauthInFlight: false,
-  history: null, historyError: false, guest: false, tab: 'ticket', wakeLock: null, hiddenAt: 0,
+  history: null, historyError: false, tab: 'ticket', wakeLock: null, hiddenAt: 0, pin: null,
 };
 
 // ------------------------------------------------------------------ theme
@@ -56,17 +58,20 @@ async function decryptCreds(pin) {
   } catch { return null; }
 }
 const hasPin = () => !!store.get('credsEnc');
-/** With a PIN the password is only ever stored encrypted. */
+/** An account is saved on this device (older versions could keep it without a PIN). */
+const hasAccount = () => hasPin() || !!store.get('creds')?.password;
+/** The ticket and account may be shown: the password is decrypted in memory. */
+const unlocked = () => hasAccount() && !!s.creds;
+/** The password is only ever stored encrypted with the PIN. */
 async function saveCreds(creds) {
   s.creds = creds;
-  if (!hasPin()) store.set('creds', creds);
-  else if (s.pin) await encryptCreds(creds, s.pin);
+  if (s.pin) await encryptCreds(creds, s.pin);
 }
 
 // ------------------------------------------------------------------ views
 
 function show(id) {
-  for (const v of ['install-gate', 'lock-view', 'login-view', 'app-view']) $('#' + v).hidden = v !== id;
+  for (const v of ['install-gate', 'pin-view', 'login-view', 'app-view']) $('#' + v).hidden = v !== id;
 }
 
 function isStandalone() {
@@ -86,37 +91,92 @@ function enforceInstallGate() {
 let installPrompt = null;
 addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; $('#install-btn').hidden = false; });
 
-// ---- PIN lock
+// ---- PIN: set up after adding an account; entered in a dialog to show the ticket
 
 let lockTries = 0, lockUntil = 0;
-function showLock() {
+
+/** Right after an account is added: its password is saved only encrypted with a PIN. */
+function showPinSetup() {
   stopPolling();
-  show('lock-view');
-  const input = $('#lock-pin');
-  input.value = '';
-  $('#lock-error').hidden = true;
-  setTimeout(() => input.focus(), 50);
+  show('pin-view');
+  applyI18n($('#pin-view'));
+  const form = $('#pin-form');
+  form.reset();
+  $('#pin-error').hidden = true;
+  setTimeout(() => form.pin.focus(), 50);
 }
-$('#lock-form').onsubmit = async (e) => {
+$('#pin-form').onsubmit = async (e) => {
   e.preventDefault();
-  const err = $('#lock-error');
-  if (Date.now() < lockUntil) { err.textContent = t('lock_wait', Math.ceil((lockUntil - Date.now()) / 1000)); err.hidden = false; return; }
-  const pin = $('#lock-pin').value;
-  const creds = await decryptCreds(pin);
-  if (!creds) {
-    lockTries++;
-    if (lockTries >= 5) { lockUntil = Date.now() + 30000; lockTries = 0; err.textContent = t('lock_wait', 30); }
-    else err.textContent = t('lock_wrong', 5 - lockTries);
-    err.hidden = false;
-    $('#lock-pin').value = '';
-    return;
-  }
-  lockTries = 0;
-  s.creds = creds;
-  s.pin = pin;
-  if (s.sessionId) { showApp(); startPolling(); } else signIn(creds);
+  const f = e.target, err = $('#pin-error');
+  err.hidden = false;
+  if (!/^\d{4,8}$/.test(f.pin.value)) return (err.textContent = t('pin_short'));
+  if (f.pin.value !== f.confirm.value) return (err.textContent = t('pin_mismatch'));
+  s.pin = f.pin.value;
+  await encryptCreds(s.creds, s.pin);
+  store.set('creds', null);
+  showApp();
+  if (s.sessionId) startPolling(); else signIn(s.creds);
 };
-$('#lock-forgot').onclick = () => { if (confirm(t('logout_confirm'))) logout(); };
+$('#pin-cancel').onclick = () => removeAccount();
+
+/** PIN (the dialog) -> the password is decrypted -> signed in -> the ticket shows. */
+function unlockDialog() {
+  if (!hasPin() || unlocked() || $('#unlock')) return;
+  const d = document.createElement('div');
+  d.id = 'unlock';
+  d.className = 'dialog-backdrop';
+  d.innerHTML = `<form class="dialog stack" role="dialog" aria-modal="true" aria-labelledby="unlock-title">
+    <h2 id="unlock-title">${t('lock_title')}</h2>
+    <p class="hint small">${t('unlock_hint')}</p>
+    <input name="pin" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" aria-labelledby="unlock-title" required>
+    <p class="error-text" role="alert" hidden></p>
+    <div class="dialog-actions"><button type="button" class="text-btn" data-forgot>${t('lock_forgot')}</button>
+      <button type="button" class="text-btn" data-cancel>${t('cancel')}</button><button class="btn" type="submit">${t('unlock')}</button></div></form>`;
+  document.body.appendChild(d);
+  const input = $('input', d), err = $('.error-text', d);
+  setTimeout(() => input.focus(), 50);
+  d.onclick = (e) => {
+    if (e.target === d || e.target.closest('[data-cancel]')) d.remove();
+    if (e.target.closest('[data-forgot]') && confirm(t('remove_confirm'))) { d.remove(); removeAccount(); }
+  };
+  const submit = $('button[type=submit]', d);
+  d.onsubmit = async (e) => {
+    e.preventDefault();
+    if (submit.disabled) return; // the PIN is still being checked
+    if (Date.now() < lockUntil) { err.textContent = t('lock_wait', Math.ceil((lockUntil - Date.now()) / 1000)); err.hidden = false; return; }
+    submit.disabled = true;
+    const creds = await decryptCreds(input.value);
+    submit.disabled = false;
+    if (!creds) {
+      lockTries++;
+      // After 5 wrong PINs: 30 s, doubling each time.
+      if (lockTries >= 5) { lockUntil = Date.now() + 30000 * 2 ** Math.min(lockTries - 5, 7); err.textContent = t('lock_wait', Math.ceil((lockUntil - Date.now()) / 1000)); }
+      else err.textContent = t('lock_wrong', 5 - lockTries);
+      err.hidden = false;
+      input.value = '';
+      return;
+    }
+    lockTries = 0;
+    s.creds = creds;
+    s.pin = input.value;
+    d.remove();
+    // Show the ticket at once ("Connecting…"); signing in to sadzv takes a few seconds and
+    // until now the screen still looked locked, so people entered the PIN again and again.
+    selectTab(s.tab);
+    if (s.sessionId) startPolling(); else signIn(creds);
+  };
+}
+
+/** Hides the ticket and account again; the rest of the app stays usable. */
+function lockNow() {
+  if (!hasPin()) return;
+  stopPolling();
+  s.creds = null;
+  s.pin = null;
+  s.lastBase64 = null;
+  closeOverlay('page');
+  if (!$('#app-view').hidden) selectTab(s.tab);
+}
 
 // ---- login
 
@@ -133,20 +193,42 @@ $('#login-form').onsubmit = async (e) => {
   btn.textContent = t('login');
   if (ok) $('#password').value = '';
 };
-$('#browse-btn').onclick = () => { s.guest = true; showApp(); };
+// Welcome: continue without an account. From Settings: cancel.
+$('#browse-btn').onclick = () => { store.set('onboarded', true); showApp(); };
 
-async function signIn(creds, { fromForm } = {}) {
+let signingIn = null; // one sign-in at a time; a second call waits for the first
+function signIn(creds, opts = {}) {
+  signingIn ??= doSignIn(creds, opts).finally(() => { signingIn = null; });
+  return signingIn;
+}
+
+async function doSignIn(creds, { fromForm } = {}) {
   const r = await api('/api/login', { ...creds, serial: store.get('serial', '') });
   if (!r.ok || !r.json.success) {
     if (fromForm) {
       $('#login-error').textContent = r.json.error === 'offline' ? t('ticket_offline_no_code') : r.json.error || t('login_failed', r.status);
       $('#login-error').hidden = false;
-    } else { showLogin(); }
+    } else if (r.status === 401) {
+      updateStatus(t('ticket_signed_out'), true);
+    } else if (hasPin()) {
+      // No network or sadzv busy: say so, and try again shortly while the ticket is shown.
+      updateStatus(r.status === 0 ? t('ticket_offline_no_code') : t('login_failed', r.status), true);
+      setTimeout(() => { if (unlocked() && !s.sessionId) signIn(s.creds); }, 10000);
+    }
     return false;
   }
-  s.guest = false;
+  store.set('onboarded', true);
   s.sessionId = r.json.sessionId;
-  await saveCreds(creds);
+  if (!hasPin()) {
+    // A new account: the password is saved only once a PIN encrypts it.
+    s.creds = creds;
+    setAccount(r.json.account);
+    s.serial = r.json.serial || '';
+    showPinSetup();
+    return true;
+  }
+  // A new password from the form is encrypted again; after an unlock it is unchanged.
+  if (fromForm) await saveCreds(creds); else s.creds = creds;
   setAccount(r.json.account);
   // Keep the card the user picked last time.
   const preferred = store.get('serial', '');
@@ -170,22 +252,31 @@ async function reauth() {
   } finally { s.reauthInFlight = false; }
 }
 
-function showLogin() {
-  s.guest = false;
+/** welcome: the first-run screen (the account is optional); otherwise adding one from Settings. */
+function showLogin({ welcome = false } = {}) {
   show('login-view');
   applyI18n($('#login-view'));
-  $('#email').value = s.creds?.email || store.get('creds')?.email || '';
+  $('#login-title').textContent = welcome ? t('welcome_title') : t('login');
+  $('#login-sub').textContent = welcome ? t('welcome_body') : t('login_sub');
+  $('#browse-btn').textContent = welcome ? t('welcome_skip') : t('cancel');
+  $('#welcome-hint').hidden = !welcome;
+  $('#email').value = s.creds?.email || '';
+  $('#login-error').hidden = true;
 }
 
-function logout() {
+/** Removes the account from this device: password, PIN, card; the app keeps working without it. */
+function removeAccount() {
   if (s.sessionId) api('/api/logout', { sessionId: s.sessionId });
   stopPolling();
   Object.assign(s, { creds: null, pin: null, sessionId: null, account: null, lastBase64: null, history: null, serial: '' });
   store.set('creds', null);
   store.set('credsEnc', null);
   store.set('serial', null);
+  store.set('onboarded', true);
   closeOverlay('page');
-  showLogin();
+  $('#unlock')?.remove();
+  s.tab = 'ticket';
+  showApp();
 }
 
 // ------------------------------------------------------------------ app shell & tabs
@@ -193,10 +284,13 @@ function logout() {
 const TABS = ['ticket', 'departures', 'planner', 'history', 'account'];
 function showApp() {
   show('app-view');
-  const allowed = s.guest ? ['departures', 'planner'] : TABS;
+  // History exists only with an account; the last tab is Account or just Settings.
+  const allowed = hasAccount() ? TABS : TABS.filter((x) => x !== 'history');
   $$('#tabbar [data-tab]').forEach((b) => (b.hidden = !allowed.includes(b.dataset.tab)));
-  if (!allowed.includes(s.tab)) s.tab = allowed[0];
+  if (!allowed.includes(s.tab)) s.tab = 'ticket';
+  $('#tabbar').classList.toggle('no-account', !hasAccount());
   applyI18n($('#tabbar'));
+  $('[data-tab="account"] span', $('#tabbar')).textContent = t(hasAccount() ? 'tab_account' : 'settings');
   selectTab(s.tab);
   maybeAskPrivacy();
   requestWakeLock();
@@ -208,15 +302,21 @@ function selectTab(tab) {
   $$('.tab').forEach((el) => (el.hidden = el.id !== 'tab-' + tab));
   const el = $('#tab-' + tab);
   if (tab === 'ticket') renderTicket(el);
-  if (tab === 'departures') live.renderDepartures(el, { guest: s.guest });
-  if (tab === 'planner') renderPlanner(el, { openStop: openStopFromPlanner, guest: s.guest });
-  if (tab === 'history') renderHistory(el);
+  if (tab === 'departures') live.renderDepartures(el);
+  if (tab === 'planner') renderPlanner(el, { openStop: openStopFromPlanner });
+  if (tab === 'history') unlocked() ? renderHistory(el) : renderLocked(el);
   if (tab === 'account') renderAccount(el);
   el.scrollTop = 0;
   window.scrollTo(0, 0);
 }
 $('#tabbar').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) selectTab(b.dataset.tab); };
 document.addEventListener('click', (e) => { if (e.target.closest('[data-signin]')) showLogin(); });
+
+/** In place of a tab whose content is behind the PIN (History). */
+function renderLocked(el) {
+  el.innerHTML = `<div class="empty locked"><h3>${t('locked_title')}</h3><p>${t('locked_body')}</p><button class="btn" data-unlock>${t('unlock')}</button></div>`;
+  el.onclick = (e) => { if (e.target.closest('[data-unlock]')) unlockDialog(); };
+}
 
 function openStopFromPlanner(name, highlight) {
   selectTab('departures');
@@ -247,10 +347,13 @@ async function selectCard(serial) {
 
 function renderTicket(el) {
   const cards = s.account?.cards || [];
+  const open = unlocked();
   el.innerHTML = `
-    <header class="screen-head"><div><h1>${esc(s.account?.userName || t('tab_ticket'))}</h1><p class="hint small" id="card-type"></p></div></header>
+    <header class="screen-head"><div><h1>${esc(open && s.account?.userName ? s.account.userName.split(' ')[0] : hasAccount() ? t('tab_ticket') : 'Plan&Ride')}</h1><p class="hint small" id="card-type"></p></div></header>
     <div id="banners"></div>
-    ${cards.length > 1 ? `<div class="segmented card-switch" role="radiogroup" aria-label="${esc(t('ticket_card'))}">${cards.map((c) => `<button role="radio" aria-checked="${c.serialNumber === s.serial}" data-card="${esc(c.serialNumber)}">${esc(c.cardTypeName || c.serialNumber)}</button>`).join('')}</div>` : ''}
+    ${!hasAccount() ? '' : !open
+      ? `<button class="locked-stub" data-unlock><span class="locked-icon" aria-hidden="true">▦</span><span class="row-text"><span class="row-title">${t('ticket_locked_title')}</span><span class="row-sub">${t('ticket_locked_body')}</span></span><span aria-hidden="true">🔒</span></button>`
+      : `${cards.length > 1 ? `<div class="segmented card-switch" role="radiogroup" aria-label="${esc(t('ticket_card'))}">${cards.map((c) => `<button role="radio" aria-checked="${c.serialNumber === s.serial}" data-card="${esc(c.serialNumber)}">${esc(c.cardTypeName || c.serialNumber)}</button>`).join('')}</div>` : ''}
     <section class="ticket">
       <button class="qr-wrap" id="qr-btn" aria-label="${esc(t('ticket_fullscreen'))}"><div id="qr" class="qr"></div><span id="qr-placeholder" class="qr-placeholder">${t('ticket_loading')}</span></button>
       <div class="stub">
@@ -258,19 +361,72 @@ function renderTicket(el) {
         <p id="status" class="status" role="status">${t('ticket_connecting')}</p>
         <p id="validity" class="hint small"></p>
       </div>
-    </section>
+    </section>`}
     <div id="follow-slot-ticket"></div>
-    <div id="preview"></div>`;
+    <div id="journeys">${journeysHtml()}</div>
+    <div id="rides-next">${ridesHtml()}</div>
+    <div id="preview"></div>
+    ${hasAccount() ? '' : `<div class="notice">${t('home_add_account_hint')} <button class="text-btn" data-add-account>${t('account_add')}</button></div>`}`;
   el.onclick = (e) => {
     const c = e.target.closest('[data-card]');
     if (c) { selectCard(c.dataset.card); renderTicket(el); }
     if (e.target.closest('#qr-btn') && s.lastBase64) openFullscreenQr();
+    if (e.target.closest('[data-unlock]')) unlockDialog();
+    if (e.target.closest('[data-add-account]')) showLogin();
+    const stop = e.target.closest('[data-preview-stop]');
+    if (stop) { selectTab('departures'); live.openStopById(stop.dataset.previewStop); }
+    const follow = e.target.closest('[data-jfollow]');
+    if (follow) return followJourney(savedJourneys().find((j) => j.id === follow.dataset.jfollow));
+    const remove = e.target.closest('[data-jremove]');
+    if (remove) { removeJourney(remove.dataset.jremove); $('#journeys', el).innerHTML = journeysHtml(); return; }
+    const j = e.target.closest('[data-jopen]');
+    if (j) {
+      const journey = savedJourneys().find((x) => x.id === j.dataset.jopen);
+      const first = journey.connection.segments[0];
+      selectTab('planner');
+      searchAt(journey.route, first.departureTime, first.serviceDate, $('#tab-planner'));
+    }
+    if (e.target.closest('[data-rides-open]')) selectTab('planner');
   };
-  if (s.lastBase64) renderQR(s.lastBase64);
-  renderBanners();
+  if (open && s.lastBase64) renderQR(s.lastBase64);
+  if (open) { renderBanners(); updateStatus(); }
   live.renderFollowSlot($('#follow-slot-ticket', el));
   renderPreview();
-  updateStatus();
+}
+
+/** Starred planner results that haven't ended yet, with Follow. */
+function journeysHtml() {
+  const now = Date.now();
+  const list = savedJourneys().filter((j) => { const { arr } = journeyTimes(j); return !arr || arr > now; }).slice(0, 5);
+  if (!list.length) return '';
+  return `<h2 class="section-label">${t('home_journeys')}</h2><ul class="list">${list.map((j) => {
+    const c = j.connection, { dep } = journeyTimes(j);
+    const mins = Math.round((dep - now) / 60000);
+    const when = !dep ? '' : mins < 0 ? t('journey_underway') : mins < 60 ? t('journey_in', countdown(mins * 60)) : `${rideDayText(dep)} ${clock(dep)}`;
+    return `<li class="journey"><button class="row-main" data-jopen="${esc(j.id)}">
+        <span class="row-title">${esc(c.departureTime)} – ${esc(c.arrivalTime)} <span class="hint small">${esc(when)}</span></span>
+        <span class="row-sub">${esc(readableStop(c.segments[0].departureStop))} → ${esc(readableStop(c.segments.at(-1).arrivalStop))}</span>
+        <span class="journey-lines">${c.segments.map((x) => plate(lineNumber(x.line) || '·')).join('')}</span></button>
+      <span class="journey-actions"><button class="btn" data-jfollow="${esc(j.id)}">${t('journey_start')}</button>
+        <button class="icon-btn" data-jremove="${esc(j.id)}" aria-label="${esc(t('journey_remove'))}">✕</button></span></li>`;
+  }).join('')}</ul>`;
+}
+
+function followJourney(j) {
+  if (!j) return;
+  const legs = j.connection.segments.filter((x) => x.routeUrl).map((x) => ({ ref: live.scheduledRef(x), boardingPlatformIds: [], alightOrder: null }));
+  if (!legs.length) return;
+  live.startJourney(legs);
+  toast(t('journey_started'));
+}
+
+/** The next run of each regular ride. */
+function ridesHtml() {
+  const next = rides().map((r) => [r, nextRideDeparture(r)]).filter(([, at]) => at).sort((a, b) => a[1] - b[1]).slice(0, 3);
+  if (!next.length) return '';
+  return `<h2 class="section-label">${t('rides_title')}</h2><ul class="list">${next.map(([r, at]) =>
+    `<li><button class="row link" data-rides-open><span class="row-text"><span class="row-title">${esc(readableStop(r.route.from))} → ${esc(readableStop(r.route.to))}</span>
+      <span class="row-sub">${esc(t('rides_next', rideDayText(at), clock(at)))}</span></span><span aria-hidden="true">›</span></button></li>`).join('')}</ul>`;
 }
 
 function renderPreview() {
@@ -281,7 +437,7 @@ function renderPreview() {
 function renderBanners() {
   const el = $('#banners');
   const card = selectedCard();
-  if (!el || !card) return;
+  if (!el || !card || !unlocked()) return;
   $('#card-type').textContent = card.cardTypeName || '';
   $('#validity').textContent = card.ticketValidTo ? t('ticket_valid_until', dateText(toMs(card.ticketValidTo))) : '';
   const out = [];
@@ -335,7 +491,8 @@ function updateStatus(text, isError) {
   if (text !== undefined) statusOverride = text ? { text, isError } : '';
   const el = $('#status');
   if (!el) return;
-  let msg = statusOverride?.text || t('ticket_ready'), err = statusOverride?.isError;
+  // No code yet: still connecting, not "ready".
+  let msg = statusOverride?.text || t(s.lastTokenAt ? 'ticket_ready' : 'ticket_connecting'), err = statusOverride?.isError;
   const age = s.lastTokenAt ? Math.round((Date.now() - s.lastTokenAt) / 60000) : 0;
   if (!navigator.onLine) {
     msg = s.lastBase64 ? t('ticket_offline', clock(s.lastTokenAt), age) : t('ticket_offline_no_code');
@@ -380,14 +537,16 @@ function stopPolling() { s.polling = false; clearTimeout(s.pollTimer); }
 // Pause when hidden, lock after the chosen timeout, refresh at once when back.
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { s.hiddenAt = Date.now(); clearTimeout(s.pollTimer); return; }
-  if (hasPin() && s.creds && Date.now() - s.hiddenAt >= store.get('lockAfter', 0) * 1000) { s.creds = null; return showLock(); }
+  // Only after the app was really in the background (iOS also fires this on other occasions).
+  if (hasPin() && s.creds && s.hiddenAt && Date.now() - s.hiddenAt >= store.get('lockAfter', 0) * 1000) lockNow();
+  s.hiddenAt = 0;
   requestWakeLock();
   if (s.polling) pollOnce();
   live.resumeFollow();
 });
 
 async function requestWakeLock() {
-  try { if ('wakeLock' in navigator && s.tab === 'ticket') s.wakeLock = await navigator.wakeLock.request('screen'); } catch { /* not allowed */ }
+  try { if ('wakeLock' in navigator && s.tab === 'ticket' && unlocked()) s.wakeLock = await navigator.wakeLock.request('screen'); } catch { /* not allowed */ }
 }
 
 // ------------------------------------------------------------------ history tab
@@ -452,35 +611,46 @@ function exportCsv() {
 // ------------------------------------------------------------------ account tab
 
 function renderAccount(el) {
-  const card = selectedCard();
-  const cards = s.account?.cards || [];
+  const open = unlocked();
+  const card = open ? selectedCard() : null;
+  const cards = open ? s.account?.cards || [] : [];
   const days = (to) => Math.floor((toMs(to) - Date.now()) / 86400000);
   const validity = (label, from, to) => `<li class="row"><span class="row-text"><span class="row-title">${esc(label)}</span><span class="row-sub">${to ? `${dateText(toMs(from))} – ${dateText(toMs(to))}` : t('not_set')}</span></span>
     ${to ? `<b class="days ${days(to) < 0 ? 'neg' : days(to) <= 7 ? 'warn' : ''}">${days(to) < 0 ? '—' : t('days_left', days(to))}</b>` : ''}</li>`;
   const link = (page, title, hint) => `<li><button class="row link" data-page="${page}"><span class="row-text"><span class="row-title">${esc(title)}</span>${hint ? `<span class="row-sub">${esc(hint)}</span>` : ''}</span><span aria-hidden="true">›</span></button></li>`;
-  el.innerHTML = `
-    <header class="screen-head"><div><h1>${esc(s.account?.userName || t('account_title'))}</h1><p class="hint small">${esc(s.creds?.email || '')}</p></div>
-      <button class="text-btn" data-refresh-account>${t('refresh')}</button></header>
-    ${card?.cardTemplateBase64 ? `<img class="card-image" alt="" src="data:image/png;base64,${esc(card.cardTemplateBase64.replace(/[^A-Za-z0-9+/=_-]/g, ''))}">` : ''}
+  const account = !hasAccount()
+    ? `<h2 class="section-label">${t('account_section')}</h2><ul class="list"><li><button class="row link" data-add-account><span class="row-text"><span class="row-title">${t('account_add')}</span><span class="row-sub">${t('account_add_hint')}</span></span><span aria-hidden="true">›</span></button></li></ul>`
+    : !open
+      ? `<div class="notice">${t('account_locked')} <button class="text-btn" data-unlock>${t('unlock')}</button></div>`
+      : `${card?.cardTemplateBase64 ? `<img class="card-image" alt="" src="data:image/png;base64,${esc(card.cardTemplateBase64.replace(/[^A-Za-z0-9+/=_-]/g, ''))}">` : ''}
     ${card?.creditLastBalance != null ? `<div class="big-stat"><span class="hint">${t('balance')}</span><strong>${money(card.creditLastBalance, card.currencySymbol)}</strong><span class="hint small">${esc(card.cardTypeName || '')}</span></div>` : ''}
     ${card ? `<h2 class="section-label">${t('validity')}</h2><ul class="list">${validity(t('ticket'), card.ticketValidFrom, card.ticketValidTo)}${validity(t('card'), card.cardValidFrom, card.cardValidTo)}${card.discountValidTo ? validity(t('discount'), card.discountValidFrom, card.discountValidTo) : ''}</ul>` : ''}
     ${cards.length > 1 ? `<h2 class="section-label">${t('cards')}</h2><ul class="list">${cards.map((c) => `<li><label class="row"><span class="row-text"><span class="row-title">${esc(c.cardTypeName || c.serialNumber)}</span><span class="row-sub">${esc([c.organizationName, c.creditLastBalance != null ? money(c.creditLastBalance, c.currencySymbol) : ''].filter(Boolean).join(', '))}</span></span><input type="radio" name="card" value="${esc(c.serialNumber)}" ${c.serialNumber === s.serial ? 'checked' : ''}></label></li>`).join('')}</ul>` : ''}
-    ${card ? `<h2 class="section-label">${t('details')}</h2><ul class="list">${card.organizationName ? `<li class="row"><span class="row-text"><span class="row-title">${t('organization')}</span><span class="row-sub">${esc(card.organizationName)}</span></span></li>` : ''}<li class="row"><span class="row-text"><span class="row-title">${t('card_number')}</span><span class="row-sub">${esc(card.serialNumber || s.serial)}</span></span></li></ul>` : ''}
+    ${card ? `<h2 class="section-label">${t('details')}</h2><ul class="list">${card.organizationName ? `<li class="row"><span class="row-text"><span class="row-title">${t('organization')}</span><span class="row-sub">${esc(card.organizationName)}</span></span></li>` : ''}<li class="row"><span class="row-text"><span class="row-title">${t('card_number')}</span><span class="row-sub">${esc(card.serialNumber || s.serial)}</span></span></li></ul>` : ''}`;
+  el.innerHTML = `
+    <header class="screen-head"><div><h1>${esc(open ? s.account?.userName || t('account_title') : hasAccount() ? t('account_title') : t('settings'))}</h1><p class="hint small">${esc(open ? s.creds?.email || '' : '')}</p></div>
+      ${open ? `<button class="text-btn" data-refresh-account>${t('refresh')}</button>` : ''}</header>
+    ${account}
     <h2 class="section-label">${t('settings')}</h2>
     <ul class="list">
-      ${link('reminders', t('s_reminders'), t('s_reminders_hint'))}
-      ${link('security', t('s_security'), t('s_security_hint'))}
+      ${link('reminders', t('s_reminders'), hasAccount() ? t('s_reminders_hint') : t('s_reminders_hint_guest'))}
+      ${hasAccount() ? link('security', t('s_security'), t('s_security_hint')) : ''}
       ${link('appearance', t('s_appearance'), t('s_appearance_hint'))}
       ${link('language', t('s_language'), lang() === 'en' ? t('lang_en') : t('lang_sk'))}
       ${link('community', t('s_community'), t('s_community_hint'))}
       ${link('about', t('s_about'), t('version', VERSION))}
     </ul>
-    <ul class="list">${link('bug', t('s_bug'), t('s_bug_hint'))}<li><button class="row link" data-support><span class="row-text"><span class="row-title">${t('s_support')}</span><span class="row-sub">${t('s_support_hint')}</span></span><span aria-hidden="true">›</span></button></li></ul>
-    <ul class="list"><li><button class="row link danger" data-logout><span class="row-title">${t('logout')}</span></button></li></ul>`;
+    <ul class="list">${link('bug', t('s_bug'), t('s_bug_hint'))}${link('feature', t('s_feature'), t('s_feature_hint'))}<li><button class="row link" data-support><span class="row-text"><span class="row-title">${t('s_support')}</span><span class="row-sub">${t('s_support_hint')}</span></span><span aria-hidden="true">›</span></button></li></ul>
+    ${hasAccount() ? `<ul class="list">${open ? `<li><button class="row link" data-lock><span class="row-title">${t('lock_now')}</span></button></li>` : ''}<li><button class="row link danger" data-remove-account><span class="row-text"><span class="row-title">${t('account_remove')}</span><span class="row-sub">${t('account_remove_hint')}</span></span></button></li></ul>` : ''}`;
   el.onclick = async (e) => {
     const page = e.target.closest('[data-page]');
-    if (page) return openSettings(page.dataset.page);
-    if (e.target.closest('[data-logout]') && confirm(t('logout_confirm'))) return logout();
+    // Security needs the PIN first.
+    if (page) return page.dataset.page === 'security' && !open ? unlockDialog() : openSettings(page.dataset.page);
+    if (e.target.closest('[data-add-account]')) return showLogin();
+    if (e.target.closest('[data-unlock]')) return unlockDialog();
+    if (e.target.closest('[data-lock]')) return lockNow();
+    // Removing needs the PIN too, so someone holding the phone can't wipe it.
+    if (e.target.closest('[data-remove-account]')) return open ? (confirm(t('remove_confirm')) && removeAccount()) : unlockDialog();
     if (e.target.closest('[data-support]')) return showSupport();
     if (e.target.closest('[data-refresh-account]')) {
       const r = await api('/api/account', { sessionId: s.sessionId });
@@ -493,9 +663,9 @@ function renderAccount(el) {
 // ------------------------------------------------------------------ settings pages
 
 function openSettings(page) {
-  const titles = { reminders: 's_reminders', security: 's_security', appearance: 's_appearance', language: 's_language', community: 's_community', about: 's_about', bug: 's_bug' };
+  const titles = { reminders: 's_reminders', security: 's_security', appearance: 's_appearance', language: 's_language', community: 's_community', about: 's_about', bug: 's_bug', feature: 's_feature' };
   const body = openPage(t(titles[page]), () => { if (s.tab === 'account') renderAccount($('#tab-account')); });
-  ({ reminders, security, appearance, language, community: communitySettings, about, bug: bugReport })[page](body);
+  ({ reminders, security, appearance, language, community: communitySettings, about, bug: bugReport, feature: (b) => bugReport(b, true) })[page](body);
 }
 
 const ARRIVE_CHOICES = [1, 2, 3, 5, 10];
@@ -503,8 +673,8 @@ function reminders(body) {
   const lead = store.get('arriveLead', 2);
   const custom = !ARRIVE_CHOICES.includes(lead);
   body.innerHTML = `
-    <label class="field">${t('threshold')}<input type="number" step="0.10" min="0" inputmode="decimal" id="threshold" value="${store.get('threshold', 1).toFixed(2)}"></label>
-    <ul class="list">${switchRow('expiry', t('expiry_warn'), t('expiry_warn_hint'), store.get('expiryWarn', true))}</ul>
+    ${hasAccount() ? `<label class="field">${t('threshold')}<input type="number" step="0.10" min="0" inputmode="decimal" id="threshold" value="${store.get('threshold', 1).toFixed(2)}"></label>
+    <ul class="list">${switchRow('expiry', t('expiry_warn'), t('expiry_warn_hint'), store.get('expiryWarn', true))}</ul>` : ''}
     <h2 class="section-label">${t('arrive_title')}</h2>
     <p class="hint">${t('arrive_label')}</p>
     <div class="chips" role="radiogroup" id="arrive">
@@ -512,18 +682,20 @@ function reminders(body) {
       <label class="chip"><input type="radio" name="arrive" value="custom" ${custom ? 'checked' : ''}>${t('arrive_custom')}</label>
     </div>
     <label class="field" id="arrive-custom" ${custom ? '' : 'hidden'}>${t('arrive_custom_label')}<input type="number" min="1" max="60" step="1" inputmode="numeric" value="${lead}"></label>`;
-  $('#threshold', body).onchange = (e) => { const v = parseFloat(e.target.value); if (v >= 0) store.set('threshold', v); };
+  const threshold = $('#threshold', body);
+  if (threshold) threshold.onchange = (e) => { const v = parseFloat(e.target.value); if (v >= 0) store.set('threshold', v); };
   const customBox = $('#arrive-custom', body);
   $('#arrive', body).onchange = (e) => {
     customBox.hidden = e.target.value !== 'custom';
-    if (e.target.value !== 'custom') store.set('arriveLead', Number(e.target.value));
+    if (e.target.value !== 'custom') { store.set('arriveLead', Number(e.target.value)); resyncRides(); }
     else $('input', customBox).focus();
   };
   $('input', customBox).onchange = (e) => {
     const v = Math.round(Number(e.target.value));
     if (v >= 1 && v <= 60) store.set('arriveLead', v); else e.target.value = store.get('arriveLead', 2);
   };
-  $('#expiry', body).onchange = (e) => store.set('expiryWarn', e.target.checked);
+  const expiry = $('#expiry', body);
+  if (expiry) expiry.onchange = (e) => store.set('expiryWarn', e.target.checked);
 }
 
 function security(body) {
@@ -535,11 +707,8 @@ function security(body) {
       <p class="error-text" id="pin-error" hidden></p>
       <button class="btn" type="submit">${t('save')}</button></form>`;
   body.innerHTML = `<p class="hint">${t('pin_hint')}</p>
-    ${hasPin()
-      ? `<h2 class="section-label">${t('pin_change')}</h2>${pinForm(true)}
-         <h2 class="section-label">${t('lock_after')}</h2><ul class="list">${timeouts.map(([sec, key]) => `<li><label class="row"><span class="row-title">${t(key)}</span><input type="radio" name="lockAfter" value="${sec}" ${store.get('lockAfter', 0) === sec ? 'checked' : ''}></label></li>`).join('')}</ul>
-         <button class="btn outline danger wide" data-remove-pin>${t('pin_remove')}</button>`
-      : `<h2 class="section-label">${t('pin_set')}</h2>${pinForm(false)}`}`;
+    <h2 class="section-label">${t('pin_change')}</h2>${pinForm(true)}
+    <h2 class="section-label">${t('lock_after')}</h2><ul class="list">${timeouts.map(([sec, key]) => `<li><label class="row"><span class="row-title">${t(key)}</span><input type="radio" name="lockAfter" value="${sec}" ${store.get('lockAfter', 0) === sec ? 'checked' : ''}></label></li>`).join('')}</ul>`;
   const form = $('#pin-form', body);
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -555,8 +724,6 @@ function security(body) {
     security(body);
   };
   body.onchange = (e) => { if (e.target.name === 'lockAfter') store.set('lockAfter', Number(e.target.value)); };
-  const remove = $('[data-remove-pin]', body);
-  if (remove) remove.onclick = () => { store.set('credsEnc', null); store.set('creds', s.creds); s.pin = null; toast(t('pin_removed')); security(body); };
 }
 
 function appearance(body) {
@@ -580,6 +747,7 @@ function language(body) {
   body.innerHTML = `<ul class="list">${[['sk', t('lang_sk')], ['en', t('lang_en')]].map(([code, label]) => `<li><label class="row"><span class="row-title">${label}</span><input type="radio" name="lang" value="${code}" ${lang() === code ? 'checked' : ''}></label></li>`).join('')}</ul>`;
   body.onchange = (e) => {
     setLang(e.target.value);
+    resyncRides(); // the server's alerts follow the language
     applyI18n();
     closeOverlay('page');
     showApp();
@@ -614,6 +782,8 @@ function communitySettings(body) {
 function about(body) {
   body.innerHTML = `<ul class="list"><li class="row"><span class="row-title">${t('version', VERSION)}</span></li>
     ${s.serial ? `<li class="row"><span class="row-title">${esc(t('card_serial', s.serial))}</span></li>` : ''}</ul>
+    <ul class="list"><li><a class="row link" href="${site('changelog')}" target="_blank" rel="noopener"><span class="row-title">${t('whats_new')}</span><span aria-hidden="true">›</span></a></li>
+      <li><a class="row link" href="${site('privacy')}" target="_blank" rel="noopener"><span class="row-title">${t('privacy_policy')}</span><span aria-hidden="true">›</span></a></li></ul>
     <button class="btn outline wide" data-update>${t('check_updates')}</button>
     <p class="hint small">${t('login_disclaimer')}</p>`;
   $('[data-update]', body).onclick = async () => {
@@ -623,28 +793,35 @@ function about(body) {
   };
 }
 
+/** The Plan&Ride website (served by emhub): Slovak at /page, English at /en/page. */
+const site = (page) => `https://par.karafa.net/${lang() === 'en' ? 'en/' : ''}${page}`;
+
 const CATEGORIES = ['crash', 'ticket', 'departures', 'planner', 'tracking', 'account', 'other'];
-function bugReport(body) {
+/** feature: a suggestion (no category, no logs); emhub lists them apart from bugs. */
+function bugReport(body, feature = false) {
   if (!config.hub) { body.innerHTML = `<div class="notice warn">${t('bug_off')}</div>`; return; }
-  const logs = collectLogs();
+  const logs = feature ? '' : collectLogs();
+  // Only while unlocked: the name and email belong to the protected account.
+  const name = unlocked() ? s.account?.userName || '' : '', email = unlocked() ? s.creds?.email || '' : '';
   body.innerHTML = `<form class="stack" id="bug-form">
-    <fieldset class="chips"><legend class="section-label">${t('bug_category')}</legend>
-      ${CATEGORIES.map((c, i) => `<label class="chip"><input type="radio" name="category" value="${c}" ${i === CATEGORIES.length - 1 ? 'checked' : ''}>${t('cat_' + c)}</label>`).join('')}</fieldset>
-    <label class="field">${t('bug_summary')}<input name="title" maxlength="140"></label>
-    <label class="field">${t('bug_description')}<textarea name="description" rows="5" maxlength="10000"></textarea></label>
-    <label class="field">${t('bug_name')}<input name="name" maxlength="120" value="${esc(s.account?.userName || '')}" autocomplete="name"></label>
-    <label class="field">${t('bug_email')}<input name="email" type="email" maxlength="200" value="${esc(s.creds?.email || '')}" autocomplete="email"><small class="hint">${t('bug_email_hint')}</small></label>
-    <div class="notice warn" id="no-email" ${s.creds?.email ? 'hidden' : ''}>${t('bug_no_email')}</div>
-    <ul class="list">${switchRow('attach-logs', t('bug_logs'), t('bug_logs_hint'), true)}</ul>
-    <details><summary>${t('bug_logs_show')}</summary><pre class="logs">${esc(logs)}</pre></details>
-    <label class="consent"><input type="checkbox" name="consent" required> <span>${t('bug_consent')}</span></label>
+    ${feature ? '' : `<fieldset class="chips"><legend class="section-label">${t('bug_category')}</legend>
+      ${CATEGORIES.map((c, i) => `<label class="chip"><input type="radio" name="category" value="${c}" ${i === CATEGORIES.length - 1 ? 'checked' : ''}>${t('cat_' + c)}</label>`).join('')}</fieldset>`}
+    <label class="field">${t(feature ? 'feature_summary' : 'bug_summary')}<input name="title" maxlength="140"></label>
+    <label class="field">${t(feature ? 'feature_description' : 'bug_description')}<textarea name="description" rows="5" maxlength="10000"></textarea></label>
+    <label class="field">${t('bug_name')}<input name="name" maxlength="120" value="${esc(name)}" autocomplete="name"></label>
+    <label class="field">${t('bug_email')}<input name="email" type="email" maxlength="200" value="${esc(email)}" autocomplete="email"><small class="hint">${t('bug_email_hint')}</small></label>
+    <div class="notice warn" id="no-email" ${email || feature ? 'hidden' : ''}>${t('bug_no_email')}</div>
+    ${feature ? '' : `<ul class="list">${switchRow('attach-logs', t('bug_logs'), t('bug_logs_hint'), true)}</ul>
+    <details><summary>${t('bug_logs_show')}</summary><pre class="logs">${esc(logs)}</pre></details>`}
+    <label class="consent"><input type="checkbox" name="consent" required> <span>${t(feature ? 'feature_consent' : 'bug_consent')}</span></label>
     <p class="error-text" id="bug-error" role="alert" hidden></p>
-    <button class="btn" type="submit" id="bug-send" disabled>${t('bug_send')}</button></form>`;
+    <button class="btn" type="submit" id="bug-send" disabled>${t(feature ? 'feature_send' : 'bug_send')}</button></form>`;
   const form = $('#bug-form', body), send = $('#bug-send', body);
   // Only logs are essential: a description is needed only when no logs are attached.
-  const hasContent = () => $('#attach-logs', body).checked || form.description.value.trim();
+  const withLogs = () => !feature && $('#attach-logs', body).checked;
+  const hasContent = () => withLogs() || form.description.value.trim() || (feature && form.title.value.trim());
   form.oninput = form.onchange = () => {
-    $('#no-email', body).hidden = !!form.email.value.trim();
+    $('#no-email', body).hidden = feature || !!form.email.value.trim();
     send.disabled = !form.checkValidity() || !hasContent();
   };
   form.onsubmit = async (e) => {
@@ -655,16 +832,16 @@ function bugReport(body) {
     send.textContent = t('bug_sending');
     try {
       const r = await apiJson('/api/hub/bugs', {
-        category: f.category, title: f.title.trim(), description: f.description.trim(), name: f.name.trim(), email: f.email.trim(),
-        appVersion: VERSION, device: navigator.userAgent, logs: $('#attach-logs', body).checked ? logs : '', consent: true,
+        kind: feature ? 'feature' : 'bug', category: feature ? 'feature' : f.category, title: f.title.trim(), description: f.description.trim(), name: f.name.trim(), email: f.email.trim(),
+        appVersion: VERSION, device: navigator.userAgent, logs: withLogs() ? logs : '', consent: true,
       });
       closeOverlay('page');
-      toast(t('bug_sent', r.code));
+      toast(t(feature ? 'feature_sent' : 'bug_sent', r.code));
     } catch (error) {
       err.textContent = t('bug_failed', error.message);
       err.hidden = false;
       send.disabled = false;
-      send.textContent = t('bug_send');
+      send.textContent = t(feature ? 'feature_send' : 'bug_send');
     }
   };
 }
@@ -718,18 +895,44 @@ applyTheme();
 applyI18n();
 $('#install-btn').onclick = async () => { if (installPrompt) { installPrompt.prompt(); await installPrompt.userChoice.catch(() => {}); installPrompt = null; } };
 
+/**
+ * Opened from a notification: "?show=follow" shows the followed bus's stops over the home tab;
+ * "?ride=<id>&dep=<ms>" starts following that day's bus of a regular ride here too.
+ */
+async function handleLaunch(params) {
+  const ride = rides().find((r) => r.id === params.get('ride'));
+  if (params.get('show') === 'follow' || ride) { selectTab('ticket'); live.openFollowed(); }
+  if (!ride) return;
+  const dep = Number(params.get('dep')) || nextRideDeparture(ride, Date.now() - 30 * 60000);
+  if (!dep) return;
+  const day = todayLocal(dep);
+  const at = new Date(dep - 2 * 60000).toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Bratislava' });
+  const r = await apiJson('/api/cp/search', { city: ride.route.city, from: ride.route.from, to: ride.route.to, fromSug: ride.route.fromSug, toSug: ride.route.toSug,
+    time: at, date: `${day.day}.${day.month}.${day.year}`, directOnly: false }).catch(() => null);
+  const c = r && pickRideConnection(r.connections, ride, dep);
+  if (!c) return toast(t('rides_missing'));
+  live.startJourney(c.segments.filter((x) => x.routeUrl).map((x) => ({ ref: live.scheduledRef(x), boardingPlatformIds: [], alightOrder: null })));
+  live.openFollowed();
+}
+navigator.serviceWorker?.addEventListener('message', (e) => {
+  if (e.data?.type === 'open') handleLaunch(new URL(e.data.url, location.origin).searchParams);
+});
+
 (async function boot() {
   if (enforceInstallGate()) return;
   await loadConfig();
   log('I', 'boot', VERSION);
   live.resumeFollow();
-  if (hasPin()) return showLock();
-  const creds = store.get('creds');
-  if (creds?.email && creds?.password) {
-    s.creds = creds;
-    showApp();
-    if (!(await signIn(creds))) showLogin();
-  } else {
-    showLogin();
+  const params = new URLSearchParams(location.search);
+  if (params.size) history.replaceState(null, '', '/');
+  const plain = store.get('creds');
+  if (plain?.email && plain?.password && !hasPin()) {
+    // Saved before 2.8 without a PIN: sign in, then the PIN is set and the password encrypted.
+    s.creds = plain;
+    if (!(await signIn(plain))) showPinSetup();
+    return;
   }
+  if (!hasAccount() && !store.get('onboarded', false)) return showLogin({ welcome: true });
+  showApp(); // with an account: locked until the PIN, the rest works right away
+  handleLaunch(params);
 })();

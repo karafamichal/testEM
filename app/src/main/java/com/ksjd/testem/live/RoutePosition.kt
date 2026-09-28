@@ -83,12 +83,13 @@ object RoutePosition {
 }
 
 /**
- * When the bus left or drove past each stop, from the rider's fixes (every few seconds).
- * Timetable times are departures, so that moment is what the delay is measured at:
- * - crossing a stop while moving: passed it (nobody got on or off) or left it without
- *   stopping on the far side; the moment is interpolated between the two fixes;
- * - stopped just past it: it leaves when it moves again (between the last two fixes).
- * Stopping just before a stop is the first case once it drives on.
+ * When the bus left or drove past each stop, from the rider's fixes (every few seconds, also
+ * while it stands). Timetable times are departures, so that moment is what the delay is
+ * measured at. Stop positions are only roughly where buses really stop, so crossing a stop
+ * decides nothing yet:
+ * - it stops anywhere within the stop's area (before or after the point): it stopped there,
+ *   and left when it moved on (between the last two fixes);
+ * - it leaves the area without having stopped: it drove past, at the moment it crossed the point.
  */
 /** The bus left [stop] at [atMs]; [stopped]: it stood there first (else it drove past). */
 data class StopPass(val stop: Int, val atMs: Long, val stopped: Boolean)
@@ -96,40 +97,58 @@ data class StopPass(val stop: Int, val atMs: Long, val stopped: Boolean)
 class StopPassDetector {
     private var lastIndex = -1f
     private var lastAt = 0L
+    /** Standing at this stop: it leaves when it moves again. */
     private var waitingAt = -1
-
+    /** Crossed this stop while moving; stopped or passed is decided once it leaves the area. */
+    private var crossed: StopPass? = null
+    /** Stood in the area of the stop ahead, before reaching its point. */
     private var stoppedBefore = false
 
     /**
-     * A fix at fractional stop [index]; returns when and how the bus left a stop once it is
-     * behind it. [atStop]: the fix is within a few tens of metres of a stop.
+     * A fix at fractional stop [index]; returns when and how the bus left a stop once that is
+     * certain. [atStop]: the fix is within the stop's area (a few tens of metres of it).
      */
     fun onFix(index: Float, moving: Boolean, atMs: Long, atStop: Boolean = false): StopPass? {
-        var passed: StopPass? = null
-        if (lastIndex >= 0f) {
-            val stop = kotlin.math.floor(index).toInt()
-            if (stop > kotlin.math.floor(lastIndex).toInt() && index > lastIndex) {
-                val at = lastAt + kotlin.math.round((stop - lastIndex).toDouble() / (index - lastIndex) * (atMs - lastAt)).toLong()
-                if (moving) {
-                    // Stood just before the stop, then drove on: it stopped there too.
-                    passed = StopPass(stop, at, stoppedBefore)
-                    waitingAt = -1
-                } else {
-                    waitingAt = stop
-                }
-            } else if (waitingAt >= 0 && moving) {
-                passed = StopPass(waitingAt, (lastAt + atMs) / 2, stopped = true)
-                waitingAt = -1
+        var result: StopPass? = null
+        // [atStop] is about the nearest stop; stops close together have overlapping areas.
+        val nearest = kotlin.math.round(index).toInt()
+        crossed?.let { pending ->
+            val inArea = atStop && nearest == pending.stop
+            when {
+                // Stopped just past the point: it stopped there after all.
+                !moving && inArea -> { waitingAt = pending.stop; crossed = null }
+                // Out of the stop's area without stopping: it drove past.
+                !inArea -> { result = pending; crossed = null }
             }
         }
-        stoppedBefore = !moving && atStop
+        if (result == null && waitingAt >= 0 && moving) {
+            result = StopPass(waitingAt, (lastAt + atMs) / 2, stopped = true)
+            waitingAt = -1
+        }
+        if (lastIndex >= 0f) {
+            val stop = floor(index).toInt()
+            if (stop > floor(lastIndex).toInt() && index > lastIndex) {
+                val at = lastAt + kotlin.math.round((stop - lastIndex).toDouble() / (index - lastIndex) * (atMs - lastAt)).toLong()
+                when {
+                    // Stood just before the point, then drove on through it.
+                    stoppedBefore && moving -> result = result ?: StopPass(stop, at, stopped = true)
+                    // Already out of the stop's area on the far side: it drove past.
+                    moving && !(atStop && nearest == stop) -> result = result ?: StopPass(stop, at, stopped = false)
+                    moving -> crossed = StopPass(stop, at, stopped = false)
+                    else -> waitingAt = stop
+                }
+            }
+        }
+        // Only the stop ahead counts (standing just after a stop is [waitingAt]).
+        val atStopAhead = atStop && nearest > floor(index).toInt()
+        stoppedBefore = (!moving && atStopAhead) || (stoppedBefore && atStopAhead)
         if (index >= lastIndex) {
             lastIndex = index
             lastAt = atMs
         } else {
             lastAt = atMs // GPS jitter backwards: keep the furthest point, but the latest time
         }
-        return passed
+        return result
     }
 }
 

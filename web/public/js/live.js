@@ -1,7 +1,7 @@
 // Departures, stop boards, trip sheet and "follow this bus" for the web client.
 import { t, lang } from './i18n.js';
 import { $, $$, esc, api, apiJson, store, config, clock, countdown, delayChip, delayInfo, plate, toast, openSheet, closeOverlay, log } from './core.js';
-import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, referenceAt, delayAt, nextCheckMs, stopPassDetector, RIDER_GPS_MAX_M } from './logic.js';
+import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, referenceAt, delayAt, nextCheckMs, stopPassDetector, earliestBoardingMs, LIVE_GPS_BEFORE_MS, RIDER_GPS_MAX_M } from './logic.js';
 
 /** Helping with bus positions: 'off' | 'buttons' | 'auto' (earlier versions had an on/off switch). */
 export const communityMode = () => store.get('communityMode', store.get('communityOn', false) ? 'buttons' : 'off');
@@ -42,11 +42,11 @@ function toggleFavourite(id) {
 // ------------------------------------------------------------------ departures tab
 
 let root = null;
-export function renderDepartures(el, { guest } = {}) {
+export function renderDepartures(el) {
   root = el;
   if (live.board) return renderBoard();
   el.innerHTML = `
-    <header class="screen-head"><h1>${t('departures_title')}</h1>${guest ? `<button class="text-btn" data-signin>${t('sign_in')}</button>` : ''}</header>
+    <header class="screen-head"><h1>${t('departures_title')}</h1></header>
     <div id="follow-slot-dep"></div>
     <div id="journey-bar-dep">${journeyBarHtml()}</div>
     <div class="search"><input type="search" id="stop-q" placeholder="${esc(t('search_stop'))}" value="${esc(live.query)}" autocomplete="off" aria-label="${esc(t('search_stop'))}"></div>
@@ -146,7 +146,7 @@ async function refreshBoard() {
   clearTimeout(live.boardTimer);
   const board = live.board;
   if (!board) return;
-  const r = await api('/api/live/departures', { platformIds: board.stop.platforms.map((p) => p.id) });
+  const r = await api('/api/live/departures', { platformIds: board.stop.platforms.map((p) => p.id), stopId: board.stop.id });
   if (live.board !== board) return;
   Object.assign(board, r.ok ? { departures: r.json, error: false, updatedAt: Date.now() } : { error: true }, { loading: false });
   renderBoard();
@@ -165,8 +165,8 @@ function renderBoard() {
     return `<li><button class="departure ${d.isCancelled ? 'cancelled' : ''} ${hl ? 'highlight' : ''}" data-dep="${i}">
       ${plate(d.line)}
       <span class="dep-main"><span class="dep-dest">${esc(d.destination)}</span>
-        <span class="dep-sub">${d.platformNumber ? esc(t('platform', d.platformNumber)) : ''} ${d.isCancelled ? `<span class="delay very">${t('cancelled')}</span>` : delayChip(d.delaySeconds)}</span></span>
-      <span class="dep-time"><strong>${esc(countdown(secs))}</strong><span>${clock(d.departsAtMs)}${d.isRealtime ? ` <i class="live-dot" title="${esc(t('live'))}"></i>` : ''}</span></span>
+        <span class="dep-sub">${d.platformNumber ? esc(t('platform', d.platformNumber)) : ''} ${d.isCancelled ? `<span class="delay very">${t('cancelled')}</span>` : d.fromTimetable ? `<span class="hint small">${esc(d.operator || t('other_carrier'))}</span>` : delayChip(d.delaySeconds)}</span></span>
+      <span class="dep-time"><strong>${esc(countdown(secs))}</strong><span>${clock(d.departsAtMs)}${d.isRealtime ? ` <i class="live-dot" title="${esc(t('live'))}"></i>` : d.fromTimetable ? ` · ${esc(t('timetable'))}` : ''}</span></span>
     </button></li>`;
   }).join('');
   root.innerHTML = `
@@ -195,16 +195,30 @@ function renderBoard() {
 // Countdowns move between refreshes.
 setInterval(() => { if (live.board && !document.hidden && root?.isConnected && !$('#sheet')) renderBoard(); }, 20000);
 
-/** Next three buses from the first favourite stop, for the ticket tab. */
+/** Next three buses from each of the first three favourite stops, for the home tab. */
 export async function renderPreview(el) {
   await loadStops();
-  const stop = favourites()[0];
-  if (!stop) { el.innerHTML = `<p class="hint">${t('ticket_next_hint')}</p>`; return; }
-  const r = await api('/api/live/departures', { platformIds: stop.platforms.map((p) => p.id) });
-  const deps = r.ok ? r.json.slice(0, 3) : [];
-  el.innerHTML = `<h2 class="section-label">${esc(t('ticket_next_from', stop.name))}</h2>
-    <ul class="board compact">${deps.map((d) => `<li><div class="departure">${plate(d.line)}<span class="dep-main"><span class="dep-dest">${esc(d.destination)}</span><span class="dep-sub">${delayChip(d.delaySeconds)}</span></span>
-      <span class="dep-time"><strong>${esc(countdown((d.departsAtMs - Date.now()) / 1000))}</strong><span>${clock(d.departsAtMs)}</span></span></div></li>`).join('')}</ul>`;
+  const stops = favourites().slice(0, 3);
+  if (!stops.length) { el.innerHTML = `<h2 class="section-label">${t('favourites')}</h2><p class="hint pad">${t('ticket_next_hint')}</p>`; return; }
+  const boards = await Promise.all(stops.map((stop) => api('/api/live/departures', { platformIds: stop.platforms.map((p) => p.id), stopId: stop.id })));
+  el.innerHTML = `<h2 class="section-label">${t('favourites')}</h2>` + stops.map((stop, i) => {
+    const deps = boards[i].ok ? boards[i].json.slice(0, 3) : [];
+    return `<button class="preview-board" data-preview-stop="${stop.id}"><span class="preview-name">${esc(stop.name)}</span>
+      <ul class="board compact">${deps.map((d) => `<li><div class="departure">${plate(d.line)}<span class="dep-main"><span class="dep-dest">${esc(d.destination)}</span><span class="dep-sub">${d.fromTimetable ? `<span class="hint small">${esc(d.operator || t('timetable'))}</span>` : delayChip(d.delaySeconds)}</span></span>
+      <span class="dep-time"><strong>${esc(countdown((d.departsAtMs - Date.now()) / 1000))}</strong><span>${clock(d.departsAtMs)}</span></span></div></li>`).join('') || `<li class="hint small">${t('board_empty')}</li>`}</ul></button>`;
+  }).join('');
+}
+
+/** A favourite stop tapped on the home tab. */
+export async function openStopById(id) {
+  await loadStops();
+  openStop((live.stops || []).find((s) => s.id === Number(id)));
+}
+
+/** The bus being followed, with the user's stops: after tapping its notification. */
+export function openFollowed() {
+  if (follow) openTrip(follow.ref, { boardingPlatformIds: follow.boardingPlatformIds, alightOrder: follow.alightOrder });
+  return !!follow;
 }
 
 // ------------------------------------------------------------------ trip sheet
@@ -442,6 +456,11 @@ async function followTick() {
       follow.boardingPlatformIds = [detail.boardingOrder];
       follow.alightOrder ??= detail.alightOrder ?? null;
       saveFollow();
+    } else if (follow && detail.boardingOrder && detail.fromTimetable && !detail.stops.some((x) => follow.boardingPlatformIds.includes(x.platformId))) {
+      // sadzv had no stop list: stops come from cp.sk with its own numbers. Without this the
+      // boarding stop isn't found and the user counts as already on the bus (GPS on all the time).
+      follow.boardingPlatformIds = [...follow.boardingPlatformIds, detail.boardingOrder];
+      saveFollow();
     }
   } catch (err) { log('W', 'follow', err.message); }
   if (!follow) return;
@@ -475,8 +494,9 @@ setInterval(() => { if (follow && !document.hidden) renderAllFollowSlots(); }, 5
 // ---- catch estimate: location only while waiting, only while visible, never sent.
 
 /**
- * Walking to the stop: look at the location only now and then, sooner the closer the user
- * is (nextCheckMs). At the stop (or on board, automatic mode) live GPS takes over.
+ * Before the user is at the stop: look at the location only every 1 to 3 minutes (nextCheckMs).
+ * Live GPS only on the bus, or at the stop from 4 min before the bus can come (earlier when it
+ * is or usually runs early). Same rules as the Android app.
  */
 const NEAR_STOP_M = 150;
 let nextFixAt = 0;
@@ -485,19 +505,24 @@ function updateLocation(p) {
   if ((!auto && !catchOn()) || !('geolocation' in navigator)) return stopGeo();
   if (!p.onBoard) findStopCoords(p);
   const toStop = () => (fix?.latitude != null && stopCoords?.lat != null ? distanceMeters(fix.latitude, fix.longitude, stopCoords.lat, stopCoords.lon) : null);
-  const atStop = p.onBoard || stopCoords?.none || (toStop() ?? Infinity) <= NEAR_STOP_M;
-  if (auto && atStop) return startRiderWatch();
+  const nearStop = stopCoords?.none || (toStop() ?? Infinity) <= NEAR_STOP_M;
+  const inWindow = Date.now() >= earliestBoarding(p) - LIVE_GPS_BEFORE_MS;
+  if (auto && (p.onBoard || (inWindow && nearStop))) return startRiderWatch();
   if (riderWatch != null) { navigator.geolocation.clearWatch(riderWatch); riderWatch = null; }
   if (p.onBoard || Date.now() < nextFixAt) return;
-  nextFixAt = Date.now() + 30000; // until this check answers
+  nextFixAt = Date.now() + 60000; // until this check answers
   navigator.geolocation.getCurrentPosition((pos) => {
     fix = pos.coords;
     const m = toStop();
-    nextFixAt = Date.now() + (m == null ? 30000 : nextCheckMs(m));
+    nextFixAt = Date.now() + (m == null ? 60000 : nextCheckMs(m));
     renderAllFollowSlots();
   }, (err) => { if (err.code === 1) fix = { denied: true }; renderAllFollowSlots(); },
   { enableHighAccuracy: true, maximumAge: 20000, timeout: 20000 });
 }
+/** The follow's boarding time, counting a bus that is or usually runs early. */
+const knownPosition = (d) => (follow.ref.scheduleUrl ? !!(d.community || follow.localDelay) : d.delaySeconds != null && d.positionSource !== 'history');
+const earliestBoarding = (p) => earliestBoardingMs(effectiveDetail(follow), p, knownPosition(effectiveDetail(follow)));
+
 function findStopCoords(p) {
   if (!stopCoords) {
     stopCoords = { pending: true };
@@ -508,7 +533,12 @@ function findStopCoords(p) {
     (fromPlatforms ? Promise.resolve(fromPlatforms) : loadStops().then(() => {
       const pl = !byName && live.stops.flatMap((s) => s.platforms).find((x) => follow.boardingPlatformIds.includes(x.id));
       return pl || apiJson('/api/live/match?name=' + encodeURIComponent(name)).catch(() => null);
-    })).then((c) => { stopCoords = c ? { lat: c.lat, lon: c.lon } : { none: true }; renderAllFollowSlots(); });
+    })).then((c) => {
+      // Timetable stops (cp.sk names) often aren't sadzv stops: use the route's own coordinates.
+      const own = follow?.detail?.stops?.[p.boardingIndex];
+      stopCoords = c ? { lat: c.lat, lon: c.lon } : own?.lat != null ? { lat: own.lat, lon: own.lon } : { none: true };
+      renderAllFollowSlots();
+    });
   }
 }
 function stopGeo() {
@@ -520,7 +550,8 @@ function stopGeo() {
 // A web app can use location only while it is open.
 
 let riderWatch = null, lastRiderIndex = -1, lastRiderReportAt = 0, stopPass = stopPassDetector(), lastArrivalStop = -1;
-const STOP_RADIUS_M = 40; // a bus standing this close to a stop is stopped there
+const STOP_RADIUS_M = 60; // a bus standing this close to a stop is stopped there (cp.sk stop positions can be tens of metres off)
+const MOVING_MPS = 2.5; // slower than this (about 9 km/h) the bus counts as stopped
 
 function startRiderWatch() {
   if (riderWatch == null) {
@@ -537,7 +568,7 @@ function onRiderFix(pos) {
   const p = tripProgress(effectiveDetail(follow), follow);
   const hit = snapToRoute(pos.coords.latitude, pos.coords.longitude, d.stops.map((s) => (s.lat != null ? [s.lat, s.lon] : null)), RIDER_GPS_MAX_M, p.position);
   if (!hit) return;
-  const moving = (pos.coords.speed ?? 0) >= 3 || (lastRiderIndex >= 0 && hit.index > lastRiderIndex + 0.05);
+  const moving = pos.coords.speed != null ? pos.coords.speed >= MOVING_MPS : lastRiderIndex >= 0 && hit.index > lastRiderIndex + 0.05;
   lastRiderIndex = Math.max(lastRiderIndex, hit.index);
   const boarding = p.boardingIndex ?? 0;
   const now = Date.now();
@@ -577,9 +608,10 @@ function catchLine(d, p) {
   if (!catchOn() || p.onBoard) return '';
   if (fix?.denied) return `<p class="catch muted">${t('catch_location_off')}</p>`;
   if (!fix || fix.accuracy > 300 || !stopCoords?.lat) return '';
-  const known = follow.ref.scheduleUrl ? !!(d.community || follow.localDelay) : d.delaySeconds != null && d.positionSource !== 'history';
+  const known = knownPosition(d);
   if (!known && !store.get('catchTimetable', false)) return '';
-  const e = catchEstimate(distanceMeters(fix.latitude, fix.longitude, stopCoords.lat, stopCoords.lon), p.secondsToBoarding);
+  const seconds = Math.trunc((earliestBoarding(p) - Date.now()) / 1000);
+  const e = catchEstimate(distanceMeters(fix.latitude, fix.longitude, stopCoords.lat, stopCoords.lon), seconds);
   const walk = Math.max(1, Math.round(e.walkSeconds / 60));
   const text = { atStop: t('catch_at_stop'), relaxed: t('catch_leave_in', walk, Math.round(e.marginSeconds / 60)), leaveSoon: t('catch_leave_in', walk, Math.round(e.marginSeconds / 60)), leaveNow: t('catch_leave_now', walk), miss: t('catch_miss', walk) }[e.verdict];
   return `<p class="catch ${e.verdict}">${esc(known ? text : t('catch_by_timetable', text))}</p>`;

@@ -42,7 +42,9 @@ data class BugReport(
     val name: String,
     val email: String,
     val device: String,
-    val logs: String
+    val logs: String,
+    /** "bug" or "feature" (a suggestion; emhub lists them separately). */
+    val kind: String = "bug"
 )
 
 /** emhub: bug reports and community bus delays. Only called for features the user turned on. */
@@ -58,6 +60,7 @@ object HubClient {
     /** Returns the bug code, e.g. "EM-0042". */
     suspend fun submitBug(report: BugReport): String = withContext(Dispatchers.IO) {
         val body = JsonObject().apply {
+            addProperty("kind", report.kind)
             addProperty("category", report.category)
             addProperty("title", report.title)
             addProperty("description", report.description)

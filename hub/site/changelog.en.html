@@ -1,0 +1,61 @@
+<h1>What's new in Plan&amp;Ride</h1>
+<h2>2.6.0</h2>
+<h3>New</h3>
+<ul><li><strong>testEM is now Plan&amp;Ride</strong>, with a new icon. (The package name stays <code>com.ksjd.testem</code>, so it updates in place.)</li>
+<li><strong>No account needed.</strong> Departures, the planner and following a bus work without signing in. On first start you can add your sadzv.qrbus.me account or skip; add or remove it any time in <em>Settings</em>. Removing it also removes the PIN.</li>
+<li><strong>Opens straight away with an account.</strong> The ticket, credit, history and account details stay hidden until you unlock with your PIN or fingerprint. Tap the ticket to unlock. <em>Lock now</em> is in <em>Account</em>.</li>
+<li><strong>My journeys</strong> (report EM-0008): star a connection in the planner and it shows on the home tab under the ticket, with a <em>Follow</em> button. Your favourite stops' next buses follow below.</li>
+<li><strong>Regular rides:</strong> tap the repeat icon on a connection, then pick days of the week, a date range, extra dates and how early to start. Before each departure the app finds that day's bus and starts following it by itself. On Android 12+, allow alarms for it to start on time.</li>
+<li><strong>Pick a date in the planner</strong>, not only a time.</li>
+<li><strong>Other carriers on the departure board:</strong> intercity buses of every carrier from the cp.sk timetable (Arriva, Slovak Lines, FlixBus and more), next to the operator's live ones. Tap one to see its stops and follow it.</li>
+<li><strong>Suggest a feature</strong> from <em>Settings</em>. Suggestions have their own list in emhub.</li>
+<li><strong>This website</strong>, with what's new, support and the privacy policy. <em>Full changelog</em> and <em>Settings → Privacy policy</em> open it.</li>
+<li><strong>Usage statistics</strong> switch in <em>Settings</em>: anonymous usage via Firebase Analytics, which no longer uses the advertising ID.</li></ul>
+<h3>Improved</h3>
+<ul><li><strong>GPS only when needed.</strong> On the way to the stop the location is checked every 1–3 min. Live GPS starts at the stop from 4 min before the bus, or earlier by as much as the bus is early or usually runs early. <em>Will I catch it?</em> counts with that earlier time too.</li>
+<li><strong>Stopped or drove past</strong> (report EM-0007): a stop is judged only once the bus has left the stop's area. A bus that halts a little before or after the stop point now counts as stopped. Phones now also report while the bus stands.</li>
+<li>The walk to the stop is found for planner buses too (their stops come from cp.sk).
+</li></ul>
+<h3>Security</h3>
+<ul><li>The sadzv.qrbus.me password is stored encrypted with a key in the Android Keystore.</li>
+<li>The PIN uses a slow hash (PBKDF2). After 5 wrong PINs, entry locks for 30 s, doubling each time up to an hour.</li>
+<li>App data is excluded from cloud backups and device transfers.
+</li></ul>
+<h2>2.3.0</h2>
+<h3>New</h3>
+<ul><li><strong>Help with bus positions on every bus.</strong> Under <em>Account → Community and location</em> choose:
+<ul><li><strong>Off</strong>: only the operator's data and the timetable.</li>
+<li><strong>Buttons</strong>: <em>Bus is here</em>, <em>Bus is leaving</em> and <em>At (stop)</em> on the follow notification, now on every bus without a live position, city or intercity.</li>
+<li><strong>Automatic</strong>: while you ride a bus you follow, your phone's position marks where the bus is, with no buttons. Only the stop the bus is between is sent, never your location. It needs precise location.
+</li></ul></li>
+<li>If you had community delays on, you keep <em>Buttons</em>.
+</li></ul>
+<h3>Improved</h3>
+<ul><li><strong>More accurate bus positions.</strong> The bus's own GPS is used when it's fresh and actually on the route, so the app no longer moves the bus ahead of reality. Positions the operator kept from long ago, or that belong to another trip, are ignored.</li>
+<li><strong>Best source first:</strong> a rider's phone on the bus, then the bus's GPS, then riders' taps, then the operator's delay, then the timetable.
+</li></ul>
+<h2>2.2.0</h2>
+<h3>Improved</h3>
+<ul><li><strong>Stop lists for every bus.</strong> The operator often has no stop list for a trip (city buses in Zvolen and Banská Bystrica, like lines 7 and 8 at Zlatý Potok). testEM then takes the stops and times from cp.sk instead. The operator's live data is still used first, and its delay is still shown whenever the bus reports one. You can follow these buses too.
+</li></ul>
+<h2>2.1.0</h2>
+<h3>New</h3>
+<ul><li><strong>Follow intercity buses.</strong> Open a connection in the Planner, tap <em>Show all stops</em>, then <em>Follow this bus</em>. The live notification counts down to departure and shows the next stop, using timetable times from cp.sk.</li>
+<li><strong>Platforms at every stop.</strong> When you open a connection from the Planner, each stop shows its platform.</li>
+<li><strong>Choose when to be alerted.</strong> Under <em>Account → Reminders → Following a bus</em>, pick how early you're told the bus is coming: 1, 2, 3, 5 or 10 minutes, or your own number up to 60. It used to always be 2 minutes.</li>
+<li><strong>Community delays for intercity buses</strong> (optional). Intercity buses don't report their position, so riders can do it. The follow notification offers <em>Bus is here</em>, <em>Bus is leaving</em>, then <em>At (next stop)</em>. The buttons move on by themselves, so if you forget one stop, just mark the next. Everyone following the same bus sees the pooled delay. Only the bus, the stop and the time are sent, with a random ID that changes for every bus. No account, no location.</li>
+<li><strong>Will I catch it?</strong> (optional). While you wait for a bus you follow, the notification shows how long the walk to your stop is and when to leave, from your location on the phone. Your location never leaves the phone. It needs precise location permission.</li>
+<li><strong>Report a bug</strong> under <em>Account</em>. It attaches this app's recent logs, with passwords and tokens removed. A summary, description, name and email are all optional, and you agree before anything is sent. Leave an email if you'd like a reply.</li>
+<li><strong>Support testEM</strong> under <em>Account</em>. A link to <a href="https://karafa.net/support/">karafa.net/support</a> if you'd like to support further work. Entirely voluntary.</li>
+<li>Both optional features are asked about once, when you first open this version. You can change them anytime under <em>Account → Community and location</em>.
+</li></ul>
+<h3>Improved</h3>
+<ul><li><strong>Nearby stops → Refresh</strong> now gets a fresh location. Before, it could reuse a position from several minutes earlier, so the list didn't change.</li>
+<li>Planner results are sorted by departure time.</li>
+<li>The "bus arrives soon" alert shows the actual number of minutes.
+</li></ul>
+<h3>Fixed</h3>
+<ul><li>Selected choices, such as the report category or the alert time, are easier to see (check mark).
+</li></ul>
+<h3>Web version (iPhone)</h3>
+<p>The home-screen web app now has departures, the Planner, following a bus with push alerts, community delays, <em>Will I catch it?</em>, history insights, a PIN lock, themes, Slovak and English, bug reports and the support link. Ticket and history times now use your local time; they used to show 2 hours early.</p>

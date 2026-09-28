@@ -25,7 +25,9 @@ class CpTimetableService(
         val timeInput: String,
         val directOnly: Boolean,
         val fromSuggestion: CpStopSuggestion? = null,
-        val toSuggestion: CpStopSuggestion? = null
+        val toSuggestion: CpStopSuggestion? = null,
+        /** ISO date, "" = today. */
+        val dateInput: String = ""
     )
 
     suspend fun searchConnections(request: SearchRequest): Result<TimetableSearchResult> {
@@ -51,7 +53,7 @@ class CpTimetableService(
                         .add("AdvancedForm.Via[0]", "")
                         .add("AdvancedForm.ViaHidden[0]", "")
                         .add("AdvancedForm_ViaHiddenCoor_0_", "")
-                        .add("Date", "")
+                        .add("Date", cpDate(request.dateInput))
                         .add("Time", request.timeInput.trim())
                         .add("IsArr", "False")
                         .add("OnlyDirect", if (request.directOnly) "True" else "False")
@@ -178,8 +180,21 @@ class CpTimetableService(
         }
     }
 
-    /** One row of cp.sk's departure board. */
-    private data class BoardRow(val line: String, val minutes: Int, val destination: String)
+    /** One row of cp.sk's departure board; [atMs] is 0 when the date couldn't be read. */
+    data class BoardRow(
+        val line: String,
+        val minutes: Int,
+        val destination: String,
+        val platform: String = "",
+        val operator: String = "",
+        val atMs: Long = 0L
+    )
+
+    /** cp.sk's intercity stop at a sadzv stop, matched by position (names differ between the two). */
+    fun intercityStopNear(name: String, lat: Double, lon: Double): CpStopSuggestion? = nearestStop("slovensko", name, lat, lon)
+
+    /** Upcoming intercity buses of every carrier at [stop], from cp.sk's departure board. */
+    fun intercityBoard(stop: CpStopSuggestion): List<BoardRow> = departureBoard("slovensko", stop, "")
 
     /**
      * The cp.sk trip for a bus seen on sadzv, found the way a person would: open cp.sk's
@@ -259,12 +274,23 @@ class CpTimetableService(
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return emptyList()
             return Jsoup.parse(response.body?.string().orEmpty()).select("tr.dep-row-first").mapNotNull { row ->
-                val minutes = Regex("""(\d{1,2}):(\d{2})""").find(row.attr("data-datetime"))
-                    ?.destructured?.let { (h, m) -> h.toInt() * 60 + m.toInt() } ?: return@mapNotNull null
+                // data-datetime="28.09.2026 18:05:00", Slovak local time
+                val stamp = Regex("""(\d{1,2})\.(\d{1,2})\.(\d{4}) (\d{1,2}):(\d{2})""").find(row.attr("data-datetime"))
+                    ?: return@mapNotNull null
+                val (day, month, year, hour, minute) = stamp.destructured
+                val atMs = runCatching {
+                    java.time.LocalDateTime.of(year.toInt(), month.toInt(), day.toInt(), hour.toInt(), minute.toInt())
+                        .atZone(SK_ZONE).toInstant().toEpochMilli()
+                }.getOrDefault(0L)
                 BoardRow(
                     line = row.selectFirst(".code h3")?.text()?.trim()?.substringAfterLast(' ').orEmpty(),
-                    minutes = minutes,
-                    destination = row.attr("data-stationname").trim()
+                    minutes = hour.toInt() * 60 + minute.toInt(),
+                    destination = row.attr("data-stationname").trim(),
+                    platform = row.select("span[title]").firstOrNull { it.attr("title").lowercase().startsWith("nást") }?.text()?.trim().orEmpty(),
+                    // The carrier is on the second row of each departure.
+                    operator = row.nextElementSibling()?.takeIf { it.hasClass("dep-row-second") }
+                        ?.selectFirst("span[title=dopravce]")?.text()?.trim().orEmpty(),
+                    atMs = atMs
                 )
             }
         }
@@ -435,6 +461,10 @@ class CpTimetableService(
             .mapNotNull { year -> runCatching { java.time.LocalDate.of(year, month.toInt(), day.toInt()) }.getOrNull() }
             .minByOrNull { kotlin.math.abs(it.toEpochDay() - today.toEpochDay()) }
     }
+
+    /** cp.sk's form wants "3.10.2026"; "" means today. */
+    private fun cpDate(iso: String): String =
+        runCatching { java.time.LocalDate.parse(iso) }.getOrNull()?.let { "${it.dayOfMonth}.${it.monthValue}.${it.year}" }.orEmpty()
 
     private fun minutesOf(time: String): Int? {
         val parts = time.trim().split(":")

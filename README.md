@@ -1,12 +1,15 @@
-# testEM
+# Plan&Ride (testEM)
 
-A cross-platform (Android & iOS) mobile application that logs into the SADZV portal, polls for real-time QR tokens, and renders them as scannable validation codes. The app includes robust security features, personal account details, advanced UI customization, and complete ticket history.
+Plan&Ride is a transit app for Slovakia: live departures of every carrier, a journey planner, following your bus with a live notification, and regular rides that start following by themselves. With a sadzv.qrbus.me account it also shows your ticket as a rotating QR code, your credit and your history. The account is optional. The project, code and package name stay **testEM** internally.
 
 ## Features
+- **Optional account**: everything except the ticket works without signing in. With an account, the app opens straight away; the ticket, credit and history stay hidden until PIN or biometric unlock.
+- **Home**: the ticket, *My journeys* (starred planner connections, one tap to follow), the next regular rides, and live boards of favourite stops.
+- **Regular rides** (Android): days of the week, a date range and extra dates; before each departure the app finds that day's bus on cp.sk and follows it.
 - **Ticket**: rotating QR code on a ticket stub with a freshness bar, a clear offline warning when the code gets old, full-screen mode at maximum brightness, and a card switcher for accounts with several cards.
 - **Live departures** (Android): stop search, nearby stops, favourite stops, a live departure board with delays, and each trip's stop list. Uses the operator's public real-time data; no sign-in needed.
 - **Follow a bus** (Android): an ongoing notification counts down to departure, then shows the current and next stop. On Android 16 it is a Live Update (Samsung One UI 8 shows it in the Now Bar). Intercity buses from the planner can be followed too, using cp.sk timetable times (no live position). Optional alerts before the bus reaches your stop (1, 2, 3, 5, 10 minutes or your own number, set in Reminders) and before you get off.
-- **Planner**: cp.sk connections with platform numbers, saved routes, recent searches, swapping from/to, sharing, and a link to live departures.
+- **Planner**: cp.sk connections on any date and time, with platform numbers, saved routes, recent searches, swapping from/to, sharing, and a link to live departures.
 - **History and insights**: ticket and top-up history, monthly spend chart, average fare, trips left on your credit, most-used stops, and CSV export.
 - **Reminders** (Android): notifications for low credit and for a ticket, card or discount that is about to expire.
 - **App security**: PIN lock with optional biometrics and an adjustable lock timeout.

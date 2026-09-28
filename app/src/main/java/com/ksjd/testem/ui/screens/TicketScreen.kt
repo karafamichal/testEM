@@ -29,7 +29,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.EventRepeat
 import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.QrCode2
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -55,6 +60,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,6 +71,16 @@ import com.ksjd.testem.AccountDetails
 import com.ksjd.testem.AppViewModel
 import com.ksjd.testem.QRDaemonConfig
 import com.ksjd.testem.R
+import com.ksjd.testem.RecurringRide
+import com.ksjd.testem.SK_ZONE
+import com.ksjd.testem.SavedJourney
+import com.ksjd.testem.readableStopName
+import com.ksjd.testem.live.TrackedTrip
+import com.ksjd.testem.live.TripTracking
+import com.ksjd.testem.live.scheduledTripRef
+import com.ksjd.testem.ui.components.GroupDivider
+import com.ksjd.testem.ui.components.ListGroup
+import com.ksjd.testem.ui.components.ListRow
 import com.ksjd.testem.TicketPhase
 import com.ksjd.testem.TicketState
 import com.ksjd.testem.live.BoardState
@@ -91,11 +107,15 @@ fun TicketScreen(
     viewModel: AppViewModel,
     liveViewModel: LiveViewModel,
     activity: FragmentActivity,
+    onUnlock: () -> Unit,
+    onSignIn: () -> Unit,
     onOpenDepartures: () -> Unit,
+    onOpenPlanner: () -> Unit,
     onOpenAccount: () -> Unit
 ) {
     val ticket by viewModel.ticketState.collectAsState()
     val app by viewModel.appState.collectAsState()
+    val timetable by viewModel.timetableState.collectAsState()
     val live by liveViewModel.state.collectAsState()
     var fullscreen by remember { mutableStateOf(false) }
     val now by produceState(System.currentTimeMillis()) {
@@ -104,19 +124,20 @@ fun TicketScreen(
             delay(1000)
         }
     }
-    val favourite = live.favourites.firstOrNull()
-    LaunchedEffect(favourite?.id) {
-        while (favourite != null) {
+    val favouriteIds = live.favourites.take(3).map { it.id }
+    LaunchedEffect(favouriteIds) {
+        while (favouriteIds.isNotEmpty()) {
             liveViewModel.refreshPreview()
             delay(30_000)
         }
     }
 
-    if (fullscreen) {
+    val unlocked = app.hasAccount && app.isAppUnlocked
+    if (fullscreen && unlocked) {
         FullscreenTicket(ticket, now, activity) { fullscreen = false }
     }
 
-    val card = ticket.selectedCard
+    val card = ticket.selectedCard.takeIf { unlocked }
     Column(
         Modifier
             .fillMaxSize()
@@ -124,18 +145,28 @@ fun TicketScreen(
             .padding(bottom = 24.dp)
     ) {
         ScreenHeader(
-            title = ticket.userName.substringBefore(' ').ifBlank { stringResource(R.string.ticket_title) },
+            title = ticket.userName.substringBefore(' ').takeIf { unlocked }?.ifBlank { null }
+                ?: stringResource(if (app.hasAccount) R.string.ticket_title else R.string.app_name),
             subtitle = card?.cardTypeName,
             actions = { if (card?.creditLastBalance != null) BalancePill(card, onOpenAccount) }
         )
 
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (ticket.phase == TicketPhase.SignedOut) {
+            if (unlocked && ticket.phase == TicketPhase.SignedOut) {
                 Notice(
                     stringResource(R.string.ticket_signed_out),
                     tone = NoticeTone.Error,
                     actionLabel = stringResource(R.string.ticket_sign_in_again),
-                    onAction = viewModel::returnToLogin
+                    onAction = { viewModel.returnToLogin(); onSignIn() }
+                )
+            }
+            // The saved password stopped working: the email is kept for signing in again.
+            if (!app.hasAccount && app.email.isNotBlank()) {
+                Notice(
+                    stringResource(R.string.ticket_signed_out),
+                    tone = NoticeTone.Warning,
+                    actionLabel = stringResource(R.string.ticket_sign_in_again),
+                    onAction = onSignIn
                 )
             }
             val credit = card?.creditLastBalance
@@ -147,37 +178,42 @@ fun TicketScreen(
             }
         }
 
-        Spacer(Modifier.height(12.dp))
-        TicketStub(
-            ticket = ticket,
-            now = now,
-            onFullscreen = { fullscreen = true },
-            onResume = viewModel::startPolling
-        )
-
-        if (ticket.cards.size > 1) {
-            SectionLabel(stringResource(R.string.ticket_card_switch))
-            Row(
-                Modifier
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ticket.cards.forEach { c ->
-                    FilterChip(
-                        selected = c.snr == ticket.selectedSnr,
-                        onClick = { viewModel.selectCard(c.snr) },
-                        label = { Text(cardLabel(c)) }
-                    )
+        if (app.hasAccount) {
+            Spacer(Modifier.height(12.dp))
+            if (unlocked) {
+                TicketStub(
+                    ticket = ticket,
+                    now = now,
+                    onFullscreen = { fullscreen = true },
+                    onResume = viewModel::startPolling
+                )
+            } else {
+                LockedStub(onUnlock)
+            }
+            if (unlocked && ticket.cards.size > 1) {
+                SectionLabel(stringResource(R.string.ticket_card_switch))
+                Row(
+                    Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ticket.cards.forEach { c ->
+                        FilterChip(
+                            selected = c.snr == ticket.selectedSnr,
+                            onClick = { viewModel.selectCard(c.snr) },
+                            label = { Text(cardLabel(c)) }
+                        )
+                    }
                 }
             }
         }
 
-        SectionLabel(
-            if (favourite != null) stringResource(R.string.ticket_next_from, favourite.name)
-            else stringResource(R.string.ticket_next_buses)
-        )
-        if (favourite == null) {
+        JourneysSection(timetable.savedJourneys, now, viewModel, onOpenPlanner)
+        RidesSection(timetable.rides, now, onOpenPlanner)
+
+        SectionLabel(stringResource(R.string.departures_favourites))
+        if (live.favourites.isEmpty()) {
             Text(
                 stringResource(R.string.ticket_next_hint),
                 style = MaterialTheme.typography.bodyMedium,
@@ -187,11 +223,172 @@ fun TicketScreen(
                     .clickable(onClick = onOpenDepartures)
             )
         } else {
-            MiniBoard(live.preview, now) {
-                liveViewModel.openStop(favourite)
-                onOpenDepartures()
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                live.favourites.take(3).forEach { stop ->
+                    val board = live.previews.firstOrNull { it.stop.id == stop.id }
+                    MiniBoard(stop.name, board, now) {
+                        liveViewModel.openStop(stop)
+                        onOpenDepartures()
+                    }
+                }
             }
         }
+
+        if (!app.hasAccount && app.email.isBlank()) {
+            Spacer(Modifier.height(16.dp))
+            Notice(
+                stringResource(R.string.home_add_account_hint),
+                actionLabel = stringResource(R.string.account_add),
+                onAction = onSignIn,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+        }
+    }
+}
+
+/** Where the ticket goes while the app is locked: one tap asks for the PIN or a fingerprint. */
+@Composable
+private fun LockedStub(onUnlock: () -> Unit) {
+    Surface(
+        onClick = onUnlock,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(56.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Outlined.QrCode2, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.ticket_locked_title), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.ticket_locked_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(Icons.Outlined.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Starred planner results that haven't ended yet: follow in one tap (bug report EM-0008). */
+@Composable
+private fun JourneysSection(journeys: List<SavedJourney>, now: Long, viewModel: AppViewModel, onOpenPlanner: () -> Unit) {
+    val upcoming = journeys.filter { it.arrivalMs == 0L || it.arrivalMs > now }.sortedBy { it.departureMs }
+    if (upcoming.isEmpty()) return
+    val context = LocalContext.current
+    val withNotifications = rememberWithNotifications()
+    val tracked by TripTracking.active.collectAsState()
+    SectionLabel(stringResource(R.string.home_journeys))
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        upcoming.take(5).forEach { journey ->
+            val c = journey.connection
+            val legs = c.segments.mapNotNull { s ->
+                scheduledTripRef(s, s.line.trim().substringAfterLast(' '))?.let { TrackedTrip(it, emptyList()) }
+            }
+            val following = tracked != null && legs.any { it.ref == tracked?.ref }
+            Surface(
+                onClick = {
+                    viewModel.searchAt(journey.route, c.departureTime, c.segments.firstOrNull()?.serviceDate.orEmpty())
+                    onOpenPlanner()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Column(Modifier.padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${c.departureTime} – ${c.arrivalTime}", style = TimeStyle, modifier = Modifier.weight(1f))
+                        Text(
+                            startsIn(journey.departureMs, now),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        IconButton(onClick = { viewModel.removeSavedJourney(journey.id) }) {
+                            Icon(Icons.Outlined.Close, stringResource(R.string.home_journey_remove), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Text(
+                        "${readableStopName(c.segments.first().departureStop)} → ${readableStopName(c.segments.last().arrivalStop)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        Modifier.padding(top = 6.dp, end = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        c.segments.forEach { LinePlate(it.line.trim().substringAfterLast(' ').ifBlank { "–" }) }
+                        Spacer(Modifier.weight(1f))
+                        if (following) {
+                            Text(stringResource(R.string.home_following), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        } else if (legs.isNotEmpty()) {
+                            FilledTonalButton(onClick = {
+                                withNotifications {
+                                    if (legs.size == 1) TripTracking.start(context, legs.first()) else TripTracking.startJourney(context, legs)
+                                }
+                            }) { Text(stringResource(R.string.journey_start)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The next time each regular ride runs. */
+@Composable
+private fun RidesSection(rides: List<RecurringRide>, now: Long, onOpenPlanner: () -> Unit) {
+    val next = rides.mapNotNull { ride ->
+        ride.nextDeparture(java.time.Instant.ofEpochMilli(now).atZone(SK_ZONE))?.let { ride to it }
+    }.sortedBy { it.second }
+    if (next.isEmpty()) return
+    SectionLabel(stringResource(R.string.rides_title))
+    ListGroup {
+        next.take(3).forEachIndexed { index, (ride, at) ->
+            if (index > 0) GroupDivider()
+            ListRow(
+                title = ride.label,
+                subtitle = stringResource(R.string.rides_next, rideDay(at), "%d:%02d".format(at.hour, at.minute)),
+                onClick = onOpenPlanner,
+                leading = { Icon(Icons.Outlined.EventRepeat, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            )
+        }
+    }
+}
+
+/** "Today", "Tomorrow" or "Mon 5.10." */
+@Composable
+internal fun rideDay(at: java.time.ZonedDateTime): String {
+    val today = java.time.LocalDate.now(SK_ZONE)
+    return when (at.toLocalDate()) {
+        today -> stringResource(R.string.day_today)
+        today.plusDays(1) -> stringResource(R.string.day_tomorrow)
+        else -> at.format(java.time.format.DateTimeFormatter.ofPattern("EEE d.M.", java.util.Locale.getDefault()))
+    }
+}
+
+@Composable
+private fun startsIn(departureMs: Long, now: Long): String {
+    if (departureMs == 0L) return ""
+    val minutes = ((departureMs - now) / 60_000L).toInt()
+    return when {
+        minutes < 0 -> stringResource(R.string.home_journey_underway)
+        minutes < 60 -> stringResource(R.string.home_journey_in, countdownText(minutes * 60))
+        else -> rideDay(java.time.Instant.ofEpochMilli(departureMs).atZone(SK_ZONE)) + " " +
+            Format.clock(departureMs)
     }
 }
 
@@ -435,9 +632,9 @@ private fun FullscreenTicket(ticket: TicketState, now: Long, activity: FragmentA
     }
 }
 
-/** Three-row slice of a departure board, used on the ticket tab. */
+/** Three-row slice of a favourite stop's departure board, used on the home tab. */
 @Composable
-private fun MiniBoard(board: BoardState?, now: Long, onOpen: () -> Unit) {
+private fun MiniBoard(stopName: String, board: BoardState?, now: Long, onOpen: () -> Unit) {
     val colors = TransitTheme.colors
     Surface(
         onClick = onOpen,
@@ -448,6 +645,14 @@ private fun MiniBoard(board: BoardState?, now: Long, onOpen: () -> Unit) {
         color = colors.board
     ) {
         Column(Modifier.padding(vertical = 6.dp)) {
+            Text(
+                stopName,
+                style = MaterialTheme.typography.labelLarge,
+                color = colors.boardDim,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp)
+            )
             val departures = board?.departures.orEmpty()
             when {
                 board == null || (board.isLoading && departures.isEmpty()) -> Box(

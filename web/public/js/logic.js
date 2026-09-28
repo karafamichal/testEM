@@ -11,6 +11,38 @@ export const readableStop = (name) =>
 
 const bratislavaDate = (ms) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bratislava' }).format(new Date(ms));
 
+// ---------------------------------------------------------------- Slovak local time
+// Operator and cp.sk times are Slovak wall-clock time, whatever zone the device is in.
+
+const tzFormat = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Europe/Bratislava', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+});
+function tzParts(ms) {
+  return Object.fromEntries(tzFormat.formatToParts(new Date(ms)).map((p) => [p.type, Number(p.value)]));
+}
+function offsetMs(ms) {
+  const p = tzParts(ms);
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(ms / 1000) * 1000;
+}
+/** Slovak local date/time -> epoch ms (month is 1-based). */
+export function localToEpoch(year, month, day, hour, minute) {
+  const guess = Date.UTC(year, month - 1, day, hour, minute);
+  return guess - offsetMs(guess - offsetMs(guess));
+}
+/** The date in Slovakia as {year, month, day}. */
+export function todayLocal(ms = Date.now()) {
+  const p = tzParts(ms);
+  return { year: p.year, month: p.month, day: p.day };
+}
+/** Minutes after midnight in Slovakia. */
+export const localMinutes = (ms) => { const p = tzParts(ms); return p.hour * 60 + p.minute; };
+export function addDays({ year, month, day }, n) {
+  const d = new Date(Date.UTC(year, month - 1, day + n));
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+export const isoDate = ({ year, month, day }) => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
 /**
  * Same bus, same key on every phone and in the Android app. Buses from sadzv's board:
  * line and trip ids and the date; timetable trips from the planner: line, first stop, time.
@@ -132,42 +164,120 @@ export const WALK_METERS_PER_SECOND = 1.3;
 export const DETOUR_FACTOR = 1.3;
 
 /**
- * Walking to the stop: when to look at the location again (GPS off in between).
- * 10 min away -> in 7.5 min; never sooner than 30 s or later than 10 min.
+ * Before the user is at the stop: when to look at the location again (GPS off in between).
+ * After most of the remaining walk, but every 1 to 3 minutes.
  */
 export const RECHECK_SHARE = 0.75;
 export function nextCheckMs(distance) {
   const walkMs = ((distance * DETOUR_FACTOR) / WALK_METERS_PER_SECOND) * 1000;
-  return Math.min(10 * 60000, Math.max(30000, Math.trunc(walkMs * RECHECK_SHARE)));
+  return Math.min(3 * 60000, Math.max(60000, Math.trunc(walkMs * RECHECK_SHARE)));
+}
+
+/** Live GPS at the stop starts this long before the bus can come. */
+export const LIVE_GPS_BEFORE_MS = 4 * 60000;
+
+/**
+ * When the bus can be at the user's stop at the earliest: its expected time, or earlier when
+ * it's running early, or (nothing live known) usually leaves early. Lateness isn't counted
+ * on, so nobody is told to leave too late. Same as the Android app.
+ */
+export function earliestBoardingMs(detail, p, positionKnown) {
+  const stop = p.boardingIndex != null ? detail.stops[p.boardingIndex] : null;
+  if (!stop) return p.boardingExpectedMs;
+  const usual = !positionKnown && detail.history ? detail.history.delaySeconds : 0;
+  const early = Math.max(0, -(detail.delaySeconds || 0), -usual);
+  return early > 0 ? Math.min(p.boardingExpectedMs, stop.scheduledMs - early * 1000) : p.boardingExpectedMs;
 }
 
 /**
- * When the bus left or drove past each stop, from the rider's fixes. Timetable times are
- * departures, so that moment is what the delay is measured at:
- * - crossing a stop while moving: passed it or left it; interpolated between the two fixes;
- * - stopped just past it: it leaves when it moves again (between the last two fixes).
+ * When the bus left or drove past each stop, from the rider's fixes (also while it stands).
+ * Timetable times are departures, so that moment is what the delay is measured at. Stop
+ * positions are only roughly where buses stop, so crossing a stop decides nothing yet:
+ * - it stops anywhere in the stop's area (before or after the point): it stopped there, and
+ *   left when it moved on (between the last two fixes);
+ * - it leaves the area without stopping: it drove past, at the moment it crossed the point.
  * Returns onFix(index, moving, atMs, atStop) -> [stop, leftAtMs, stoppedThere] | null
- * (atStop: the fix is within a few tens of metres of a stop).
+ * (atStop: the fix is within the nearest stop's area). Same as the Android app.
  */
 export function stopPassDetector() {
-  let lastIndex = -1, lastAt = 0, waitingAt = -1, stoppedBefore = false;
+  let lastIndex = -1, lastAt = 0, waitingAt = -1, crossed = null, stoppedBefore = false;
   return (index, moving, atMs, atStop = false) => {
-    let passed = null;
+    let result = null;
+    const nearest = Math.round(index); // atStop is about the nearest stop; close stops overlap
+    if (crossed) {
+      const inArea = atStop && nearest === crossed[0];
+      if (!moving && inArea) { waitingAt = crossed[0]; crossed = null; } // stopped just past the point
+      else if (!inArea) { result = crossed; crossed = null; } // out of the area without stopping
+    }
+    if (!result && waitingAt >= 0 && moving) {
+      result = [waitingAt, Math.round((lastAt + atMs) / 2), true];
+      waitingAt = -1;
+    }
     if (lastIndex >= 0) {
       const stop = Math.floor(index);
       if (stop > Math.floor(lastIndex) && index > lastIndex) {
         const at = lastAt + Math.round(((stop - lastIndex) / (index - lastIndex)) * (atMs - lastAt));
-        if (moving) { passed = [stop, at, stoppedBefore]; waitingAt = -1; } else waitingAt = stop;
-      } else if (waitingAt >= 0 && moving) {
-        passed = [waitingAt, Math.round((lastAt + atMs) / 2), true];
-        waitingAt = -1;
+        if (stoppedBefore && moving) result ??= [stop, at, true]; // stood before the point, drove on
+        else if (moving && !(atStop && nearest === stop)) result ??= [stop, at, false]; // already past the area
+        else if (moving) crossed = [stop, at, false];
+        else waitingAt = stop;
       }
     }
-    stoppedBefore = !moving && atStop;
+    const atStopAhead = atStop && nearest > Math.floor(index); // standing just after a stop is waitingAt
+    stoppedBefore = (!moving && atStopAhead) || (stoppedBefore && atStopAhead);
     if (index >= lastIndex) lastIndex = index; // GPS jitter backwards keeps the furthest point
     lastAt = atMs;
-    return passed;
+    return result;
   };
+}
+
+// ---------------------------------------------------------------- regular rides
+// { id, route: { city, from, to, fromSug, toSug }, time: 'HH:MM', lines: [], days: [1..7 ISO],
+//   dates: ['YYYY-MM-DD'], startDate, endDate, leadMinutes, enabled }
+
+export const WORKDAYS = [1, 2, 3, 4, 5];
+export const EVERY_DAY = [1, 2, 3, 4, 5, 6, 7];
+
+export function rideRunsOn(ride, day) {
+  const iso = isoDate(day);
+  if ((ride.dates || []).includes(iso)) return true;
+  const weekday = new Date(Date.UTC(day.year, day.month - 1, day.day)).getUTCDay() || 7;
+  if (!(ride.days || []).includes(weekday)) return false;
+  return (!ride.startDate || iso >= ride.startDate) && (!ride.endDate || iso <= ride.endDate);
+}
+
+/** Epoch ms of the next departure whose follow start (departure - lead) is after [afterMs], or null. */
+export function nextRideDeparture(ride, afterMs = Date.now()) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(ride.time || '');
+  if (!ride.enabled || !m) return null;
+  let day = todayLocal(afterMs);
+  for (let i = 0; i <= 366; i++, day = addDays(day, 1)) {
+    if (!rideRunsOn(ride, day)) continue;
+    const departure = localToEpoch(day.year, day.month, day.day, Number(m[1]), Number(m[2]));
+    if (departure - (ride.leadMinutes ?? 10) * 60000 > afterMs) return departure;
+  }
+  return null;
+}
+
+/**
+ * That day's bus for [ride] among cp.sk's results: the same time and lines, else the same
+ * first line within 15 min, else any connection within 10 min.
+ */
+export function pickRideConnection(connections, ride, departureMs) {
+  const day = isoDate(todayLocal(departureMs));
+  const wanted = localMinutes(departureMs);
+  const gap = (c) => {
+    const first = c.segments[0];
+    const m = /(\d{1,2}):(\d{2})/.exec(first?.departureTime || '');
+    if (!m || (first.serviceDate && first.serviceDate !== day)) return Infinity;
+    return Math.abs(Number(m[1]) * 60 + Number(m[2]) - wanted);
+  };
+  const lines = (c) => c.segments.map((s) => lineNumber(s.line));
+  const lines0 = ride.lines || [];
+  const best = (list) => list.sort((a, b) => gap(a) - gap(b))[0] || null;
+  return connections.find((c) => gap(c) === 0 && (!lines0.length || lines(c).join(' ') === lines0.join(' ')))
+    || best(connections.filter((c) => lines0.length && lines(c)[0] === lines0[0] && gap(c) <= 15))
+    || best(connections.filter((c) => gap(c) <= 10));
 }
 
 export function catchEstimate(distance, secondsToBoarding) {

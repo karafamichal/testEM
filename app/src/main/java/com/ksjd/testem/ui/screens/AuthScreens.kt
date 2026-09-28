@@ -21,8 +21,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -41,7 +45,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.autofill.AutofillNode
 import androidx.compose.ui.autofill.AutofillType
@@ -67,12 +73,12 @@ import com.ksjd.testem.R
 import com.ksjd.testem.ui.components.Notice
 import com.ksjd.testem.ui.components.NoticeTone
 
-/** Shared frame for the pre-login screens: signage stripe, left-aligned copy. */
+/** Shared frame for the sign-in screens: signage stripe, left-aligned copy. */
 @Composable
 private fun AuthFrame(
     title: String,
     body: String,
-    onBrowse: () -> Unit,
+    footer: @Composable ColumnScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(
@@ -99,9 +105,7 @@ private fun AuthFrame(
         Spacer(Modifier.height(32.dp))
         content()
         Spacer(Modifier.height(24.dp))
-        TextButton(onClick = onBrowse, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.auth_browse_public))
-        }
+        footer()
     }
 }
 
@@ -139,8 +143,9 @@ private fun PrimaryButton(text: String, onClick: () -> Unit, enabled: Boolean = 
     }
 }
 
+/** Right after an account is added: its ticket gets a PIN. Cancelling removes the account again. */
 @Composable
-fun PinSetupScreen(viewModel: AppViewModel, onBrowse: () -> Unit) {
+fun PinSetupScreen(viewModel: AppViewModel) {
     var pin by rememberSaveable { mutableStateOf("") }
     var confirm by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
@@ -155,11 +160,16 @@ fun PinSetupScreen(viewModel: AppViewModel, onBrowse: () -> Unit) {
         }
         if (error.isEmpty()) viewModel.setPin(pin)
     }
+    BackHandler(onBack = viewModel::removeAccount)
 
     AuthFrame(
         title = stringResource(R.string.pin_setup_title),
         body = stringResource(R.string.pin_setup_subtitle),
-        onBrowse = onBrowse
+        footer = {
+            TextButton(onClick = viewModel::removeAccount, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.pin_setup_cancel))
+            }
+        }
     ) {
         PinField(pin, { pin = it }, stringResource(R.string.pin_label_range), ImeAction.Next) {
             focus.moveFocus(FocusDirection.Down)
@@ -175,23 +185,34 @@ fun PinSetupScreen(viewModel: AppViewModel, onBrowse: () -> Unit) {
     }
 }
 
+/**
+ * PIN or biometrics to show the ticket and account. The rest of the app never needs it,
+ * so this is a dialog over whatever the user was looking at.
+ */
 @Composable
-fun PinUnlockScreen(viewModel: AppViewModel, appState: AppState, activity: FragmentActivity, onBrowse: () -> Unit) {
+fun UnlockDialog(viewModel: AppViewModel, appState: AppState, activity: FragmentActivity, onDismiss: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     val incorrect = stringResource(R.string.pin_error_incorrect)
+    val lockedText = stringResource(R.string.pin_locked_out)
+    val done by rememberUpdatedState(onDismiss)
+    fun lockedMessage(until: Long) = lockedText.format(((until - System.currentTimeMillis()) / 1000L + 1).coerceAtLeast(1))
     val submit = {
-        if (viewModel.verifyPin(pin)) {
-            error = ""
-        } else {
-            error = incorrect
-            pin = ""
+        val lockedUntil = viewModel.pinLockedUntil()
+        when {
+            lockedUntil > 0 -> error = lockedMessage(lockedUntil)
+            viewModel.verifyPin(pin) -> { error = ""; done() }
+            else -> {
+                val until = viewModel.pinLockedUntil()
+                error = if (until > 0) lockedMessage(until) else incorrect
+                pin = ""
+            }
         }
     }
     val canUseBiometrics = appState.biometricEnabled && biometricsAvailable(activity)
     val prompt = rememberBiometricPrompt(
         activity = activity,
-        onSuccess = { viewModel.unlockWithBiometrics() },
+        onSuccess = { viewModel.unlockWithBiometrics(); done() },
         onError = { error = it },
         failedMessage = stringResource(R.string.biometric_not_recognized)
     )
@@ -199,64 +220,104 @@ fun PinUnlockScreen(viewModel: AppViewModel, appState: AppState, activity: Fragm
     // Offer the fingerprint/face prompt straight away; PIN stays as the fallback.
     LaunchedEffect(Unit) { if (canUseBiometrics) prompt.authenticate(promptInfo) }
 
-    AuthFrame(
-        title = stringResource(R.string.unlock_title),
-        body = stringResource(R.string.unlock_subtitle),
-        onBrowse = onBrowse
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.unlock_title)) },
+        text = {
+            Column {
+                Text(stringResource(R.string.unlock_subtitle), style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(12.dp))
+                PinField(pin, { pin = it }, stringResource(R.string.pin_label), ImeAction.Done) { if (pin.length >= 4) submit() }
+                if (error.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                if (canUseBiometrics) {
+                    TextButton(onClick = { prompt.authenticate(promptInfo) }) { Text(stringResource(R.string.use_biometrics)) }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = submit, enabled = pin.length >= 4) { Text(stringResource(R.string.unlock_button)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
+    )
+}
+
+/** In place of a tab whose content is behind the PIN (History). */
+@Composable
+fun LockedScreen(onUnlock: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        PinField(pin, { pin = it }, stringResource(R.string.pin_label), ImeAction.Done, submit)
-        if (error.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp))
-            Notice(error, tone = NoticeTone.Error)
-        }
-        Spacer(Modifier.height(20.dp))
-        PrimaryButton(stringResource(R.string.unlock_button), submit, enabled = pin.length >= 4)
-        if (canUseBiometrics) {
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(
-                onClick = { prompt.authenticate(promptInfo) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) { Text(stringResource(R.string.use_biometrics)) }
-        }
+        Icon(Icons.Outlined.Lock, contentDescription = null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(12.dp))
+        Text(stringResource(R.string.locked_title), style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            stringResource(R.string.locked_body),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onUnlock, shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.unlock_button)) }
     }
 }
 
+/**
+ * Adding the SADZV account. [welcome]: the first-run screen, where the account is optional
+ * and [onSkip] continues without it; otherwise [onSkip] cancels.
+ */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun LoginScreen(viewModel: AppViewModel, appState: AppState, activity: FragmentActivity, onBrowse: () -> Unit) {
+fun LoginScreen(viewModel: AppViewModel, appState: AppState, welcome: Boolean, onSkip: () -> Unit) {
     var email by rememberSaveable(appState.email) { mutableStateOf(appState.email) }
-    var password by rememberSaveable(appState.password) { mutableStateOf(appState.password) }
+    var password by rememberSaveable { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
-    var biometricError by remember { mutableStateOf("") }
     val focus = LocalFocusManager.current
-
-    val requireBiometric = appState.biometricEnabled && biometricsAvailable(activity)
-    val prompt = rememberBiometricPrompt(
-        activity = activity,
-        onSuccess = {
-            biometricError = ""
-            viewModel.login(email, password)
-        },
-        onError = { biometricError = it },
-        failedMessage = stringResource(R.string.biometric_not_recognized)
-    )
-    val promptInfo = biometricPromptInfo()
     val canSubmit = !appState.isLoading && email.isNotBlank() && password.isNotEmpty()
     val submit = {
         if (canSubmit) {
             focus.clearFocus()
-            if (requireBiometric) prompt.authenticate(promptInfo) else viewModel.login(email, password)
+            viewModel.login(email, password)
         }
     }
 
     AuthFrame(
-        title = stringResource(R.string.login_title),
-        body = stringResource(R.string.login_subtitle),
-        onBrowse = onBrowse
+        title = stringResource(if (welcome) R.string.welcome_title else R.string.login_title),
+        body = stringResource(if (welcome) R.string.welcome_body else R.string.login_subtitle),
+        footer = {
+            if (welcome) {
+                OutlinedButton(
+                    onClick = onSkip,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text(stringResource(R.string.welcome_skip)) }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.welcome_skip_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.cancel)) }
+            }
+        }
     ) {
+        if (welcome) {
+            Text(stringResource(R.string.welcome_account_title), style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.login_subtitle),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+        }
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
@@ -291,10 +352,9 @@ fun LoginScreen(viewModel: AppViewModel, appState: AppState, activity: FragmentA
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { submit() })
         )
-        val message = appState.loginError.ifBlank { biometricError }
-        if (message.isNotBlank()) {
+        if (appState.loginError.isNotBlank()) {
             Spacer(Modifier.height(12.dp))
-            Notice(message, tone = NoticeTone.Error)
+            Notice(appState.loginError, tone = NoticeTone.Error)
         }
         Spacer(Modifier.height(20.dp))
         PrimaryButton(stringResource(R.string.login_button), submit, enabled = canSubmit, loading = appState.isLoading)

@@ -301,18 +301,21 @@ private val CATEGORIES = listOf(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit) {
+fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean = false) {
     val context = LocalContext.current
     val ticket by viewModel.ticketState.collectAsState()
     val app by viewModel.appState.collectAsState()
     val scope = rememberCoroutineScope()
-    var category by rememberSaveable { mutableStateOf("other") }
+    var category by rememberSaveable { mutableStateOf(if (feature) "feature" else "other") }
     var title by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
     // Signed-in users get their name and email filled in; they can change or clear both.
-    var name by rememberSaveable { mutableStateOf(ticket.userName) }
-    var email by rememberSaveable { mutableStateOf(app.email) }
-    var attachLogs by rememberSaveable { mutableStateOf(true) }
+    // Only while unlocked: the name and email belong to the protected account.
+    val known = app.hasAccount && app.isAppUnlocked
+    var name by rememberSaveable { mutableStateOf(if (known) ticket.userName else "") }
+    var email by rememberSaveable { mutableStateOf(if (known) app.email else "") }
+    // A suggestion needs no logs.
+    var attachLogs by rememberSaveable { mutableStateOf(!feature) }
     var showLogs by rememberSaveable { mutableStateOf(false) }
     var consent by rememberSaveable { mutableStateOf(false) }
     var sending by remember { mutableStateOf(false) }
@@ -324,8 +327,8 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit) {
     if (sentCode.isNotEmpty()) {
         AlertDialog(
             onDismissRequest = onDone,
-            title = { Text(stringResource(R.string.bug_sent_title, sentCode)) },
-            text = { Text(stringResource(R.string.bug_sent_body)) },
+            title = { Text(stringResource(if (feature) R.string.feature_sent_title else R.string.bug_sent_title, sentCode)) },
+            text = { Text(stringResource(if (feature) R.string.feature_sent_body else R.string.bug_sent_body)) },
             confirmButton = { TextButton(onClick = onDone) { Text(stringResource(R.string.privacy_done)) } }
         )
     }
@@ -337,16 +340,16 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit) {
     val invalidEmail = stringResource(R.string.bug_invalid_email)
 
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionLabel(stringResource(R.string.bug_category), modifier = Modifier.padding(start = 0.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!feature) SectionLabel(stringResource(R.string.bug_category), modifier = Modifier.padding(start = 0.dp))
+        if (!feature) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CATEGORIES.forEach { (id, label) ->
                 FilterChip(selected = category == id, onClick = { category = id }, label = { Text(stringResource(label)) },
                     leadingIcon = if (category == id) ({ Icon(Icons.Outlined.Check, null, Modifier.size(18.dp)) }) else null)
             }
         }
-        OutlinedTextField(title, { if (it.length <= 140) title = it }, label = { Text(stringResource(R.string.bug_summary)) },
+        OutlinedTextField(title, { if (it.length <= 140) title = it }, label = { Text(stringResource(if (feature) R.string.feature_summary else R.string.bug_summary)) },
             singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(description, { if (it.length <= 10_000) description = it }, label = { Text(stringResource(R.string.bug_description)) },
+        OutlinedTextField(description, { if (it.length <= 10_000) description = it }, label = { Text(stringResource(if (feature) R.string.feature_description else R.string.bug_description)) },
             minLines = 5, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(name, { if (it.length <= 120) name = it }, label = { Text(stringResource(R.string.bug_name)) },
             singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -360,11 +363,11 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit) {
             modifier = Modifier.fillMaxWidth()
         )
     }
-    if (email.isBlank()) {
+    if (email.isBlank() && !feature) {
         Notice(stringResource(R.string.bug_no_email), modifier = Modifier.padding(horizontal = 16.dp), tone = NoticeTone.Warning)
     }
     Spacer(Modifier.height(8.dp))
-    ListGroup {
+    if (!feature) ListGroup {
         ListRow(
             stringResource(R.string.bug_logs),
             subtitle = stringResource(R.string.bug_logs_hint),
@@ -405,7 +408,7 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit) {
     ) {
         Checkbox(checked = consent, onCheckedChange = { consent = it })
         Text(
-            stringResource(R.string.bug_consent),
+            stringResource(if (feature) R.string.feature_consent else R.string.bug_consent),
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier
                 .padding(top = 12.dp, end = 8.dp)
@@ -421,7 +424,7 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit) {
                 runCatching {
                     HubClient.submitBug(
                         BugReport(category, title.trim(), description.trim(), name.trim(), email.trim(), AppLogs.device(),
-                            if (attachLogs) logs else "")
+                            if (attachLogs) logs else "", kind = if (feature) "feature" else "bug")
                     )
                 }.onSuccess { sentCode = it }
                     .onFailure { error = failed.replace("%s", it.message ?: "?") }
@@ -434,5 +437,5 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp)
-    ) { Text(stringResource(if (sending) R.string.bug_sending else R.string.bug_send)) }
+    ) { Text(stringResource(if (sending) R.string.bug_sending else if (feature) R.string.feature_send else R.string.bug_send)) }
 }

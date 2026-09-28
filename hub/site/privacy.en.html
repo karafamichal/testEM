@@ -1,0 +1,94 @@
+<h1>Plan&amp;Ride privacy policy</h1>
+<p><em>Effective 28 September 2026. Updated the same day: web version (section 8).</em></p>
+<p>Plan&amp;Ride is a free, open-source transit app for Slovakia, for Android. It is developed by Michal Karafa and Michal Jablonský (ksjd), who are jointly responsible for the data described here. Contact: <strong>ksjd.apps@gmail.com</strong>.</p>
+<p>Plan&amp;Ride is an unofficial app. It is not made by, or affiliated with, any transport operator.</p>
+<p>This policy covers the Android app and the web version for iPhone (see section 8 for how the web version differs). The short version:</p>
+<ul><li>Your account password is stored only on your device, and your location never leaves it. (The web version passes the password through our server to sign you in, without keeping it.)</li>
+<li>Plan&amp;Ride shows no ads, and nobody gets your data to sell or advertise.</li>
+<li>Anything sent to us (bug reports, suggestions, help with bus positions) is sent only when you choose to.
+</li></ul>
+<h2>What the app sends, and where</h2>
+<h3>1. Your sadzv.qrbus.me account (optional)</h3>
+<p>You can use Plan&amp;Ride without an account. If you add your sadzv.qrbus.me account to show your ticket:</p>
+<ul><li>Your email and password are stored <strong>only on your phone</strong>. The password is encrypted with a key kept in the phone's secure hardware (Android Keystore).</li>
+<li>The app sends them <strong>only to sadzv.qrbus.me</strong>, to sign you in. From there it loads your ticket code, cards, credit, validity dates and ticket history, the same as the operator's website shows you.</li>
+<li>The last account details are kept on the phone so the app works offline. They are protected by your PIN or fingerprint.</li>
+<li>We never receive your password or account data.</li>
+<li><em>Settings → Remove account from this phone</em> deletes the email, password, PIN and stored account details.
+</li></ul>
+<p>sadzv.qrbus.me handles this data under its own privacy policy.</p>
+<h3>2. Timetables and live departures</h3>
+<p>To show stops, departures, bus positions and connections, the app loads public data directly from <strong>sadzv.qrbus.me</strong> and <strong>cp.sk</strong>. These services receive what you search for (stop names, from and to, date and time) and your IP address, as with any website. No account is involved.</p>
+<h3>3. Your location</h3>
+<p>Location is optional. It is used only on your phone, for:</p>
+<ul><li>stops near you, when you tap <em>Find stops near me</em>;</li>
+<li><em>Will I catch it?</em>: the walk from where you are to the stop of a bus you follow;</li>
+<li><em>Automatic</em> help with bus positions (see 4): working out where on the route the bus you are riding is.
+</li></ul>
+<p><strong>Your location is never sent</strong> to us or anyone else. While you follow a bus, the app checks your location only every 1 to 3 minutes on the way to the stop. Continuous GPS runs only at the stop, from a few minutes before the bus comes, or while you ride.</p>
+<h3>4. Help with bus positions (optional, off by default)</h3>
+<p>Many buses don't report where they are, so riders can help. You can choose <em>Buttons</em> (tap <em>Bus is here</em>) or <em>Automatic</em> in <em>Settings → Community and location</em>. Plan&amp;Ride then sends our server (emhub):</p>
+<ul><li>which bus: line, trip identifier and date, or line, first stop and departure time;</li>
+<li>which stop it is at or has passed, and the timetable time there;</li>
+<li>a random identifier that is new for every bus you follow;</li>
+<li>that the report comes from Android.
+</li></ul>
+<p>The server records when each report arrives. It never receives your location or anything linked to you or your account. Reports from all riders are combined into the current delay of a bus, and into how late that trip usually runs. We keep them for that purpose.</p>
+<h3>5. Bug reports and feature suggestions (optional)</h3>
+<p>When you send a bug report or a suggestion from <em>Settings</em>, and only after you tick the consent box, our server receives:</p>
+<ul><li>what you wrote, and the category;</li>
+<li>your name and email, if you enter them;</li>
+<li>your device model, Android version and app version;</li>
+<li>for bug reports only, if you leave <em>Attach app logs</em> on: recent log lines from this app and the last crash. Passwords, tokens and other long secrets are removed before sending. You can view the logs before you send them.
+</li></ul>
+<p>We use this to fix the problem or consider the idea, and to reply if you left an email. You get a confirmation email, and replies about your report. We keep reports while we work on them. Write to us to have yours deleted.</p>
+<h3>6. Usage statistics (Google Firebase Analytics)</h3>
+<p>To see which features are used and where the app can improve, Plan&amp;Ride uses <strong>Google Firebase Analytics</strong>. It collects:</p>
+<ul><li>how the app is used: app opens, sessions, updates, and time in the app;</li>
+<li>an app-instance identifier created for Firebase;</li>
+<li>device model, Android version, language, app version;</li>
+<li>your country or region, estimated from your IP address. Google does not store the IP address itself.
+</li></ul>
+<p>Firebase Analytics in Plan&amp;Ride:</p>
+<ul><li>does not use your advertising ID;</li>
+<li>receives no account data, no location and no content you enter.
+</li></ul>
+<p>Google processes this data for us under the <a href="https://policies.google.com/privacy">Google Privacy Policy</a> and the <a href="https://firebase.google.com/terms/data-processing-terms">Firebase data processing terms</a>. Google keeps it for the retention period set in our Analytics settings.</p>
+<p>You can turn this off at any time: <em>Settings → Usage statistics</em>.</p>
+<h3>7. Notifications, alarms and the phone</h3>
+<p>Everything else stays on the phone:</p>
+<ul><li>saved journeys, regular rides, favourite stops;</li>
+<li>settings, PIN (stored only as a salted slow hash);</li>
+<li>reminders, and follow notifications.
+</li></ul>
+<p>App data is excluded from Android cloud backups and device transfers.</p>
+<h3>8. The web version (for iPhone)</h3>
+<p>The web version runs in your browser, added to the Home Screen. It works the same way as the Android app, with these differences:</p>
+<ul><li><strong>Signing in goes through our web server.</strong> A browser can't sign in to sadzv.qrbus.me directly, so our web server passes your email and password on to sadzv.qrbus.me and keeps the resulting session in its memory for up to 6 hours, to load your ticket code. It does not store your password. On your device, the password is stored only encrypted with your PIN, in the browser's storage.</li>
+<li><strong>Timetables and live departures</strong> are loaded through our web server too (it asks sadzv.qrbus.me and cp.sk for you).</li>
+<li><strong>Alerts for a bus you follow:</strong> if you turn them on, our web server keeps the bus, your stops, your language and your browser's notification address (issued by Apple, Google or Mozilla's push service) until the bus arrives, for at most 3 hours.</li>
+<li><strong>Regular rides:</strong> our web server keeps your rides (stops, times, days and dates, how early to start) with your browser's notification address, so it can find your bus and notify you while the app is closed. They stay until you delete them; deleting all of them removes the entry.</li>
+<li>Bug reports and suggestions are passed on to emhub by our web server, with your browser's details instead of a device model.</li>
+<li>The web version uses <strong>no usage statistics</strong> (no Firebase Analytics).</li>
+<li>Your location is used only in the browser and is never sent, as in the app.</li>
+</ul>
+<h2>Where our server runs</h2>
+<p>Our servers (emhub, and the web server of the web version) run on servers operated by the developers. It is reached through Cloudflare, which carries the connection (encrypted with HTTPS) and sees IP addresses as part of that. The server's logs, which include IP addresses, are used only for security and troubleshooting, and are kept for a limited time.</p>
+<p>All connections from the app use HTTPS.</p>
+<h2>Legal basis (GDPR)</h2>
+<ul><li><strong>Your consent:</strong> bug reports and suggestions, and help with bus positions. You can withdraw it at any time. Stop sending, or switch the feature off.</li>
+<li><strong>Our legitimate interest</strong> in keeping the app working and improving it: anonymous usage statistics, which you can switch off, and security logs.</li>
+<li>Your account is used only on your device (and, in the web version, passed through our web server to sign in), to provide the service you ask for.</li>
+<li><strong>Providing the service you ask for:</strong> alerts and regular rides in the web version, which you can delete at any time.
+</li></ul>
+<h2>Your rights</h2>
+<p>You have the right to:</p>
+<ul><li>see what we hold about you, have it corrected or deleted, and restrict or object to its use;</li>
+<li>get your data in a portable form;</li>
+<li>withdraw consent.
+</li></ul>
+<p>Write to <strong>ksjd.apps@gmail.com</strong>. As we don't know who sent a report without an email, tell us the report code (for example EM-0042) or what you wrote. You can also complain to the Slovak data protection authority, the <a href="https://dataprotection.gov.sk">Úrad na ochranu osobných údajov SR</a>.</p>
+<h2>Children</h2>
+<p>Plan&amp;Ride is a general transit app, not aimed at children under 13. We don't knowingly collect their personal data.</p>
+<h2>Changes</h2>
+<p>If this policy changes, the new version is published here with a new effective date. Important changes are also mentioned in the app's <em>What's new</em>.</p>

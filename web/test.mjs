@@ -1,6 +1,6 @@
 // Run: node test.mjs
 import assert from 'node:assert/strict';
-import { tripProgress, catchEstimate, communityKey, lineNumber, historyInsights, historyToCsv, snapToRoute, delayAt, nextCheckMs, stopPassDetector, BUS_GPS_MAX_M, RIDER_GPS_MAX_M } from './public/js/logic.js';
+import { tripProgress, catchEstimate, communityKey, lineNumber, historyInsights, historyToCsv, snapToRoute, delayAt, nextCheckMs, stopPassDetector, nextRideDeparture, pickRideConnection, earliestBoardingMs, WORKDAYS, BUS_GPS_MAX_M, RIDER_GPS_MAX_M } from './public/js/logic.js';
 import { parseScheduledTrip, localToEpoch } from './cp.js';
 
 const T0 = Date.UTC(2026, 8, 24, 10, 0);
@@ -25,10 +25,10 @@ assert.equal(tripProgress(detail, { boardingPlatformIds: [1], alightOrder: 2 }, 
 assert.deepEqual(catchEstimate(600, 900), { walkSeconds: 600, marginSeconds: 300, verdict: 'leaveSoon' });
 assert.equal(catchEstimate(600, 400).verdict, 'miss');
 assert.equal(catchEstimate(30, 10).verdict, 'atStop');
-// location checks while walking: 3/4 of the walk, 30 s .. 10 min
-assert.equal(nextCheckMs(460), 345000);
-assert.equal(nextCheckMs(10), 30000);
-assert.equal(nextCheckMs(20000), 600000);
+// location checks before the stop: 3/4 of the walk, every 1 to 3 min
+assert.equal(nextCheckMs(120), 90000);
+assert.equal(nextCheckMs(10), 60000);
+assert.equal(nextCheckMs(460), 180000);
 // the moment the bus left or passed a stop
 {
   const pass = stopPassDetector();
@@ -43,6 +43,40 @@ assert.equal(nextCheckMs(20000), 600000);
   before(0.9, true, 0);
   before(0.99, false, 10000, true); // standing at the stop, just before its point
   assert.equal(before(1.2, true, 50000)[2], true);
+  // EM-0007: crosses the stop point moving, halts 20 m further on, drives on -> stopped, not passed
+  const past = stopPassDetector();
+  const fixes = [[0.8, true, false], [0.97, true, true], [1.03, true, true], [1.04, false, true], [1.04, false, true], [1.04, false, true], [1.08, true, true], [1.3, true, false]];
+  const out = fixes.map(([i, m, a], n) => past(i, m, n * 5000, a)).filter(Boolean);
+  assert.deepEqual(out, [[1, 27500, true]]);
+  // drives through the stop's area without stopping -> passed, decided once out of the area
+  const through = stopPassDetector();
+  const got = [[0.8, true, false], [0.95, true, true], [1.05, true, true], [1.3, true, false]].map(([i, m, a], n) => through(i, m, n * 5000, a)).filter(Boolean);
+  assert.equal(got.length, 1);
+  assert.equal(got[0][2], false);
+}
+
+// ---- regular rides (same rules as the Android app)
+{
+  const ride = { id: 'r', route: {}, time: '07:25', lines: ['101'], days: WORKDAYS, dates: [], leadMinutes: 10, enabled: true };
+  const at = (y, mo, d, h, mi) => localToEpoch(y, mo, d, h, mi);
+  // Friday 2026-10-02: after 7:15 the next one is Monday
+  assert.equal(nextRideDeparture(ride, at(2026, 10, 2, 8, 0)), at(2026, 10, 5, 7, 25));
+  assert.equal(nextRideDeparture(ride, at(2026, 10, 2, 7, 16)), at(2026, 10, 5, 7, 25));
+  assert.equal(nextRideDeparture(ride, at(2026, 10, 2, 7, 14)), at(2026, 10, 2, 7, 25));
+  const ranged = { ...ride, time: '18:00', days: [6], dates: ['2026-10-07'], startDate: '2026-10-10', endDate: '2026-10-17' };
+  assert.equal(nextRideDeparture(ranged, at(2026, 10, 1, 12, 0)), at(2026, 10, 7, 18, 0));
+  assert.equal(nextRideDeparture(ranged, at(2026, 10, 8, 12, 0)), at(2026, 10, 10, 18, 0));
+  assert.equal(nextRideDeparture(ranged, at(2026, 10, 18, 0, 0)), null);
+  assert.equal(nextRideDeparture({ ...ride, enabled: false }, at(2026, 10, 1, 0, 0)), null);
+  const conn = (id, time, ...lines) => ({ id, segments: lines.map((l) => ({ line: 'Bus ' + l, departureTime: time, serviceDate: '2026-10-05' })) });
+  const dep = at(2026, 10, 5, 7, 25);
+  assert.equal(pickRideConnection([conn('a', '7:20', '106'), conn('b', '7:25', '101'), conn('c', '7:40', '101')], ride, dep).id, 'b');
+  assert.equal(pickRideConnection([conn('a', '7:24', '106'), conn('c', '7:30', '101')], ride, dep).id, 'c');
+  assert.equal(pickRideConnection([conn('x', '9:00', '5')], ride, dep), null);
+  // earliest boarding: a bus that usually leaves 3 min early (nothing live known) counts as 3 min earlier
+  const d = { stops: [{ scheduledMs: 1_000_000 }], delaySeconds: 0, history: { delaySeconds: -180 } };
+  assert.equal(earliestBoardingMs(d, { boardingIndex: 0, boardingExpectedMs: 1_000_000 }, false), 1_000_000 - 180_000);
+  assert.equal(earliestBoardingMs(d, { boardingIndex: 0, boardingExpectedMs: 1_000_000 }, true), 1_000_000);
 }
 assert.equal(communityKey(detail), `507|S0|${T0}`);
 assert.equal(communityKey(detail, { lineId: 910009139, tripNumber: 123, line: '1' }), 'sadzv|910009139|123|2026-09-24|1');

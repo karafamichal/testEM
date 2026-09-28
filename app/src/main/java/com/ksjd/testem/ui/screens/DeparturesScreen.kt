@@ -95,15 +95,15 @@ import com.ksjd.testem.ui.theme.TransitTheme
 import kotlinx.coroutines.delay
 
 @Composable
-fun DeparturesScreen(liveViewModel: LiveViewModel, onExitGuest: (() -> Unit)?) {
+fun DeparturesScreen(liveViewModel: LiveViewModel) {
     Column(Modifier.fillMaxSize()) {
         JourneyDraftBar(Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-        Box(Modifier.weight(1f)) { DeparturesContent(liveViewModel, onExitGuest) }
+        Box(Modifier.weight(1f)) { DeparturesContent(liveViewModel) }
     }
 }
 
 @Composable
-private fun DeparturesContent(liveViewModel: LiveViewModel, onExitGuest: (() -> Unit)?) {
+private fun DeparturesContent(liveViewModel: LiveViewModel) {
     val state by liveViewModel.state.collectAsState()
     val board = state.board
     if (board != null) {
@@ -117,7 +117,7 @@ private fun DeparturesContent(liveViewModel: LiveViewModel, onExitGuest: (() -> 
             onOpenTrip = liveViewModel::openTrip
         )
     } else {
-        StopFinder(state, liveViewModel, onExitGuest)
+        StopFinder(state, liveViewModel)
     }
 }
 
@@ -126,19 +126,14 @@ private fun DeparturesContent(liveViewModel: LiveViewModel, onExitGuest: (() -> 
 // --------------------------------------------------------------------------
 
 @Composable
-private fun StopFinder(state: LiveState, vm: LiveViewModel, onExitGuest: (() -> Unit)?) {
+private fun StopFinder(state: LiveState, vm: LiveViewModel) {
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) vm.findNearby() else vm.onLocationPermissionDenied()
     }
 
     LazyColumn(Modifier.fillMaxSize()) {
         item {
-            ScreenHeader(
-                title = stringResource(R.string.departures_title),
-                actions = {
-                    if (onExitGuest != null) TextButton(onClick = onExitGuest) { Text(stringResource(R.string.auth_sign_in)) }
-                }
-            )
+            ScreenHeader(title = stringResource(R.string.departures_title))
             OutlinedTextField(
                 value = state.query,
                 onValueChange = vm::search,
@@ -424,6 +419,15 @@ private fun BoardRow(departure: LiveDeparture, now: Long, highlighted: Boolean, 
                 }
                 if (departure.isCancelled) {
                     Text(stringResource(R.string.board_cancelled), style = MaterialTheme.typography.labelMedium, color = colors.late)
+                } else if (departure.fromTimetable) {
+                    // Another carrier: timetable only, so name who runs it instead of a delay.
+                    Text(
+                        departure.operator.ifBlank { stringResource(R.string.board_other_carrier) },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.boardDim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 } else {
                     DelayLabel(departure.delaySeconds, onBoard = true)
                 }
@@ -444,7 +448,11 @@ private fun BoardRow(departure: LiveDeparture, now: Long, highlighted: Boolean, 
                     style = TimeStyle.copy(fontSize = 22.sp),
                     color = colors.boardText
                 )
-                Text(stringResource(R.string.board_scheduled), style = MaterialTheme.typography.bodySmall, color = colors.boardDim)
+                Text(
+                    stringResource(if (departure.fromTimetable) R.string.board_timetable else R.string.board_scheduled),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.boardDim
+                )
             }
         }
     }

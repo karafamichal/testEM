@@ -80,41 +80,48 @@ import com.ksjd.testem.ui.components.SectionLabel
 import com.ksjd.testem.ui.components.daysLeftText
 import com.ksjd.testem.ui.theme.TransitTheme
 
-private enum class SettingsPage { Appearance, Security, Reminders, Language, Community, BugReport, Developer }
+private enum class SettingsPage { Appearance, Security, Reminders, Language, Community, BugReport, Feature, Developer }
 
 @Composable
-fun AccountScreen(viewModel: AppViewModel) {
+fun AccountScreen(viewModel: AppViewModel, onUnlock: () -> Unit, onSignIn: () -> Unit) {
+    val app by viewModel.appState.collectAsState()
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     val current = page
-    if (current != null) {
+    // Pages behind the PIN close when the app locks.
+    if (current != null && current in LOCKED_PAGES && !(app.hasAccount && app.isAppUnlocked)) page = null
+    if (current != null && page != null) {
         BackHandler { page = null }
         SettingsPageScreen(current, viewModel, onBack = { page = null })
         return
     }
-    AccountOverview(viewModel, onOpen = { page = it })
+    AccountOverview(viewModel, onUnlock, onSignIn, onOpen = { page = it })
 }
 
+/** Security (PIN) and Developer (raw token) need the account unlocked. */
+private val LOCKED_PAGES = setOf(SettingsPage.Security, SettingsPage.Developer)
+
 @Composable
-private fun AccountOverview(viewModel: AppViewModel, onOpen: (SettingsPage) -> Unit) {
+private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSignIn: () -> Unit, onOpen: (SettingsPage) -> Unit) {
     val ticket by viewModel.ticketState.collectAsState()
     val app by viewModel.appState.collectAsState()
-    var confirmSignOut by remember { mutableStateOf(false) }
+    var confirmRemove by remember { mutableStateOf(false) }
     var showSupport by remember { mutableStateOf(false) }
-    val card = ticket.selectedCard
+    val unlocked = app.hasAccount && app.isAppUnlocked
+    val card = ticket.selectedCard.takeIf { unlocked }
     if (showSupport) SupportDialog { showSupport = false }
 
-    if (confirmSignOut) {
+    if (confirmRemove) {
         AlertDialog(
-            onDismissRequest = { confirmSignOut = false },
-            title = { Text(stringResource(R.string.logout_title)) },
-            text = { Text(stringResource(R.string.logout_message)) },
+            onDismissRequest = { confirmRemove = false },
+            title = { Text(stringResource(R.string.account_remove_title)) },
+            text = { Text(stringResource(R.string.account_remove_message)) },
             confirmButton = {
                 TextButton(onClick = {
-                    confirmSignOut = false
-                    viewModel.logout()
-                }) { Text(stringResource(R.string.logout_confirm), color = MaterialTheme.colorScheme.error) }
+                    confirmRemove = false
+                    viewModel.removeAccount()
+                }) { Text(stringResource(R.string.account_remove_confirm), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text(stringResource(R.string.cancel)) } }
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.cancel)) } }
         )
     }
 
@@ -125,33 +132,52 @@ private fun AccountOverview(viewModel: AppViewModel, onOpen: (SettingsPage) -> U
             .padding(bottom = 24.dp)
     ) {
         ScreenHeader(
-            title = ticket.userName.ifBlank { stringResource(R.string.tab_account) },
-            subtitle = app.email,
+            title = when {
+                unlocked -> ticket.userName.ifBlank { stringResource(R.string.tab_account) }
+                app.hasAccount -> stringResource(R.string.tab_account)
+                else -> stringResource(R.string.settings_title)
+            },
+            subtitle = app.email.takeIf { unlocked },
             actions = {
-                IconButton(onClick = viewModel::refreshAccount, enabled = !ticket.isRefreshingAccount) {
-                    Icon(Icons.Outlined.Refresh, stringResource(R.string.refresh_button))
+                if (unlocked) {
+                    IconButton(onClick = viewModel::refreshAccount, enabled = !ticket.isRefreshingAccount) {
+                        Icon(Icons.Outlined.Refresh, stringResource(R.string.refresh_button))
+                    }
                 }
             }
         )
 
-        if (card != null) {
-            CardImage(card)
-            BalanceBlock(card)
-            SectionLabel(stringResource(R.string.account_validity))
-            ListGroup {
-                ValidityRow(stringResource(R.string.account_ticket), card.ticketValidFrom, card.ticketValidTo)
-                GroupDivider()
-                ValidityRow(stringResource(R.string.account_card), card.cardValidFrom, card.cardValidTo)
-                if (card.discountValidTo > 0) {
-                    GroupDivider()
-                    ValidityRow(stringResource(R.string.account_discount), card.discountValidFrom, card.discountValidTo)
+        when {
+            !app.hasAccount -> {
+                SectionLabel(stringResource(R.string.account_section))
+                ListGroup {
+                    SettingsLink(stringResource(R.string.account_add), stringResource(R.string.account_add_hint), onSignIn)
                 }
             }
-        } else {
-            Notice(stringResource(R.string.account_no_details), modifier = Modifier.padding(16.dp))
+            !unlocked -> Notice(
+                stringResource(R.string.account_locked),
+                actionLabel = stringResource(R.string.unlock_button),
+                onAction = onUnlock,
+                modifier = Modifier.padding(16.dp)
+            )
+            card != null -> {
+                CardImage(card)
+                BalanceBlock(card)
+                SectionLabel(stringResource(R.string.account_validity))
+                ListGroup {
+                    ValidityRow(stringResource(R.string.account_ticket), card.ticketValidFrom, card.ticketValidTo)
+                    GroupDivider()
+                    ValidityRow(stringResource(R.string.account_card), card.cardValidFrom, card.cardValidTo)
+                    if (card.discountValidTo > 0) {
+                        GroupDivider()
+                        ValidityRow(stringResource(R.string.account_discount), card.discountValidFrom, card.discountValidTo)
+                    }
+                }
+            }
+            else -> Notice(stringResource(R.string.account_no_details), modifier = Modifier.padding(16.dp))
         }
 
-        if (ticket.cards.size > 1) {
+        if (unlocked && ticket.cards.size > 1) {
             SectionLabel(stringResource(R.string.account_cards))
             ListGroup {
                 ticket.cards.forEachIndexed { index, c ->
@@ -182,17 +208,25 @@ private fun AccountOverview(viewModel: AppViewModel, onOpen: (SettingsPage) -> U
 
         SectionLabel(stringResource(R.string.settings_title))
         ListGroup {
-            SettingsLink(stringResource(R.string.settings_reminders), stringResource(R.string.settings_reminders_hint)) { onOpen(SettingsPage.Reminders) }
-            GroupDivider()
-            SettingsLink(stringResource(R.string.security_title), stringResource(R.string.security_subtitle)) { onOpen(SettingsPage.Security) }
+            SettingsLink(stringResource(R.string.settings_reminders), stringResource(if (app.hasAccount) R.string.settings_reminders_hint else R.string.settings_reminders_hint_guest)) { onOpen(SettingsPage.Reminders) }
+            if (app.hasAccount) {
+                GroupDivider()
+                SettingsLink(stringResource(R.string.security_title), stringResource(R.string.security_subtitle)) {
+                    if (unlocked) onOpen(SettingsPage.Security) else onUnlock()
+                }
+            }
             GroupDivider()
             SettingsLink(stringResource(R.string.settings_appearance), stringResource(R.string.settings_appearance_hint)) { onOpen(SettingsPage.Appearance) }
             GroupDivider()
             SettingsLink(stringResource(R.string.language_title), languageName(app.languageCode)) { onOpen(SettingsPage.Language) }
             GroupDivider()
             SettingsLink(stringResource(R.string.settings_community), stringResource(R.string.settings_community_hint)) { onOpen(SettingsPage.Community) }
-            GroupDivider()
-            SettingsLink(stringResource(R.string.settings_developer), stringResource(R.string.settings_developer_hint)) { onOpen(SettingsPage.Developer) }
+            if (app.hasAccount) {
+                GroupDivider()
+                SettingsLink(stringResource(R.string.settings_developer), stringResource(R.string.settings_developer_hint)) {
+                    if (unlocked) onOpen(SettingsPage.Developer) else onUnlock()
+                }
+            }
         }
         Spacer(Modifier.height(16.dp))
         ListGroup {
@@ -207,17 +241,45 @@ private fun AccountOverview(viewModel: AppViewModel, onOpen: (SettingsPage) -> U
                 trailing = { Switch(whatsNew, setWhatsNew) }
             )
             GroupDivider()
+            // Firebase remembers this itself; the switch only reads and changes it.
+            var stats by remember { mutableStateOf(prefs.getAnalyticsEnabled()) }
+            val setStats: (Boolean) -> Unit = { on ->
+                stats = on
+                prefs.saveAnalyticsEnabled(on)
+                com.google.firebase.analytics.FirebaseAnalytics.getInstance(context).setAnalyticsCollectionEnabled(on)
+            }
+            ListRow(
+                stringResource(R.string.analytics_switch),
+                subtitle = stringResource(R.string.analytics_switch_hint),
+                onClick = { setStats(!stats) },
+                trailing = { Switch(stats, setStats) }
+            )
+            GroupDivider()
             SettingsLink(stringResource(R.string.bug_title), stringResource(R.string.bug_hint)) { onOpen(SettingsPage.BugReport) }
             GroupDivider()
+            SettingsLink(stringResource(R.string.feature_title), stringResource(R.string.feature_hint)) { onOpen(SettingsPage.Feature) }
+            GroupDivider()
             SettingsLink(stringResource(R.string.support_title), stringResource(R.string.support_hint)) { showSupport = true }
+            GroupDivider()
+            SettingsLink(stringResource(R.string.privacy_policy_title), stringResource(R.string.privacy_policy_hint)) {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(siteUrl(context, "privacy")))) }
+            }
         }
-        Spacer(Modifier.height(16.dp))
-        ListGroup {
-            ListRow(
-                title = stringResource(R.string.logout),
-                titleColor = MaterialTheme.colorScheme.error,
-                onClick = { confirmSignOut = true }
-            )
+        if (app.hasAccount) {
+            Spacer(Modifier.height(16.dp))
+            ListGroup {
+                if (unlocked && app.isPinSet) {
+                    ListRow(title = stringResource(R.string.lock_now), onClick = viewModel::lock)
+                    GroupDivider()
+                }
+                ListRow(
+                    title = stringResource(R.string.account_remove),
+                    subtitle = stringResource(R.string.account_remove_hint),
+                    titleColor = MaterialTheme.colorScheme.error,
+                    // Removing needs the PIN too, so someone holding the phone can't wipe it.
+                    onClick = { if (unlocked) confirmRemove = true else onUnlock() }
+                )
+            }
         }
     }
 }
@@ -238,13 +300,15 @@ fun WhatsNewDialog() {
         dismissButton = {
             TextButton(onClick = {
                 close()
-                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(CHANGELOG_URL))) }
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(siteUrl(context, "changelog")))) }
             }) { Text(stringResource(R.string.whats_new_changelog)) }
         }
     )
 }
 
-private const val CHANGELOG_URL = "https://github.com/karafamichal/testEM/releases/latest"
+/** The Plan&Ride website (served by emhub): Slovak at /page, English at /en/page. */
+private fun siteUrl(context: android.content.Context, page: String): String =
+    "https://par.karafa.net/" + (if (CredentialsManager(context).getLanguageCode() == "en") "en/" else "") + page
 
 /** A short note, then the support page in the browser. */
 @Composable
@@ -348,6 +412,7 @@ private fun SettingsPageScreen(page: SettingsPage, viewModel: AppViewModel, onBa
         SettingsPage.Language -> stringResource(R.string.language_title)
         SettingsPage.Community -> stringResource(R.string.settings_community)
         SettingsPage.BugReport -> stringResource(R.string.bug_title)
+        SettingsPage.Feature -> stringResource(R.string.feature_title)
         SettingsPage.Developer -> stringResource(R.string.settings_developer)
     }
     Column(
@@ -367,6 +432,7 @@ private fun SettingsPageScreen(page: SettingsPage, viewModel: AppViewModel, onBa
             SettingsPage.Language -> LanguageSettings(app, viewModel)
             SettingsPage.Community -> CommunitySettings()
             SettingsPage.BugReport -> BugReportForm(viewModel, onDone = onBack)
+            SettingsPage.Feature -> BugReportForm(viewModel, onDone = onBack, feature = true)
             SettingsPage.Developer -> DeveloperSettings(viewModel)
         }
     }
@@ -403,6 +469,11 @@ private fun ReminderSettings(app: AppState, viewModel: AppViewModel) {
 
     var thresholdText by rememberSaveable { mutableStateOf("%.2f".format(app.lowCreditWarningThreshold)) }
 
+    // Credit and expiry come from the account; without one only the bus alerts apply.
+    if (!app.hasAccount) {
+        ArrivalAlertSetting()
+        return
+    }
     Text(
         stringResource(R.string.reminders_intro),
         style = MaterialTheme.typography.bodyMedium,

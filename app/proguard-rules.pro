@@ -28,6 +28,12 @@
 -keep class com.ksjd.testem.AccountDetails { *; }
 -keep class com.ksjd.testem.SavedRoute { *; }
 -keep class com.ksjd.testem.CpStopSuggestion { *; }
+# Saved journeys and regular rides (2.6). Without these, R8 renames or drops the fields Gson
+# fills, so they read back empty after a restart and are lost after every update.
+-keep class com.ksjd.testem.SavedJourney { *; }
+-keep class com.ksjd.testem.RecurringRide { *; }
+-keep class com.ksjd.testem.TimetableConnection { *; }
+-keep class com.ksjd.testem.TimetableSegment { *; }
 # Journey legs travel to the tracking service as JSON.
 -keep class com.ksjd.testem.live.TrackedTrip { *; }
 -keep class com.ksjd.testem.live.TripRef { *; }

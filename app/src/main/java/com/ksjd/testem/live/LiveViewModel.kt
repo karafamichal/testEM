@@ -49,8 +49,8 @@ data class LiveState(
     val stopsFailed: Boolean = false,
     val board: BoardState? = null,
     val trip: TripSheetState? = null,
-    /** Next departures from the first favourite stop, shown on the ticket tab. */
-    val preview: BoardState? = null
+    /** Next departures from the first few favourite stops, shown on the home tab. */
+    val previews: List<BoardState> = emptyList()
 )
 
 /** A planner bus as a trip: stops, times and the user's stops come from its cp.sk route page. */
@@ -188,7 +188,7 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
         boardJob = viewModelScope.launch {
             while (isActive) {
                 val stop = _state.value.board?.stop ?: return@launch
-                val result = runCatching { repo.getDepartures(stop) }
+                val result = runCatching { repo.getBoard(stop) }
                 _state.update { state ->
                     val board = state.board?.takeIf { it.stop.id == stop.id } ?: return@update state
                     state.copy(
@@ -206,21 +206,20 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     // --------------------------------------------------------------- preview
 
     fun refreshPreview() {
-        val stop = _state.value.favourites.firstOrNull()
-        if (stop == null) {
-            _state.update { it.copy(preview = null) }
+        val stops = _state.value.favourites.take(PREVIEW_STOPS)
+        if (stops.isEmpty()) {
+            _state.update { it.copy(previews = emptyList()) }
             return
         }
         viewModelScope.launch {
-            val result = runCatching { repo.getDepartures(stop) }
-            _state.update { state ->
-                state.copy(
-                    preview = result.fold(
-                        onSuccess = { BoardState(stop, it.take(3), isLoading = false, updatedAtMs = System.currentTimeMillis()) },
-                        onFailure = { BoardState(stop, state.preview?.departures.orEmpty(), isLoading = false, hasError = true) }
-                    )
+            val boards = stops.map { stop ->
+                val old = _state.value.previews.firstOrNull { it.stop.id == stop.id }
+                runCatching { repo.getBoard(stop) }.fold(
+                    onSuccess = { BoardState(stop, it.take(3), isLoading = false, updatedAtMs = System.currentTimeMillis()) },
+                    onFailure = { BoardState(stop, old?.departures.orEmpty(), isLoading = false, hasError = true) }
                 )
             }
+            _state.update { it.copy(previews = boards) }
         }
     }
 
@@ -243,6 +242,11 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     /** A bus from a planner result: no live data, so its stops and times come from cp.sk. */
     fun openScheduledTrip(segment: TimetableSegment, line: String) {
         loadTrip(TripSheetState(scheduledTripRef(segment, line) ?: return))
+    }
+
+    /** The bus being followed, with the user's stops, e.g. after tapping its notification. */
+    fun openFollowed(trip: TrackedTrip) {
+        loadTrip(TripSheetState(trip.ref, boardingPlatformIds = trip.boardingPlatformIds, alightOrder = trip.alightOrder))
     }
 
     /** Where the user gets off the bus in the open sheet (to add it to a journey), null = clear. */
@@ -292,5 +296,6 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         private const val BOARD_REFRESH_MS = 15_000L
         private const val TRIP_REFRESH_MS = 15_000L
+        private const val PREVIEW_STOPS = 3
     }
 }

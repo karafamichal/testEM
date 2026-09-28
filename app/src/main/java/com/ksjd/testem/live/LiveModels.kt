@@ -37,9 +37,13 @@ data class LiveDeparture(
     val isCancelled: Boolean,
     /** Delay in seconds; null when the departure is not tracked live. */
     val delaySeconds: Int?,
-    val fetchedAtMs: Long
+    val fetchedAtMs: Long,
+    /** Another carrier's bus from cp.sk's timetable (not in sadzv's live data). */
+    val fromTimetable: Boolean = false,
+    /** Carrier, shown for [fromTimetable] buses. */
+    val operator: String = ""
 ) {
-    val key: String get() = "$lineId-$tripNumber-$plannedSecondOfDay"
+    val key: String get() = if (fromTimetable) "cp-$line-$plannedSecondOfDay-$destination" else "$lineId-$tripNumber-$plannedSecondOfDay"
 }
 
 data class LiveVehicle(

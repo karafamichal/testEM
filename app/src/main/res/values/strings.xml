@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">testEM</string>
+    <string name="app_name">Plan&amp;Ride</string>
 
     <!-- General -->
     <string name="back">Back</string>
@@ -10,18 +10,15 @@
     <string name="update_button">Update</string>
 
     <!-- Tabs -->
-    <string name="tab_ticket">Ticket</string>
     <string name="tab_departures">Departures</string>
     <string name="tab_planner">Planner</string>
     <string name="tab_history">History</string>
     <string name="tab_account">Account</string>
 
     <!-- Sign-in and lock -->
-    <string name="auth_browse_public">Browse departures and timetables without signing in</string>
-    <string name="auth_sign_in">Sign in</string>
     <string name="login_title">Sign in</string>
     <string name="login_subtitle">Use the email and password of your sadzv.qrbus.me account.</string>
-    <string name="login_unofficial_note">testEM is an unofficial app and is not affiliated with the operator.</string>
+    <string name="login_unofficial_note">Plan&amp;Ride is an unofficial app and is not affiliated with the operator.</string>
     <string name="email_label">Email or username</string>
     <string name="password_label">Password</string>
     <string name="password_show">Show password</string>
@@ -40,7 +37,7 @@
     <string name="pin_save_button">Save PIN</string>
     <string name="unlock_title">Unlock</string>
     <string name="unlock_subtitle">Enter your PIN or use your fingerprint or face.</string>
-    <string name="unlock_prompt_title">Unlock testEM</string>
+    <string name="unlock_prompt_title">Unlock Plan&amp;Ride</string>
     <string name="unlock_prompt_subtitle">Confirm it’s you to continue</string>
     <string name="unlock_prompt_use_pin">Use PIN</string>
     <string name="pin_label">PIN</string>
@@ -186,10 +183,6 @@
         <item quantity="one">%d day left</item>
         <item quantity="other">%d days left</item>
     </plurals>
-    <string name="logout">Sign out</string>
-    <string name="logout_title">Sign out?</string>
-    <string name="logout_message">Your saved email and password will be removed from this phone.</string>
-    <string name="logout_confirm">Sign out</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -205,12 +198,12 @@
     <string name="settings_developer">Developer</string>
     <string name="settings_developer_hint">Connection state and raw token</string>
 
-    <string name="reminders_intro">testEM checks your account about twice a day and notifies you when something needs attention.</string>
+    <string name="reminders_intro">Plan&amp;Ride checks your account about twice a day and notifies you when something needs attention.</string>
     <string name="reminders_low_credit">Low credit</string>
     <string name="reminders_low_credit_hint">When credit drops below %1$s</string>
     <string name="reminders_expiry">Expiry</string>
     <string name="reminders_expiry_hint">7 days and 1 day before your ticket, card or discount ends</string>
-    <string name="reminders_permission_needed">Notifications are turned off for testEM. Allow them in system settings to get reminders.</string>
+    <string name="reminders_permission_needed">Notifications are turned off for Plan&amp;Ride. Allow them in system settings to get reminders.</string>
     <string name="low_credit_threshold_title">Low credit level</string>
     <string name="low_credit_threshold_label">Amount (EUR)</string>
     <string name="low_credit_threshold_description">Used for the warning on the ticket and for reminders.</string>
@@ -247,7 +240,7 @@
     <string name="developer_polling_hint">Turn off to stop requesting new codes</string>
     <string name="developer_phase">Connection state</string>
     <string name="developer_last_code">Last new code</string>
-    <string name="developer_version">testEM %1$s</string>
+    <string name="developer_version">Plan&amp;Ride %1$s</string>
     <string name="token_info_title">Current token</string>
     <string name="token_waiting">No token yet.</string>
     <string name="token_hex_label">HEX: %1$s</string>
@@ -340,7 +333,7 @@
     <string name="bug_logs_hint">Recent log lines from this app and the last crash. Passwords and tokens are removed.</string>
     <string name="bug_logs_show">Show what will be sent</string>
     <string name="bug_logs_hide">Hide logs</string>
-    <string name="bug_consent">I agree that this report, the name and email above, device model, app version and (if attached) the logs are sent to the testEM developer to fix the bug and reply to me.</string>
+    <string name="bug_consent">I agree that this report, the name and email above, device model, app version and (if attached) the logs are sent to the Plan&amp;Ride developer to fix the bug and reply to me.</string>
     <string name="bug_send">Send report</string>
     <string name="bug_sending">Sending…</string>
     <string name="bug_sent_title">Report %1$s sent</string>
@@ -360,9 +353,9 @@
     <string name="arrival_alert_custom_label">Minutes (1–60)</string>
     <string name="catch_location_allow">Allow</string>
     <string name="community_bus_leaving">Bus is leaving</string>
-    <string name="support_title">Support testEM</string>
+    <string name="support_title">Support Plan&amp;Ride</string>
     <string name="support_hint">Help keep the app free and improving</string>
-    <string name="support_body">testEM is free and open source, built in spare time. If it makes your trips easier, you can support further work on the project with a small contribution. It is completely voluntary and changes nothing in the app.</string>
+    <string name="support_body">Plan&amp;Ride is free and open source, built in spare time. If it makes your trips easier, you can support further work on the project with a small contribution. It is completely voluntary and changes nothing in the app.</string>
     <string name="support_open">Open support page</string>
     <string name="support_later">Not now</string>
     <string name="community_mode_off">Off</string>
@@ -397,6 +390,87 @@
     <string name="whats_new_title">What’s new in %1$s</string>
     <string name="whats_new_changelog">Full changelog</string>
     <string name="whats_new_ok">OK</string>
+    <!-- 2.6: optional account, home, regular rides, suggestions -->
+    <string name="tab_home">Home</string>
+    <string name="welcome_title">Welcome to Plan&amp;Ride</string>
+    <string name="welcome_body">Live departures, the journey planner and following your bus all work without an account.</string>
+    <string name="welcome_account_title">Show your ticket here too</string>
+    <string name="welcome_skip">Continue without an account</string>
+    <string name="welcome_skip_hint">You can add your account later in Settings.</string>
+    <string name="pin_setup_cancel">Cancel and remove the account</string>
+    <string name="pin_locked_out">Too many wrong PINs. Try again in %1$d s.</string>
+    <string name="locked_title">Locked</string>
+    <string name="locked_body">Unlock with your PIN or fingerprint to see your ticket and account.</string>
+    <string name="ticket_locked_title">Show your ticket</string>
+    <string name="ticket_locked_body">Tap and unlock with your PIN or fingerprint</string>
+    <string name="home_add_account_hint">Have a sadzv.qrbus.me account? Add it to show your ticket and credit here.</string>
+    <string name="home_journeys">My journeys</string>
+    <string name="home_journey_remove">Remove journey</string>
+    <string name="home_following">Following</string>
+    <string name="home_journey_underway">Underway</string>
+    <string name="home_journey_in">in %1$s</string>
+    <string name="day_today">Today</string>
+    <string name="day_tomorrow">Tomorrow</string>
+    <string name="account_section">Account</string>
+    <string name="account_add">Add account</string>
+    <string name="account_add_hint">Your sadzv.qrbus.me ticket, credit and history</string>
+    <string name="account_locked">Your account is locked. Unlock to see your card, credit and history.</string>
+    <string name="account_remove">Remove account from this phone</string>
+    <string name="account_remove_hint">Signs out, forgets the password and the PIN</string>
+    <string name="account_remove_title">Remove the account?</string>
+    <string name="account_remove_message">Your email, password, PIN and cached account details are removed from this phone. Departures, the planner, saved journeys and favourite stops stay.</string>
+    <string name="account_remove_confirm">Remove</string>
+    <string name="lock_now">Lock now</string>
+    <string name="settings_reminders_hint_guest">Alerts while following a bus</string>
+    <string name="planner_save_journey">Save to my journeys</string>
+    <string name="planner_unsave_journey">Remove from my journeys</string>
+    <string name="board_other_carrier">Other carrier</string>
+    <string name="board_timetable">Timetable</string>
+    <string name="rides_title">Regular rides</string>
+    <string name="rides_empty">Search a connection you take often and tap the repeat icon on it. The app then follows that bus by itself on the days you choose.</string>
+    <string name="rides_next">Next: %1$s %2$s</string>
+    <string name="rides_no_next">No more rides planned</string>
+    <string name="rides_paused">Paused</string>
+    <string name="rides_every_day">Every day</string>
+    <string name="rides_workdays">Workdays</string>
+    <string name="rides_weekends">Weekends</string>
+    <string name="rides_dates_only">Chosen dates</string>
+    <string name="rides_intro">Before each departure the app finds that day’s bus and starts following it, with the live notification and your alerts.</string>
+    <string name="rides_lines">Lines: %1$s</string>
+    <string name="rides_departs">Departs %1$s</string>
+    <string name="rides_days">Days</string>
+    <string name="rides_range">Only between</string>
+    <string name="rides_from">From</string>
+    <string name="rides_until">Until</string>
+    <string name="rides_dates">Also on these dates</string>
+    <string name="rides_add_date">Add a date</string>
+    <string name="rides_lead">Start following before departure</string>
+    <string name="rides_enabled">On</string>
+    <string name="rides_pick_days">Pick at least one day or date.</string>
+    <string name="rides_exact_needed">Allow alarms for Plan&amp;Ride so following starts on time. Without it you get a notification to tap instead.</string>
+    <string name="rides_delete">Delete this ride</string>
+    <string name="rides_save">Save</string>
+    <string name="rides_repeat">Repeat this ride regularly</string>
+    <string name="rides_channel">Regular rides</string>
+    <string name="rides_due_title">%1$s is due</string>
+    <string name="rides_due_body">Your %1$s bus. Tap to follow it.</string>
+    <string name="rides_busy_title">%1$s not followed</string>
+    <string name="rides_busy_body">You were already following another bus.</string>
+    <string name="rides_finding">Finding your %1$s bus…</string>
+    <string name="rides_missing_title">%1$s: bus not found</string>
+    <string name="rides_missing_body">There’s no %1$s connection today. Check the planner.</string>
+    <string name="analytics_switch">Usage statistics</string>
+    <string name="analytics_switch_hint">Anonymous app usage via Google Firebase Analytics, to see what to improve. No account data or location.</string>
+    <string name="privacy_policy_title">Privacy policy</string>
+    <string name="privacy_policy_hint">What the app sends where, and your rights</string>
+    <string name="feature_title">Suggest a feature</string>
+    <string name="feature_hint">An idea for the app? Tell us</string>
+    <string name="feature_summary">Your idea in a few words</string>
+    <string name="feature_description">What should the app do, and how would it help you?</string>
+    <string name="feature_consent">I agree that this suggestion, the name and email above, device model and app version are sent to the Plan&amp;Ride developer to consider it and reply to me.</string>
+    <string name="feature_send">Send suggestion</string>
+    <string name="feature_sent_title">Suggestion %1$s sent</string>
+    <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• Automatic updates now really share where your bus is, including the exact moment it leaves or passes each stop.\n• The planner finds connections with changes between city and intercity buses, and shows which town each stop is in.\n• Follow a whole journey with changes: the app tells you where to get off and then follows your next bus.\n• No connection found? Build your own journey bus by bus.\n• Delays in the trip view refresh by themselves.\n• While you walk to the stop, your location is checked only now and then, which saves battery.</string>
+    <string name="whats_new_body">• testEM is now Plan&amp;Ride, with a new icon.\n• No account needed: use departures, the planner and following a bus without signing in. Add or remove your sadzv.qrbus.me account any time in Settings.\n• With an account, the app opens straight away; the ticket, credit and history stay hidden until you unlock with your PIN or fingerprint.\n• Star a connection in the planner and it appears under your ticket, ready to follow.\n• Regular rides: pick the days and dates, and the app follows your bus by itself before it leaves.\n• Pick a date in the planner, not only a time.\n• Departures show other carriers’ intercity buses too (Arriva, Slovak Lines, FlixBus and more).\n• GPS runs only when needed: your location is checked every 1–3 min on the way, and live GPS starts at the stop 4 min before the bus (earlier if it usually comes early).\n• Better detection of whether a bus stopped or drove past a stop.\n• Suggest a feature from Settings.\n• New website par.karafa.net with what’s new, support and the privacy policy; anonymous usage statistics can be turned off in Settings.\n• Your password is now stored encrypted, and PIN guessing is limited.</string>
 </resources>
