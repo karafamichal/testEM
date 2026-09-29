@@ -40,7 +40,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 

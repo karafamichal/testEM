@@ -324,6 +324,14 @@
     <string name="catch_timetable_hint">Vypnuté: upozornenie len keď je známa skutočná poloha autobusu</string>
     <string name="catch_location_needed">Povoľte presnú polohu, aby bol čas chôdze správny.</string>
     <string name="location_background_needed">Automatický režim potrebuje polohu „Povoliť vždy“, inak funguje len pri otvorenej aplikácii.</string>
+    <string name="location_background_title">Poloha na pozadí</string>
+    <string name="location_background_disclosure">Plan&amp;Ride zbiera údaje o polohe na funkciu „Stihnem to?“ a na označovanie polohy vášho autobusu v Automatickom režime, aj keď je aplikácia zatvorená alebo sa nepoužíva. Deje sa to len počas sledovania autobusu, pričom je celý čas zobrazená notifikácia.
+
+„Povoliť vždy“ umožní, aby to fungovalo aj pri pravidelných jazdách, ktoré sa spúšťajú samy. Vaša poloha zostáva v tomto telefóne a nikdy sa neposiela ani nezdieľa.
+
+Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
+    <string name="location_background_continue">Pokračovať</string>
+    <string name="location_background_not_now">Teraz nie</string>
     <string name="location_background_allow">Povoliť vždy</string>
     <string name="community_delay_label">%1$s, podľa cestujúcich</string>
     <string name="bug_title">Nahlásiť chybu</string>

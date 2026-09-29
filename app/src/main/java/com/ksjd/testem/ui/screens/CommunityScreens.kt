@@ -152,6 +152,7 @@ fun CommunitySettings() {
         TripTracking.refresh(context)
     }
     var hasBackground by remember { mutableStateOf(Locations.hasBackground(context)) }
+    var disclosure by remember { mutableStateOf(false) }
     // Android 11+ opens the app's location settings page for this; the user picks "Allow all the time".
     val background = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         hasBackground = Locations.hasBackground(context)
@@ -189,7 +190,21 @@ fun CommunitySettings() {
             modifier = Modifier.padding(16.dp),
             tone = NoticeTone.Warning,
             actionLabel = stringResource(R.string.location_background_allow),
-            onAction = { background.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }
+            onAction = { disclosure = true }
+        )
+    }
+    // Google Play: a prominent disclosure must come before the "all the time" permission request.
+    if (disclosure) {
+        AlertDialog(
+            onDismissRequest = { disclosure = false },
+            title = { Text(stringResource(R.string.location_background_title)) },
+            text = { Text(stringResource(R.string.location_background_disclosure)) },
+            confirmButton = {
+                Button(onClick = { disclosure = false; background.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }) {
+                    Text(stringResource(R.string.location_background_continue))
+                }
+            },
+            dismissButton = { TextButton(onClick = { disclosure = false }) { Text(stringResource(R.string.location_background_not_now)) } }
         )
     }
     var predict by remember { mutableStateOf(prefs.getPredictShift()) }
