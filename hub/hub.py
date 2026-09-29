@@ -8,6 +8,7 @@ One stdlib-only process:
   /login, /auth  admin sign-in (local password or Authentik via OIDC)
   /dashboard     admin dashboard (bugs, community tracking, settings)
   /admin/api/*   JSON API behind the dashboard (session cookie)
+  /api/v1/timetable/*   stops, boards, trips and connections from open GTFS feeds (timetable.py)
 
 Configuration comes from environment variables (see hub.env.example).
 """
@@ -40,7 +41,9 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-VERSION = "1.7.1"
+import timetable
+
+VERSION = "1.8.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -64,7 +67,9 @@ SETTINGS = {  # key: (env var, default, is secret)
     "oidc_client_id": ("HUB_OIDC_CLIENT_ID", "", False),
     "oidc_client_secret": ("HUB_OIDC_CLIENT_SECRET", "", True),
     "oidc_label": ("HUB_OIDC_LABEL", "Authentik", False),
+    "gtfs_feeds": ("HUB_GTFS_FEEDS", timetable.DEFAULT_FEEDS, False),  # transiq feed names, comma-separated
 }
+GTFS_DIR = Path(ENV("HUB_GTFS_DIR", str(Path(DB_PATH).parent / "gtfs")))
 INVITE_HOURS = 72
 SECURE_COOKIES = PUBLIC_URL.startswith("https://")
 SESSION_DAYS = 14
@@ -325,6 +330,7 @@ user_login_limiter = RateLimiter(20, 60 * 60)  # per username: many addresses gu
 bug_limiter = RateLimiter(10, 60 * 60)
 report_limiter = RateLimiter(1200, 60 * 60)  # per IP: phones on mobile data share addresses
 reporter_limiter = RateLimiter(300, 60 * 60)  # per rider: GPS every 15 s is 240 an hour
+timetable_limiter = RateLimiter(2000, 60 * 60)  # per IP: a planner search is a few requests
 
 
 # ------------------------------------------------------------------ email
@@ -754,6 +760,58 @@ def trusted_proxy(address):
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+# ------------------------------------------------------------------ timetable API (app, web, dashboard)
+
+def gtfs_feeds():
+    return [f.strip() for f in setting("gtfs_feeds").split(",") if f.strip()]
+
+
+def when_param(value):
+    """Epoch seconds, or a local ISO time ("2026-09-30T07:00"); empty = now."""
+    if not value:
+        return now()
+    if re.fullmatch(r"\d{9,11}", value):
+        return int(value)
+    moment = datetime.fromisoformat(value)
+    return int((moment if moment.tzinfo else moment.replace(tzinfo=LOCAL_ZONE)).timestamp())
+
+
+def timetable_query(route, query):
+    """(HTTP status, body) for GET timetable/<route>."""
+    t = timetable.current
+    if t is None:
+        return 503, {"error": "Timetable is loading, try again in a minute"}
+    limit = lambda default, top: max(1, min(top, int(query.get("n") or default)))  # noqa: E731
+    if route == "stops":
+        if query.get("q"):
+            return 200, {"stops": t.search(query["q"], limit(18, 50))}
+        if query.get("lat") and query.get("lon"):
+            return 200, {"stops": t.near(float(query["lat"]), float(query["lon"]), min(2000, int(query.get("radius") or 300)),
+                                         limit(10, 50))}
+        return 400, {"error": "q or lat and lon are required"}
+    if route == "departures":
+        if query.get("stop"):
+            stations = [s for s in (t.by_id.get(i) for i in query["stop"].split(",")) if s is not None]
+        elif query.get("lat") and query.get("lon"):
+            radius = min(1000, int(query.get("radius") or 150))
+            stations = [t.by_id[s["id"]] for s in t.near(float(query["lat"]), float(query["lon"]), radius, 20)]
+        else:
+            return 400, {"error": "stop or lat and lon are required"}
+        exclude = {f for f in (query.get("exclude") or "").split(",") if f}
+        return 200, {"departures": t.departures(stations, when_param(query.get("time")), limit(30, 200), exclude),
+                     "stops": [t.station_json(s) for s in stations]}
+    if route == "trip":
+        trip = t.trip(query.get("id") or "") if re.fullmatch(r"[^:]+:.+:\d{8}", query.get("id") or "") else None
+        return (200, trip) if trip else (404, {"error": "No such trip"})
+    if route == "plan":
+        origin, target = t.resolve(query.get("from") or ""), t.resolve(query.get("to") or "")
+        if origin is None or target is None:
+            return 404, {"error": "Stop not found", "from": origin is not None, "to": target is not None}
+        journeys = t.plan(origin, target, when_param(query.get("time")), limit(5, 10), query.get("direct") in ("1", "true"))
+        return 200, {"from": t.station_json(origin), "to": t.station_json(target), "connections": journeys}
+    return 404, {"error": "Not found"}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "emhub/" + VERSION
     protocol_version = "HTTP/1.1"
@@ -1068,6 +1126,11 @@ class Handler(BaseHTTPRequestHandler):
         given = self.headers.get("X-App-Key", "")
         if not any(hmac.compare_digest(given.encode(), k.encode()) for k in APP_KEYS):
             return self.error(401, "Missing or wrong app key", cors=True)
+        if method == "GET" and route.startswith("timetable/"):
+            if not timetable_limiter.allow(self.client_ip()):
+                return self.error(429, "Too many requests", cors=True)
+            status, body = timetable_query(route[len("timetable/"):], query)
+            return self.send(status, body, headers=self.cors())
         if method == "POST" and route == "bugs":
             return self.submit_bug()
         if method == "POST" and route == "community/reports":
@@ -1202,6 +1265,24 @@ class Handler(BaseHTTPRequestHandler):
             origin = self.headers.get("Origin")
             if origin and origin.rstrip("/") not in ORIGINS:
                 return self.error(403, "Wrong origin")
+        if route == "timetable/status":
+            return self.send(200, dict(timetable.status(GTFS_DIR, gtfs_feeds()), feedList=setting("gtfs_feeds"),
+                                       source=timetable.FEED_URL))
+        if method == "POST" and route == "timetable/update":
+            timetable.request_update()
+            return self.send(202, {"ok": True})
+        if method == "POST" and route == "timetable/feeds":
+            names = [f.strip() for f in re.split(r"[,\s]+", str(self.json_body().get("feeds", ""))) if f.strip()]
+            if not names or not all(re.fullmatch(r"[a-z0-9_-]{1,60}", f) for f in names):
+                return self.error(400, "Feed names are lowercase letters, digits, - and _")
+            with db() as conn:
+                save_settings(conn, {"gtfs_feeds": ",".join(dict.fromkeys(names))})
+            timetable.log(f"{user['username']} changed the feed list: {', '.join(names)}")
+            timetable.request_update()
+            return self.send(200, {"ok": True})
+        if method == "GET" and route.startswith("timetable/"):
+            status, body = timetable_query(route[len("timetable/"):], query)
+            return self.send(status, body)
         parts = route.strip("/").split("/")
         with db() as conn:
             if method == "GET" and route == "me":
@@ -1535,6 +1616,8 @@ def main():
         print(f"password sign-in {'allowed again' if changed else 'unchanged: no such user'} for {sys.argv[2]}")
         return
     threading.Thread(target=mail_worker, daemon=True).start()
+    if ENV("HUB_TIMETABLE", "on") != "off":
+        timetable.start(GTFS_DIR, gtfs_feeds)
     host, port = ENV("HUB_HOST", "0.0.0.0"), int(ENV("HUB_PORT", "8080"))
     print(f"[emhub] listening on {host}:{port}, public URL {PUBLIC_URL}", flush=True)
     Server((host, port), Handler).serve_forever()

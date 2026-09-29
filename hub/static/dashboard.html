@@ -153,6 +153,7 @@
     <a href="#bugs" data-nav="bugs">Bugs <span class="count" id="count-new" hidden></span></a>
     <a href="#ideas" data-nav="ideas">Suggestions <span class="count" id="count-ideas" hidden></span></a>
     <a href="#community" data-nav="community">Community</a>
+    <a href="#timetable" data-nav="timetable">Timetable</a>
     <a href="#site" data-nav="site">Website</a>
     <a href="#settings" data-nav="settings">Settings</a>
   </nav>
@@ -215,6 +216,7 @@ async function route() {
     a.setAttribute("aria-current", (a.dataset.nav === ({ bug: "bugs", idea: "ideas", templates: "settings" }[page] || page || "bugs")) ? "page" : "false"));
   try {
     if (page === "community") return await renderCommunity(arg);
+    if (page === "timetable") return await renderTimetable();
     if (page === "settings") return await renderSettings(arg);
     if (page === "templates") return await renderTemplates(arg);
     if (page === "site") return await renderSite(arg);
@@ -449,6 +451,142 @@ async function renderCommunity(selected) {
     await api("community/block", { reporter: b.dataset.block, unblock: !!b.dataset.unblock });
     toast(b.dataset.unblock ? "Rider unblocked" : "Rider blocked; their reports no longer count"); renderCommunity(selected);
   });
+}
+
+// ------------------------------------------------------------------ timetable
+
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const dayClock = (ms) => new Date(ms).toLocaleString([], { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+const localInput = (d = new Date()) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+const kb = (n) => n == null ? "–" : n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " kB";
+const epochOf = (v) => Math.floor(new Date(v || Date.now()).getTime() / 1000);
+let ttPoll = null;
+
+async function renderTimetable() {
+  clearTimeout(ttPoll);
+  const st = await api("timetable/status");
+  if (location.hash.slice(1).split("/")[0] !== "timetable") return;
+  const feeds = Object.entries(st.feeds);
+  view.innerHTML = `
+    <div class="page-head"><h1>Timetable</h1>
+      <div class="stats">
+        <div class="stat"><b>${st.trips.toLocaleString()}</b><span>trips</span></div>
+        <div class="stat"><b>${st.stations.toLocaleString()}</b><span>stations</span></div>
+        <div class="stat"><b>${st.builtAt ? ago(st.builtAt) : "–"}</b><span>${st.busy ? "updating now…" : "last built"}</span></div>
+      </div>
+      <button class="btn" id="tt-update" type="button" ${st.busy ? "disabled" : ""}>Update now</button>
+    </div>
+    <div class="section">
+      <p class="muted" style="max-width:80ch;margin:0 0 14px">The app's planner, other carriers on the boards and bus stop lists come from these GTFS feeds
+        (<code>${esc(st.source)}</code>). Every night at 04:30 changed feeds are downloaded and the timetable is rebuilt;
+        a feed that fails to download keeps its previous file. The app asks <code>/api/v1/timetable/…</code> with its app key.</p>
+      <h2>Search</h2>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="stops" aria-selected="true">Stops and departures</button>
+        <button type="button" role="tab" data-tab="plan" aria-selected="false">Connections</button>
+      </div>
+      <div id="tt-stops">
+        <form class="row" id="tt-stop-form" style="gap:8px;margin-bottom:10px">
+          <input class="input" name="q" placeholder="Stop, e.g. zvol zla po kon or bb as" autocomplete="off" style="flex:1 1 280px">
+          <label>From <input type="datetime-local" name="time" value="${localInput()}"></label>
+        </form>
+        <div id="tt-stop-list"></div>
+        <div id="tt-board"></div>
+      </div>
+      <div id="tt-plan" hidden>
+        <form class="row" id="tt-plan-form" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <input class="input" name="from" placeholder="From" required style="flex:1 1 200px">
+          <input class="input" name="to" placeholder="To" required style="flex:1 1 200px">
+          <input type="datetime-local" name="time" value="${localInput()}">
+          <label class="small"><input type="checkbox" name="direct"> Direct only</label>
+          <button class="btn" type="submit">Search</button>
+        </form>
+        <div id="tt-plan-out"></div>
+      </div>
+      <div id="tt-trip"></div>
+    </div>
+    <div class="section">
+      <h2>Feeds</h2>
+      <div class="table-wrap"><table class="grid">
+        <thead><tr><th>Feed</th><th>Trips loaded</th><th>File</th><th>File date</th><th>Last download</th></tr></thead>
+        <tbody>${feeds.map(([name, f]) => `<tr><td><code>${esc(name)}</code></td>
+          <td>${f.trips === "failed" ? '<span class="error-text">failed to read</span>' : f.trips == null ? '<span class="muted">not loaded</span>' : f.trips.toLocaleString()}</td>
+          <td>${kb(f.size)}</td><td>${f.modified ? when(f.modified) : '<span class="muted">missing</span>'}</td>
+          <td>${f.result ? esc(f.result) + ` <span class="muted small">${ago(f.at)}</span>` : '<span class="muted">not since start</span>'}</td></tr>`).join("")}</tbody>
+      </table></div>
+      <form class="stack-form" id="tt-feeds" style="max-width:760px;margin-top:14px">
+        <label class="field">Feeds to load (names from transiq, comma-separated; add <code>zsr</code> for trains)
+          <textarea class="input" name="feeds" rows="3">${esc(st.feedList)}</textarea></label>
+        <div class="row"><button class="btn" type="submit">Save and update</button></div>
+      </form>
+    </div>
+    <div class="section">
+      <h2>Log</h2>
+      <div class="logs" style="max-height:340px">${st.log.length ? st.log.map((l) => `${esc(when(l.at))}  ${esc(l.text)}`).join("\n") : "Nothing yet."}</div>
+    </div>`;
+  if (st.busy) ttPoll = setTimeout(renderTimetable, 3000);
+  $("#tt-update").onclick = run($("#tt-update"), async () => {
+    await api("timetable/update", {}); toast("Update started"); setTimeout(renderTimetable, 1500);
+  });
+  $("#tt-feeds").onsubmit = (e) => run(e.submitter, async () => {
+    await api("timetable/feeds", { feeds: new FormData(e.target).get("feeds") }); toast("Saved; updating"); setTimeout(renderTimetable, 1500);
+  })(e);
+  view.querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => {
+    view.querySelectorAll("[data-tab]").forEach((x) => x.setAttribute("aria-selected", x === b));
+    $("#tt-stops").hidden = b.dataset.tab !== "stops";
+    $("#tt-plan").hidden = b.dataset.tab !== "plan";
+  });
+  const stopForm = $("#tt-stop-form");
+  const bindTrips = () => view.querySelectorAll("[data-trip]").forEach((el) => {
+    const open = () => showTrip(el.dataset.trip).catch((err) => toast(err.message));
+    el.onclick = open; el.onkeydown = (e) => e.key === "Enter" && open();
+  });
+  const board = async (id, name) => {
+    const r = await api(`timetable/departures?stop=${encodeURIComponent(id)}&n=40&time=${epochOf(new FormData(stopForm).get("time"))}`);
+    const s = r.stops[0] || {};
+    $("#tt-board").innerHTML = `<h3 style="margin:6px 0">${esc(name)} <span class="muted small">${s.lat != null ? s.lat.toFixed(5) + ", " + s.lon.toFixed(5) : "no position"} · id <code>${esc(id)}</code></span></h3>
+      ${r.departures.length ? `<div class="table-wrap"><table class="grid"><thead><tr><th>Departs</th><th>Line</th><th>To</th><th>Operator</th><th>Feed</th></tr></thead>
+      <tbody>${r.departures.map((d) => `<tr class="click" data-trip="${esc(d.tripId)}" tabindex="0"><td>${dayClock(d.at)}</td>
+        <td><span class="plate line">${esc(d.line)}</span></td><td>${esc(d.headsign)}</td><td>${esc(d.operator)}</td><td><code>${esc(d.feed)}</code></td></tr>`).join("")}</tbody></table></div>`
+        : '<p class="muted">No departures after this time.</p>'}`;
+    bindTrips();
+  };
+  const search = async () => {
+    const q = new FormData(stopForm).get("q").trim();
+    if (!q) { $("#tt-stop-list").innerHTML = ""; return; }
+    const r = await api("timetable/stops?q=" + encodeURIComponent(q));
+    $("#tt-stop-list").innerHTML = r.stops.length ? `<div class="row" style="gap:6px;margin-bottom:12px">${r.stops.map((s) =>
+      `<button class="btn quiet" type="button" data-stop="${esc(s.id)}">${esc(s.name)}</button>`).join("")}</div>` : '<p class="muted">No stop matches.</p>';
+    view.querySelectorAll("[data-stop]").forEach((b) => b.onclick = () => board(b.dataset.stop, b.textContent).catch((err) => toast(err.message)));
+  };
+  let timer;
+  stopForm.oninput = () => { clearTimeout(timer); timer = setTimeout(() => search().catch((err) => toast(err.message)), 200); };
+  stopForm.onsubmit = (e) => e.preventDefault();
+  $("#tt-plan-form").onsubmit = (e) => run(e.submitter, async () => {
+    const f = new FormData(e.target);
+    const q = new URLSearchParams({ from: f.get("from"), to: f.get("to"), time: epochOf(f.get("time")), n: 6, direct: f.get("direct") ? 1 : 0 });
+    const r = await api("timetable/plan?" + q);
+    $("#tt-plan-out").innerHTML = `<p class="muted small">${esc(r.from.name)} → ${esc(r.to.name)}</p>` + (r.connections.length ? r.connections.map((c) => `
+      <div class="card" style="margin-bottom:10px"><div><strong>${dayClock(c.departure)} → ${clock(c.arrival)}</strong>
+        <span class="muted small">${Math.round((c.arrival - c.departure) / 60000)} min</span></div>
+        ${c.legs.map((l) => l.type === "walk"
+          ? `<div class="muted small">walk ${esc(l.from.name)} → ${esc(l.to.name)}, ${Math.round((l.arrival - l.departure) / 60000)} min</div>`
+          : `<div data-trip="${esc(l.tripId)}" tabindex="0" style="cursor:pointer"><span class="plate line">${esc(l.line)}</span>
+             ${clock(l.departure)} ${esc(l.from.name)} → ${clock(l.arrival)} ${esc(l.to.name)} <span class="muted small">${esc(l.operator)}</span></div>`).join("")}
+      </div>`).join("") : '<p class="muted">No connection found in the next two days.</p>');
+    bindTrips();
+  })(e);
+}
+
+async function showTrip(id) {
+  const t = await api("timetable/trip?id=" + encodeURIComponent(id));
+  const box = $("#tt-trip");
+  box.innerHTML = `<h3 style="margin:18px 0 6px"><span class="plate line">${esc(t.line)}</span> to ${esc(t.headsign)}
+      <span class="muted small">${esc(t.operator)} · <code>${esc(id)}</code></span></h3>
+    <div class="table-wrap"><table class="grid"><thead><tr><th>#</th><th>Stop</th><th>Arrives</th><th>Departs</th><th>Position</th></tr></thead>
+    <tbody>${t.stops.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.name)}</td><td>${clock(s.arrival)}</td><td>${clock(s.departure)}</td>
+      <td class="small">${s.lat != null ? `<a href="https://www.openstreetmap.org/?mlat=${s.lat}&mlon=${s.lon}#map=17/${s.lat}/${s.lon}" target="_blank" rel="noopener">${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}</a>` : '<span class="muted">unknown</span>'}</td></tr>`).join("")}</tbody></table></div>`;
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ------------------------------------------------------------------ settings

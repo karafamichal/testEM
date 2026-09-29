@@ -47,7 +47,7 @@ data class BugReport(
     val kind: String = "bug"
 )
 
-/** emhub: bug reports and community bus delays. Only called for features the user turned on. */
+/** emhub: timetables (planner, other carriers, stop lists), bug reports and community bus delays. */
 object HubClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -108,6 +108,14 @@ object HubClient {
         parseDelay(root) to h?.let {
             TripHistory(it.get("delaySeconds").asInt, it.get("runs").asInt, it.get("lateRuns").asInt, it.get("dayType").asString)
         }
+    }
+
+    /** GET /api/v1/timetable/[path] (stops, departures, trip, plan); blocking, call off the main thread. */
+    fun timetable(path: String, params: Map<String, String>): JsonObject {
+        val url = "${BuildConfig.HUB_URL}/api/v1/timetable/$path".toHttpUrl().newBuilder().apply {
+            params.forEach { (k, v) -> addQueryParameter(k, v) }
+        }.build()
+        return execute(Request.Builder().url(url).get())
     }
 
     private fun parseDelay(root: JsonObject): CommunityDelay? {

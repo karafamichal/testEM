@@ -53,7 +53,7 @@ data class LiveState(
     val previews: List<BoardState> = emptyList()
 )
 
-/** A planner bus as a trip: stops, times and the user's stops come from its cp.sk route page. */
+/** A planner bus as a trip: stops, times and the user's stops come from its timetable trip. */
 fun scheduledTripRef(segment: TimetableSegment, line: String): TripRef? {
     if (segment.routeUrl.isBlank()) return null
     return TripRef(
@@ -232,6 +232,8 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
             routeNumber = departure.routeNumber,
             tripNumber = departure.tripNumber,
             destination = departure.destination,
+            scheduleUrl = departure.scheduleUrl,
+            serviceDate = departure.serviceDate,
             fromStopId = _state.value.board?.stop?.id ?: 0,
             plannedSecondOfDay = departure.plannedSecondOfDay
         )
@@ -239,7 +241,7 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
         loadTrip(TripSheetState(ref, boardingPlatformIds = boarding))
     }
 
-    /** A bus from a planner result: no live data, so its stops and times come from cp.sk. */
+    /** A bus from a planner result: no live data, so its stops and times come from the timetable. */
     fun openScheduledTrip(segment: TimetableSegment, line: String) {
         loadTrip(TripSheetState(scheduledTripRef(segment, line) ?: return))
     }

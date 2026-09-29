@@ -117,7 +117,7 @@
 
     <!-- Trasa -->
     <string name="planner_title">Trasa</string>
-    <string name="planner_subtitle">Spojenia z cp.sk</string>
+    <string name="planner_subtitle">Regionálne a diaľkové autobusy</string>
     <string name="planner_swap">Vymeniť odkiaľ a kam</string>
     <string name="planner_now">Teraz</string>
     <string name="planner_pick_time">Zvoliť čas</string>
@@ -130,9 +130,6 @@
     <string name="planner_platform">nást. %1$s</string>
     <string name="planner_share">Zdieľať spojenie</string>
     <string name="planner_live_at_stop">Živé odchody: %1$s</string>
-    <string name="timetables_city_slovakia">Slovensko</string>
-    <string name="timetables_city_zvolen">Zvolen</string>
-    <string name="timetables_city_banska_bystrica">B. Bystrica</string>
     <string name="timetables_from_label">Odkiaľ</string>
     <string name="timetables_to_label">Kam</string>
     <string name="timetables_search_button">Hľadať</string>
@@ -140,7 +137,7 @@
     <string name="timetables_transfer_label">Tu prestúpte</string>
     <string name="timetables_load_more">Zobraziť neskoršie spojenia</string>
     <string name="timetables_no_results">Nenašli sa žiadne spojenia. Skúste iný čas alebo vypnite „Len priame“.</string>
-    <string name="timetables_error">Spojenia z cp.sk sa nepodarilo načítať. Skontrolujte pripojenie a skúste znova.</string>
+    <string name="timetables_error">Spojenia sa nepodarilo načítať. Skontrolujte pripojenie a skúste znova.</string>
 
     <!-- História -->
     <string name="history_title">História</string>
@@ -493,7 +490,5 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="feature_send">Odoslať návrh</string>
     <string name="feature_sent_title">Návrh %1$s odoslaný</string>
     <string name="feature_sent_body">Ďakujeme za nápad. Ak ste nechali e-mail, ozveme sa, keď bude novinka.</string>
-    <string name="whats_new_body">• Automatický režim teraz označuje autobus aj pri zatvorenej aplikácii a vypnutej obrazovke. Pre pravidelné jazdy, ktoré sa spúšťajú samy, povoľte polohu „Vždy“ v Nastaveniach → Komunita a poloha.
-• Aktualizácia aplikácie už nezastaví sledovanie autobusu.
-• Ukazovateľ priebehu v notifikácii sledovania je na dlhých spojoch jednoduchší.</string>
+    <string name="whats_new_body">• Vyhľadávač spojení, autobusy ďalších dopravcov na tabuliach a zoznamy zastávok sú teraz z nášho servera (otvorené cestovné poriadky slovenských autobusových dopravcov), už nie z cp.sk.\n• Zastávky stačí písať skratkou: „z z p k“ alebo „zvol zla po kon“ nájde Zvolen, Zlatý Potok konečná.\n• Vyhľadávač zatiaľ pozná len regionálne a diaľkové autobusy: bez vlakov a bez MHD v Banskej Bystrici a vo Zvolene (MHD je naďalej naživo na tabuliach).\n• Spojenia označené hviezdičkou pred touto verziou treba označiť znova.</string>
 </resources>

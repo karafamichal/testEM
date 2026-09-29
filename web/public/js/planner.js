@@ -1,14 +1,12 @@
-// cp.sk planner for the web client (same flow as the Android Planner tab).
+// Planner for the web client (same flow as the Android Planner tab), from emhub's timetables.
 import { t, lang } from './i18n.js';
 import { $, esc, apiJson, store, plate, toast, clock } from './core.js';
 import { readableStop, lineNumber, nextRideDeparture, localToEpoch, WORKDAYS, EVERY_DAY } from './logic.js';
 import { openScheduledTrip, scheduledRef, startJourney } from './live.js';
 import { rides, saveRides, rideDayText } from './rides.js';
 
-// "All of Slovakia" is cp.sk's combined timetable (trains, intercity and city buses), so
-// connections that change from a city bus to an intercity one are found.
+// One timetable for every region; the city is kept only because saved routes carry it.
 const ALL = 'vlakbusmhd';
-const CITIES = [[ALL, () => t('city_slovakia')], ['banskabystrica', () => 'B. Bystrica'], ['zvolen', () => 'Zvolen']];
 // Before 2.6 "Slovakia" was the intercity-only timetable; its stop ids differ, so saved stops are looked up again.
 const upgrade = (r) => (r.city === 'slovensko' ? { ...r, city: ALL, fromSug: null, toSug: null } : r);
 const SWAP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>';
@@ -31,7 +29,6 @@ export function renderPlanner(el, { openStop } = {}) {
   const isSaved = p.from && p.to && saved.some((r) => sameRoute(r, { from: p.from.trim(), to: p.to.trim() }));
   el.innerHTML = `
     <header class="screen-head"><div><h1>${t('planner_title')}</h1><p class="hint small">${t('planner_sub')}</p></div></header>
-    <div class="segmented" role="radiogroup">${CITIES.map(([slug, label]) => `<button role="radio" aria-checked="${p.city === slug}" data-city="${slug}">${esc(label())}</button>`).join('')}</div>
     <form class="planner-form" autocomplete="off">
       <div class="od">
         <label class="od-field"><span>${t('from')}</span><input id="pl-from" value="${esc(p.from)}" required></label>
@@ -130,8 +127,6 @@ function bind(el) {
   $('#pl-direct', el).onchange = (e) => (p.direct = e.target.checked);
   $('form', el).onsubmit = (e) => { e.preventDefault(); search(); };
   el.onclick = (e) => {
-    const city = e.target.closest('[data-city]');
-    if (city) { p.city = city.dataset.city; store.set('plannerCity', p.city); p.fromSug = p.toSug = null; return renderPlanner(root); }
     if (e.target.closest('[data-swap]')) {
       [p.from, p.to, p.fromSug, p.toSug] = [p.to, p.from, p.toSug, p.fromSug];
       return renderPlanner(root);
@@ -226,7 +221,7 @@ async function more() {
 // ---------------------------------------------------------------- date
 
 const todayIso = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bratislava' }).format(new Date());
-/** cp.sk's form wants "3.10.2026"; "" means today. */
+/** The server takes "3.10.2026"; "" means today. */
 const cpDate = (iso) => (/^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? iso.split('-').reverse().map(Number).join('.') : '');
 
 /** Opens the planner on a route at a time and date and searches (a saved journey from the home tab). */

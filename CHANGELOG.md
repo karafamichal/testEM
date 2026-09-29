@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.0
+
+### Changed
+- **Timetables from our own server.** The planner, other carriers' buses on the departure boards and the stop lists of buses without live data now come from emhub, which loads the open timetables of the Slovak bus carriers every night. The app no longer uses cp.sk.
+- **Stop shortcuts:** type the start of each word, e.g. *z z p k* or *zvol zla po kon* for Zvolen, Zlatý Potok konečná, or *bb as* for Banská Bystrica, AS.
+- For now the planner covers regional and long-distance buses. Trains and the city buses of Banská Bystrica and Zvolen are not in it (city buses still show live on the boards).
+- Journeys starred before 2.7.0 point at cp.sk: star them again.
+
 ## 2.6.1
 
 ### Fixed

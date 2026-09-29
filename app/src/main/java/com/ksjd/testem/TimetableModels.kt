@@ -28,7 +28,7 @@ data class TimetableSegment(
     val arrivalStop: String,
     val departurePlatform: String = "",
     val arrivalPlatform: String = "",
-    /** cp.sk page with every stop of this bus. */
+    /** Trip link with every stop of this bus (TimetableService.tripUrl). */
     val routeUrl: String = "",
     /** ISO date of [departureTime]. */
     val serviceDate: String = ""
@@ -44,7 +44,7 @@ data class TimetableConnection(
     val isDirect: Boolean
         get() = segments.size <= 1
 
-    /** cp.sk does not list results in departure order; this sorts them by date and time. */
+    /** Sorts connections by date and time. */
     val departureSortKey: String
         get() = segments.firstOrNull()?.let { "${it.serviceDate} ${it.departureTime.padStart(5, '0')}" }.orEmpty()
 }
@@ -67,7 +67,7 @@ data class TimetableSearchResult(
 
 data class TimetableState(
     val isLoading: Boolean = false,
-    /** "vlakbusmhd": cp.sk's timetable of trains, intercity and city buses together, so transfers between them are found. */
+    /** Planner scope; one timetable for all buses now, kept for saved routes. */
     val citySlug: String = PLANNER_ALL,
     val fromInput: String = "",
     val toInput: String = "",

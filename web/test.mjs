@@ -1,7 +1,7 @@
 // Run: node test.mjs
 import assert from 'node:assert/strict';
 import { tripProgress, catchEstimate, communityKey, lineNumber, historyInsights, historyToCsv, snapToRoute, delayAt, nextCheckMs, stopPassDetector, nextRideDeparture, pickRideConnection, earliestBoardingMs, WORKDAYS, BUS_GPS_MAX_M, RIDER_GPS_MAX_M } from './public/js/logic.js';
-import { parseScheduledTrip, localToEpoch } from './cp.js';
+import { hubTrip, tripUrl, parseTripUrl, localToEpoch } from './transit.js';
 
 const T0 = Date.UTC(2026, 8, 24, 10, 0);
 const stops = [0, 5, 10, 15].map((m, i) => ({ name: `S${i}`, platformId: i + 1, order: i + 1, scheduledMs: T0 + m * 60000, actualMs: null }));
@@ -96,22 +96,25 @@ assert.equal(delayAt(2, sched, T0 + 5 * 60000), 0); // waiting at a stop before 
 assert.equal(delayAt(1.5, sched, T0 + 2 * 60000), -60); // left stop 1 a minute early
 assert.equal(lineNumber('Bus 507105'), '507105');
 
-// cp.sk route page: boarding at the first active stop, day rollover after midnight.
-const html = `<ul class="line-itinerary">
-  <li class="item inactive"><strong class="name">Zvolen,,AS</strong><span class="departure">23:40</span></li>
-  <li class="item"><strong class="name">Sliač,,kúpele</strong><span class="departure">23:55</span><span class="fixed-codes"><span><span title="nástupište">3</span></span></span></li>
-  <li class="item"><strong class="name">B.Bystrica,,AS</strong><span class="arrival">0:15</span><span class="departure">0:20</span></li>
-  <li class="item inactive"><strong class="name">Brezno,,AS</strong><span class="arrival">1:05</span></li>
-</ul>`;
-const trip = parseScheduledTrip(html, { line: '507', destination: '', serviceDate: '2026-09-24' });
+// Timetable trips from emhub: boarding and alighting come from the trip link; where you get off, the arrival counts.
+const link = parseTripUrl(tripUrl('sad-zvolen-as:T-5:20260924', 1, 2));
+assert.deepEqual(link, { id: 'sad-zvolen-as:T-5:20260924', from: 1, to: 2 });
+assert.equal(parseTripUrl('https://cp.sk/vlakbusmhd/draha/?x=1'), null, 'old cp.sk links are not ours');
+const at = (h, m, d = 24) => localToEpoch(2026, 9, d, h, m);
+const trip = hubTrip({ headsign: '', stops: [
+  { name: 'Zvolen, AS', arrival: at(23, 40), departure: at(23, 40), lat: 48.57, lon: 19.12 },
+  { name: 'Sliač, kúpele', arrival: at(23, 55), departure: at(23, 55), platform: '3', lat: 48.6, lon: 19.14 },
+  { name: 'Banská Bystrica, AS', arrival: at(0, 15, 25), departure: at(0, 20, 25), lat: null, lon: null },
+  { name: 'Brezno, AS', arrival: at(1, 5, 25), departure: at(1, 5, 25) },
+] }, { line: '507', destination: '' }, link.from, link.to);
 assert.equal(trip.stops.length, 4);
 assert.equal(trip.boardingOrder, 2);
 assert.equal(trip.alightOrder, 3);
-assert.equal(trip.stops[1].name, 'Sliač, kúpele');
 assert.deepEqual(trip.stops.map((s) => s.platform), ['', '3', '', '']);
-assert.equal(trip.stops[1].scheduledMs, localToEpoch(2026, 9, 24, 23, 55));
-assert.equal(trip.stops[2].scheduledMs, localToEpoch(2026, 9, 25, 0, 15), 'alight uses arrival, next day');
-assert.equal(trip.stops[0].scheduledMs, localToEpoch(2026, 9, 24, 23, 40));
+assert.equal(trip.stops[1].scheduledMs, at(23, 55));
+assert.equal(trip.stops[2].scheduledMs, at(0, 15, 25), 'alight uses arrival');
+assert.equal(trip.stops[2].lat, null);
+assert.equal(trip.destination, 'Brezno, AS');
 // Europe/Bratislava is UTC+2 in September.
 assert.equal(localToEpoch(2026, 9, 24, 12, 0), Date.UTC(2026, 8, 24, 10, 0));
 

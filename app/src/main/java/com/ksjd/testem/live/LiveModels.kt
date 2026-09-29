@@ -38,10 +38,13 @@ data class LiveDeparture(
     /** Delay in seconds; null when the departure is not tracked live. */
     val delaySeconds: Int?,
     val fetchedAtMs: Long,
-    /** Another carrier's bus from cp.sk's timetable (not in sadzv's live data). */
+    /** Another carrier's bus from emhub's timetable (not in sadzv's live data). */
     val fromTimetable: Boolean = false,
     /** Carrier, shown for [fromTimetable] buses. */
-    val operator: String = ""
+    val operator: String = "",
+    /** Timetable trip link (TimetableService.tripUrl) of a [fromTimetable] bus, and its service date. */
+    val scheduleUrl: String = "",
+    val serviceDate: String = ""
 ) {
     val key: String get() = if (fromTimetable) "cp-$line-$plannedSecondOfDay-$destination" else "$lineId-$tripNumber-$plannedSecondOfDay"
 }
@@ -66,7 +69,7 @@ data class TripStop(
     val scheduledMs: Long,
     /** Actual departure in epoch ms, null if the bus has not left this stop yet. */
     val actualMs: Long?,
-    /** Platform or track at this stop (timetable trips from cp.sk), "" when unknown. */
+    /** Platform or track at this stop (timetable trips), "" when unknown. */
     val platform: String = "",
     /** Stop position, filled in only when a GPS position has to be placed on the route. */
     val lat: Double? = null,
@@ -84,7 +87,7 @@ data class TripDetail(
     /** For timetable-only trips: the stops where the user's part of the journey starts and ends. */
     val boardingOrder: Int? = null,
     val alightOrder: Int? = null,
-    /** sadzv had no stop list, so stops and times come from cp.sk (live delay still from sadzv). */
+    /** sadzv had no stop list, so stops and times come from the timetable (live delay still from sadzv). */
     val fromTimetable: Boolean = false,
     /** Pooled rider reports (when the user opted in). */
     val community: com.ksjd.testem.hub.CommunityDelay? = null,
@@ -113,12 +116,12 @@ data class TripRef(
     val routeNumber: String,
     val tripNumber: Int,
     val destination: String,
-    /** cp.sk route page for buses without live data; times then come from the timetable only. */
+    /** Timetable trip link (TimetableService.tripUrl) for buses without live data; times come from the timetable only. */
     val scheduleUrl: String = "",
     /** ISO date of the departure from the boarding stop, needed to place timetable times. */
     val serviceDate: String = "",
     /** sadzv stop where the user boards and the planned departure (seconds after midnight):
-     *  used to find the trip on cp.sk when sadzv has no stop list for it. */
+     *  used to find the trip in the timetable when sadzv has no stop list for it. */
     val fromStopId: Int = 0,
     val plannedSecondOfDay: Int = -1
 ) {

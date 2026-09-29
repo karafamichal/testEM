@@ -184,29 +184,12 @@ fun PlannerScreen(
 @Composable
 private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
     val context = LocalContext.current
-    val cities = listOf(
-        PLANNER_ALL to stringResource(R.string.timetables_city_slovakia),
-        "banskabystrica" to stringResource(R.string.timetables_city_banska_bystrica),
-        "zvolen" to stringResource(R.string.timetables_city_zvolen)
-    )
     val canSearch = !state.isLoading && state.fromInput.isNotBlank() && state.toInput.isNotBlank()
     val isSaved = state.savedRoutes.any {
         it.fromText.equals(state.fromInput.trim(), true) && it.toText.equals(state.toInput.trim(), true)
     }
 
     Column(Modifier.padding(horizontal = 16.dp)) {
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            cities.forEachIndexed { index, (slug, label) ->
-                SegmentedButton(
-                    selected = state.citySlug == slug,
-                    onClick = { viewModel.setTimetableCity(slug) },
-                    shape = SegmentedButtonDefaults.itemShape(index, cities.size),
-                    label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                )
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-
         Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(
@@ -405,7 +388,7 @@ private fun RouteShortcuts(state: TimetableState, viewModel: AppViewModel) {
     }
 }
 
-/** cp.sk labels lines like "Bus 10"; stop boards use the bare number. */
+/** Planner lines read like "Bus 10"; stop boards use the bare number. */
 private fun lineNumber(line: String): String = line.trim().substringAfterLast(' ')
 
 /** "Zvolen,,AS" → "Zvolen, AS" */

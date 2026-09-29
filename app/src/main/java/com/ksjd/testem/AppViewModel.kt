@@ -62,7 +62,7 @@ data class AppState(
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application
     private val prefs = CredentialsManager(application)
-    private val cpTimetableService = CpTimetableService()
+    private val timetableService = TimetableService()
 
     private val _appState = MutableStateFlow(AppState())
     val appState: StateFlow<AppState> = _appState
@@ -429,10 +429,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     // =========================================================== timetables
 
-    fun setTimetableCity(citySlug: String) {
-        _timetableState.update { it.copy(citySlug = normalizeTimetableCitySlug(citySlug)) }
-    }
-
     fun setTimetableTime(time: String) = _timetableState.update { it.copy(timeInput = time) }
 
     /** ISO date, "" = today. */
@@ -634,7 +630,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             val city = _timetableState.value.citySlug
             val suggestions = withContext(Dispatchers.IO) {
-                cpTimetableService.suggestStops(city, trimmed)
+                timetableService.suggestStops(city, trimmed)
             }.getOrDefault(emptyList())
             _timetableState.update {
                 if (isFrom) it.copy(fromSuggestions = suggestions, isLoadingFromSuggestions = false)
@@ -664,8 +660,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             val time = state.timeInput.ifBlank { currentTimeText() }
             val result = withContext(Dispatchers.IO) {
-                cpTimetableService.searchConnections(
-                    CpTimetableService.SearchRequest(
+                timetableService.searchConnections(
+                    TimetableService.SearchRequest(
                         citySlug = state.citySlug,
                         fromInput = route.fromText,
                         toInput = route.toText,
@@ -709,7 +705,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (current.isLoading || current.isLoadingMore) return
         viewModelScope.launch {
             _timetableState.update { it.copy(isLoadingMore = true) }
-            val result = withContext(Dispatchers.IO) { cpTimetableService.loadMoreConnections(cursor) }
+            val result = withContext(Dispatchers.IO) { timetableService.loadMoreConnections(cursor) }
             result.fold(
                 onSuccess = { searchResult ->
                     _timetableState.update { state ->
@@ -728,11 +724,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun normalizeTimetableCitySlug(citySlug: String): String = when (citySlug.trim().lowercase()) {
-        "", "slovakia", "slovensko" -> PLANNER_ALL
-        "banska-bystrica", "banská-bystrica", "banska bystrica", "banská bystrica" -> "banskabystrica"
-        else -> citySlug.trim().lowercase()
-    }
 
     private fun currentTimeText(): String {
         val now = java.util.Calendar.getInstance()

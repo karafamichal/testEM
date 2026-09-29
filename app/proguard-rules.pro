@@ -19,8 +19,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
-# jsoup optionally references re2j, which is not bundled.
--dontwarn com.google.re2j.**
 
 # Classes stored as JSON in SharedPreferences via Gson reflection.
 -keepattributes Signature

@@ -106,7 +106,7 @@ object TripTracking {
         start(context, current.copy(alightOrder = order))
     }
 
-    /** A journey the user is putting together bus by bus (when cp.sk finds no connection). */
+    /** A journey the user is putting together bus by bus (when the planner finds no connection). */
     private val _draft = MutableStateFlow<List<TrackedTrip>>(emptyList())
     val draft: StateFlow<List<TrackedTrip>> = _draft
     fun addToDraft(leg: TrackedTrip) { _draft.value = _draft.value.filter { it.ref != leg.ref } + leg }
@@ -219,7 +219,7 @@ class TripTrackerService : Service() {
     }
 
     /**
-     * A recurring ride is due: find that day's bus on cp.sk, then follow it like any journey.
+     * A recurring ride is due: find that day's bus in the timetable, then follow it like any journey.
      * Something already followed wins; the ride is skipped with a note.
      */
     private fun startRide(rideId: String, departureMs: Long) {
@@ -377,7 +377,7 @@ class TripTrackerService : Service() {
         val detail = lastDetail ?: return
         val coords = routeCoords ?: return Log.i(GPS_TAG, "fix: no stop coordinates yet").let { }
         if (coords.count { it != null } < 2) {
-            // Lookup failed (offline, cp.sk down): try again on the next tracking round.
+            // Lookup failed (offline, emhub down): try again on the next tracking round.
             Log.i(GPS_TAG, "fix: only ${coords.count { it != null }} of ${coords.size} stops have coordinates, retrying")
             routeCoords = null
             return
@@ -489,7 +489,7 @@ class TripTrackerService : Service() {
             val byName = current.ref.isScheduleOnly || lastDetail?.fromTimetable == true
             val platforms = if (byName) emptyList() else current.boardingPlatformIds
             stopLatLon = repo.stopLocation(platforms, p.boardingStopName)
-                // Timetable stops (cp.sk names) often aren't sadzv stops: use the route's own coordinates.
+                // Timetable stops often aren't sadzv stops: use the route's own coordinates.
                 ?: p.boardingIndex?.let { i ->
                     lastDetail?.let { d -> runCatching { repo.withCoordinates(current.ref, d) }.getOrNull() }
                         ?.stops?.getOrNull(i)?.let { s -> s.lat?.let { it to s.lon!! } }
@@ -575,14 +575,14 @@ class TripTrackerService : Service() {
                 return
             }
             val fetched = runCatching { repo.getTrip(current.ref) }.getOrNull()
-            // Timetable trips (journey legs) learn where the user gets on and off from cp.sk's route page.
+            // Timetable trips (journey legs) learn where the user gets on and off from their trip link.
             val board = fetched?.boardingOrder
             if (board != null && current.boardingPlatformIds.isEmpty()) {
                 current = current.copy(boardingPlatformIds = listOf(board), alightOrder = current.alightOrder ?: fetched.alightOrder)
                 trip = current
                 TripTracking.set(this@TripTrackerService, current)
             } else if (board != null && fetched.fromTimetable && fetched.stops.none { it.platformId in current.boardingPlatformIds }) {
-                // sadzv had no stop list, so stops come from cp.sk with its stop numbers: without this
+                // sadzv had no stop list, so stops come from the timetable with its stop numbers: without this
                 // the boarding stop isn't found and the user counts as already on the bus (GPS on all the time).
                 current = current.copy(boardingPlatformIds = current.boardingPlatformIds + board)
                 trip = current
@@ -860,7 +860,7 @@ class TripTrackerService : Service() {
         private const val REQUEST_REPORT_LEAVING = 13
         /** Within this of the boarding stop the rider is "at the stop": live GPS on. */
         private const val NEAR_STOP_M = 150
-        /** A bus standing this close to a stop is stopped there (intercity stop positions from cp.sk can be tens of metres off). */
+        /** A bus standing this close to a stop is stopped there (timetable stop positions can be tens of metres off). */
         private const val STOP_RADIUS_M = 60
         /** Slower than this (m/s, about 9 km/h) the bus counts as stopped. */
         private const val MOVING_MPS = 2.5f

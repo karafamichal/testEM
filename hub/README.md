@@ -74,8 +74,14 @@ Apps send `X-App-Key` (one of `HUB_APP_KEYS`). An app key ships inside the app, 
 | POST | `/api/v1/bugs` | `consent: true`, plus `description` and/or `logs` (a suggestion, `kind: "feature"`: `description` or `title`; logs are dropped); optional `kind` (`bug`/`feature`), `title`, `category`, `name`, `email`, `platform`, `appVersion`, `device` |
 | POST | `/api/v1/community/reports` | `tripKey`, `line`, `stopIndex`, `stopName`, `scheduledMs`, `reporter` |
 | GET | `/api/v1/community/delay?trip=<tripKey>` | → `{ delay: { delaySeconds, reporters, updatedAt, lastStopName } \| null }` |
+| GET | `/api/v1/timetable/stops?q=<text>` or `?lat=&lon=&radius=` | stop search (shortcuts: `z z p k`, `zvol zla po kon`, `bb as`) or stops nearby → `{ stops: [{ id, name, lat, lon }] }` |
+| GET | `/api/v1/timetable/departures?stop=<id>` or `?lat=&lon=&radius=`, optional `time`, `n`, `exclude=<feed,…>` | → `{ departures: [{ at, tripId, line, headsign, operator, mode, platform, stop, seq, feed }] }` |
+| GET | `/api/v1/timetable/trip?id=<feed:trip:YYYYMMDD>` | every stop with `arrival`/`departure` (epoch ms), position and platform |
+| GET | `/api/v1/timetable/plan?from=<id or name>&to=…&time=<epoch s or 2026-09-30T07:00>&n=5&direct=1` | connections with their `legs` (`trip` or `walk`) |
 | GET | `/api/v1/health` | no key needed |
 
 `tripKey` is `line|first stop|first departure (epoch ms)`, the same bus on every phone. `reporter` is a random id the app creates for each followed bus, so reports can't be linked across trips. The server uses its own clock for "now", so a phone with the wrong time can't skew the delay.
+
+Timetables (`timetable.py`) come from open GTFS feeds (the transiq mirror of the carriers' published timetables), downloaded every night at 04:30 and loaded into memory. Stops of every feed with the same name are one station, so changes between carriers work; stations under 400 m apart are joined by a footpath. Connections use a connection scan in rounds (one per vehicle): among journeys arriving at most 10 min + 15 % later than the fastest, the one with the fewest vehicles wins, and it leaves as late as possible. The dashboard's *Timetable* page shows the feeds, the update log and a search, and edits the feed list.
 
 How the delay is pooled: only the last 45 minutes count, each rider counts once (their latest report), newer reports weigh more (10-minute half-life), and with 3 or more riders any report more than 5 minutes from the median is ignored. Admins can delete reports or block a rider id from the Community page.

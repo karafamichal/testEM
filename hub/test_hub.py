@@ -325,6 +325,73 @@ assert call("/admin/api/site/support/en/reset", {}, cookie)[0] == 200
 assert b"New support" not in call("/en/support")[2]
 assert call("/admin/api/site/support/de/save", {"html": "x"}, cookie)[0] == 404
 
+# ---- timetable: two carriers meet at "Town, AS"; shortcuts, boards, trips, connections, API
+import io  # noqa: E402
+import zipfile  # noqa: E402
+import timetable  # noqa: E402
+
+
+def gtfs(path, stops, trips):
+    """stops: [(id, name, lat, lon)]; trips: {trip_id: (line, [(stop_id, "HH:MM")])}. Runs every day of 2026."""
+    files = {
+        "agency.txt": "agency_id,agency_name\nx,Carrier " + os.path.basename(path)[0],
+        "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\nall,1,1,1,1,1,1,1,20260101,20261231",
+        "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\n" + "\n".join(f"{i},\"{n}\",{la},{lo}" for i, n, la, lo in stops),
+        "routes.txt": "route_id,agency_id,route_short_name,route_long_name,route_type\n" + "\n".join(
+            f"r{t},x,{line},,3" for t, (line, _) in trips.items()),
+        "trips.txt": "route_id,service_id,trip_id,trip_headsign\n" + "\n".join(f"r{t},all,{t}," for t in trips),
+        "stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\n" + "\n".join(
+            f"{t},{hm}:00,{hm}:00,{s},{k}" for t, (_, rows) in trips.items() for k, (s, hm) in enumerate(rows)),
+    }
+    with zipfile.ZipFile(path, "w") as z:
+        for name, text in files.items():
+            z.writestr(name, text)
+
+
+folder = tempfile.mkdtemp()
+gtfs(os.path.join(folder, "a.zip"), [("1", "Town,,AS", 48.70, 19.10), ("2", "Town, Park", 48.71, 19.12),
+                                     ("3", "Village,,Zlatý Potok,konečná", 48.60, 19.20)],
+     {"a1": ("101", [("3", "06:00"), ("1", "06:20"), ("2", "06:30")])})
+gtfs(os.path.join(folder, "b.zip"), [("B1", "Town, AS", 48.7001, 19.1001), ("B2", "City, Station", 48.80, 19.30),
+                                     ("B3", "Nowhere", -1.0, -1.0)],
+     {"b1": ("202", [("B1", "06:30"), ("B2", "07:10")]), "b2": ("202", [("B1", "07:30"), ("B3", "07:50"), ("B2", "08:10")])})
+tt = timetable.Timetable({"a": os.path.join(folder, "a.zip"), "b": os.path.join(folder, "b.zip")}, today=datetime.date(2026, 9, 29))
+assert [s["name"] for s in tt.search("v z p k")] == ["Village, Zlatý Potok, konečná"], "initials, in order"
+assert [s["name"] for s in tt.search("vill zla po kon")] == ["Village, Zlatý Potok, konečná"]
+assert tt.search("t as")[0]["name"] == "Town, AS" and tt.search("zzz") == []
+assert len([n for n in tt.names if n == "Town, AS"]) == 1, "one station for both carriers"
+at = lambda hm: int(datetime.datetime(2026, 9, 30, *map(int, hm.split(":")), tzinfo=timetable.ZONE).timestamp())  # noqa: E731
+hm = lambda ms: datetime.datetime.fromtimestamp(ms / 1000, timetable.ZONE).strftime("%d %H:%M")  # noqa: E731
+village, city, town = tt.resolve("v z p k"), tt.resolve("city station"), tt.resolve("town as")
+first = tt.plan(village, city, at("05:50"), 2)[0]
+assert [(leg["line"], hm(leg["departure"]), hm(leg["arrival"])) for leg in first["legs"]] == \
+    [("101", "30 06:00", "30 06:20"), ("202", "30 06:30", "30 07:10")], first
+assert tt.plan(village, city, at("05:50"), 1, direct=True) == [], "no single bus"
+assert [hm(j["departure"]) for j in tt.plan(town, city, at("06:00"), 2, direct=True)] == ["30 06:30", "30 07:30"]
+board = tt.departures([town], at("06:00"), 5)
+assert [(d["line"], hm(d["at"])) for d in board[:3]] == [("101", "30 06:20"), ("202", "30 06:30"), ("202", "30 07:30")], board
+trip = tt.trip(board[1]["tripId"])
+assert [s["name"] for s in trip["stops"]] == ["Town, AS", "City, Station"] and hm(trip["stops"][1]["arrival"]) == "30 07:10"
+assert tt.trip("b:nope:20260930") is None
+timetable.current = tt
+def app_get(path, key="dev-key"):
+    req = urllib.request.Request(base + "/api/v1/timetable/" + path, headers={"X-App-Key": key})
+    try:
+        res = opener.open(req)
+    except urllib.error.HTTPError as err:
+        res = err
+    return res.status, json.loads(res.read() or b"{}")
+assert app_get("stops?q=t%20as", key="wrong")[0] == 401
+assert app_get("stops?q=t%20as")[1]["stops"][0]["id"] == "town as"
+status, plan = app_get("plan?from=v%20z%20p%20k&to=city%20station&time=2026-09-30T05:50&n=1")
+assert status == 200 and len(plan["connections"][0]["legs"]) == 2, plan
+assert app_get("plan?from=qqq&to=city")[0] == 404 and app_get("trip?id=junk")[0] == 404
+assert app_get(f"departures?lat=48.7&lon=19.1&time={at('07:00')}")[1]["departures"][0]["line"] == "202"
+st = json.loads(call("/admin/api/timetable/status", cookie=cookie)[2])
+assert st["ready"] and st["trips"] == 3 and "gtfs_feeds" not in st, st
+assert call("/admin/api/timetable/feeds", {"feeds": "a,b; rm -rf"}, cookie)[0] == 400
+assert json.loads(call("/admin/api/timetable/stops?q=city", cookie=cookie)[2])["stops"][0]["name"] == "City, Station"
+
 server.shutdown()
 print("ok")
 

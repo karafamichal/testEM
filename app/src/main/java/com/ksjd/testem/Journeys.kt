@@ -5,7 +5,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
-/** Operator and cp.sk times are Slovak local time, whatever zone the phone is set to. */
+/** Operator and timetable times are Slovak local time, whatever zone the phone is set to. */
 val SK_ZONE: ZoneId = ZoneId.of("Europe/Bratislava")
 
 /** A planner connection the user starred: shown under the ticket on the home tab, followable in one tap. */
@@ -15,7 +15,7 @@ data class SavedJourney(
     val connection: TimetableConnection,
     val savedAtMs: Long = System.currentTimeMillis()
 ) {
-    /** Departure from the first stop in epoch ms, or 0 when cp.sk gave no date. */
+    /** Departure from the first stop in epoch ms, or 0 when the timetable gave no date. */
     val departureMs: Long get() = connection.segments.firstOrNull()?.let { epochMs(it.serviceDate, it.departureTime) } ?: 0L
 
     /** Arrival at the last stop; the date rolls over when the clock goes backwards. */
@@ -51,7 +51,7 @@ fun parseClock(text: String): LocalTime? {
 
 /**
  * A ride the user takes again and again ("7:25 bus to school on weekdays"). Before each
- * departure the app finds that day's bus on cp.sk and starts following it by itself.
+ * departure the app finds that day's bus in the timetable and starts following it by itself.
  */
 data class RecurringRide(
     val id: String,

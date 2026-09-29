@@ -15,8 +15,8 @@ android {
         applicationId = "com.ksjd.testem"
         minSdk = 24
         targetSdk = 36
-        versionCode = 12
-        versionName = "2.6.1"
+        versionCode = 13
+        versionName = "2.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -120,7 +120,6 @@ dependencies {
     implementation("com.google.code.gson:gson:2.11.0")
 
     // HTML parsing
-    implementation("org.jsoup:jsoup:1.18.1")
 
     // QR Code generation
     implementation("com.google.zxing:core:3.5.3")

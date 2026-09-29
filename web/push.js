@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import webpush from 'web-push';
-import { getLiveTrip, getScheduledTrip, searchConnections } from './cp.js';
+import { getLiveTrip, getScheduledTrip, searchConnections } from './transit.js';
 import { tripProgress, communityKey, nextRideDeparture, pickRideConnection, lineNumber, readableStop, todayLocal, localMinutes } from './public/js/logic.js';
 
 const DATA_DIR = process.env.DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
@@ -98,7 +98,7 @@ async function tick() {
       }
       const detail = await trips.get(key);
       if (!detail.stops.length) continue;
-      // Planner buses learn where the user gets on and off from cp.sk's route page.
+      // Planner buses learn where the user gets on and off from their trip link.
       if (!f.boardingPlatformIds?.length && detail.boardingOrder) {
         f.boardingPlatformIds = [detail.boardingOrder];
         f.alightOrder ??= detail.alightOrder ?? null;
@@ -214,7 +214,7 @@ async function rideTick() {
         }, hub);
         await send(f, 'started', t.rideStarted(rideLabel(ride), hhmm(departure)), `/?ride=${encodeURIComponent(ride.id)}&dep=${departure}`);
       } catch {
-        // cp.sk down: nothing to follow this time.
+        // Timetable down: nothing to follow this time.
       }
       if (f.gone) { delete rideStore[key]; break; }
     }
@@ -222,7 +222,7 @@ async function rideTick() {
   if (changed) saveRides();
 }
 
-/** That day's buses for a ride, as trip refs for following (cp.sk timetable times). */
+/** That day's buses for a ride, as trip refs for following (timetable times). */
 async function findRideLegs(ride, departure) {
   const day = todayLocal(departure);
   const search = departure - 2 * 60000;

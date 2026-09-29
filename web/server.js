@@ -9,7 +9,7 @@ import express from 'express';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import * as transit from './cp.js';
+import * as transit from './transit.js';
 import { startFollowing, stopFollowing, vapidPublicKey, syncRides } from './push.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -632,7 +632,7 @@ app.post('/api/select-card', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Public transit (no sign-in): live departures, trips, cp.sk planner.
+// Public transit (no sign-in): live departures, trips, planner (emhub timetables).
 // ---------------------------------------------------------------------------
 const wrap = (fn) => async (req, res) => {
   try {
@@ -652,7 +652,7 @@ app.get('/api/live/stops', wrap(() => transit.getStops()));
 app.post('/api/live/departures', wrap(async (req) => {
   const ids = (req.body?.platformIds || []).map(Number).filter(Number.isFinite).slice(0, 20);
   if (!ids.length) throw Object.assign(new Error('platformIds required'), { status: 400 });
-  // With the stop, other carriers' intercity buses from cp.sk join the board.
+  // With the stop, other carriers' buses from the timetable join the board.
   const stopId = Number(req.body?.stopId);
   const stop = stopId ? (await transit.getStops()).find((x) => x.id === stopId) : null;
   return transit.getBoard(ids, stop);
@@ -661,7 +661,7 @@ app.post('/api/live/trip', wrap(async (req) => {
   const ref = asTripRef(req.body || {});
   const trip = await (ref.scheduleUrl ? transit.getScheduledTrip(ref) : transit.getLiveTrip(ref));
   // Automatic mode places the rider's phone on the route: it needs stop coordinates.
-  return req.body?.withCoordinates ? transit.withCoordinates(trip, !ref.scheduleUrl && !trip.fromTimetable, ref) : trip;
+  return req.body?.withCoordinates ? transit.withCoordinates(trip, !ref.scheduleUrl && !trip.fromTimetable) : trip;
 }));
 app.get('/api/live/match', wrap((req) => transit.matchStopByName(String(req.query.name || ''))));
 app.get('/api/cp/suggest', wrap((req) => transit.suggestStops(String(req.query.city || ''), String(req.query.q || '').slice(0, 80))));

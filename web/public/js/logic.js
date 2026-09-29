@@ -12,7 +12,7 @@ export const readableStop = (name) =>
 const bratislavaDate = (ms) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bratislava' }).format(new Date(ms));
 
 // ---------------------------------------------------------------- Slovak local time
-// Operator and cp.sk times are Slovak wall-clock time, whatever zone the device is in.
+// Operator and timetable times are Slovak wall-clock time, whatever zone the device is in.
 
 const tzFormat = new Intl.DateTimeFormat('en-US', {
   timeZone: 'Europe/Bratislava', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -260,7 +260,7 @@ export function nextRideDeparture(ride, afterMs = Date.now()) {
 }
 
 /**
- * That day's bus for [ride] among cp.sk's results: the same time and lines, else the same
+ * That day's bus for [ride] among the planner's results: the same time and lines, else the same
  * first line within 15 min, else any connection within 10 min.
  */
 export function pickRideConnection(connections, ride, departureMs) {

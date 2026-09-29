@@ -186,7 +186,7 @@ function renderBoard() {
     if (dep) {
       const d = b.departures[Number(dep.dataset.dep)];
       openTrip({ line: d.line, lineId: d.lineId, routeNumber: d.routeNumber, tripNumber: d.tripNumber, destination: d.destination,
-        fromStopId: b.stop.id, plannedSecondOfDay: d.plannedSecondOfDay },
+        scheduleUrl: d.scheduleUrl || '', serviceDate: d.serviceDate || '', fromStopId: b.stop.id, plannedSecondOfDay: d.plannedSecondOfDay },
         { boardingPlatformIds: b.stop.platforms.map((p) => p.id) });
     }
   };
@@ -238,13 +238,13 @@ export function openTrip(ref, { boardingPlatformIds = [], alightOrder = null } =
   }).catch(() => { if (sheetTrip) Object.assign(sheetTrip, { loading: false, error: true }); renderTripSheet(); });
 }
 
-/** A planner bus as a trip: stops, times and the user's stops come from its cp.sk route page. */
+/** A planner bus as a trip: stops, times and the user's stops come from its timetable trip. */
 export const scheduledRef = (segment) => ({
   line: lineNumber(segment.line), lineId: 0, routeNumber: '', tripNumber: 0,
   destination: readableStop(segment.arrivalStop), scheduleUrl: segment.routeUrl, serviceDate: segment.serviceDate,
 });
 
-/** A bus from a planner result: stops and times from cp.sk. */
+/** A bus from a planner result: stops and times from the timetable. */
 export function openScheduledTrip(segment) {
   if (!segment.routeUrl) return;
   openTrip(scheduledRef(segment));
@@ -451,13 +451,13 @@ async function followTick() {
   try {
     const detail = await loadTrip(follow.ref, { withCoordinates: communityMode() === 'auto' });
     if (follow && detail.stops.length) follow.detail = detail;
-    // Journey legs from the planner learn where the user gets on and off from cp.sk's route page.
+    // Journey legs from the planner learn where the user gets on and off from their trip link.
     if (follow && !follow.boardingPlatformIds?.length && detail.boardingOrder) {
       follow.boardingPlatformIds = [detail.boardingOrder];
       follow.alightOrder ??= detail.alightOrder ?? null;
       saveFollow();
     } else if (follow && detail.boardingOrder && detail.fromTimetable && !detail.stops.some((x) => follow.boardingPlatformIds.includes(x.platformId))) {
-      // sadzv had no stop list: stops come from cp.sk with its own numbers. Without this the
+      // sadzv had no stop list: stops come from the timetable with its own numbers. Without this the
       // boarding stop isn't found and the user counts as already on the bus (GPS on all the time).
       follow.boardingPlatformIds = [...follow.boardingPlatformIds, detail.boardingOrder];
       saveFollow();
@@ -534,7 +534,7 @@ function findStopCoords(p) {
       const pl = !byName && live.stops.flatMap((s) => s.platforms).find((x) => follow.boardingPlatformIds.includes(x.id));
       return pl || apiJson('/api/live/match?name=' + encodeURIComponent(name)).catch(() => null);
     })).then((c) => {
-      // Timetable stops (cp.sk names) often aren't sadzv stops: use the route's own coordinates.
+      // Timetable stops often aren't sadzv stops: use the route's own coordinates.
       const own = follow?.detail?.stops?.[p.boardingIndex];
       stopCoords = c ? { lat: c.lat, lon: c.lon } : own?.lat != null ? { lat: own.lat, lon: own.lon } : { none: true };
       renderAllFollowSlots();
@@ -550,7 +550,7 @@ function stopGeo() {
 // A web app can use location only while it is open.
 
 let riderWatch = null, lastRiderIndex = -1, lastRiderReportAt = 0, stopPass = stopPassDetector(), lastArrivalStop = -1;
-const STOP_RADIUS_M = 60; // a bus standing this close to a stop is stopped there (cp.sk stop positions can be tens of metres off)
+const STOP_RADIUS_M = 60; // a bus standing this close to a stop is stopped there (timetable stop positions can be tens of metres off)
 const MOVING_MPS = 2.5; // slower than this (about 9 km/h) the bus counts as stopped
 
 function startRiderWatch() {

@@ -115,7 +115,7 @@
 
     <!-- Planner -->
     <string name="planner_title">Planner</string>
-    <string name="planner_subtitle">Connections from cp.sk</string>
+    <string name="planner_subtitle">Regional and long-distance buses</string>
     <string name="planner_swap">Swap from and to</string>
     <string name="planner_now">Leave now</string>
     <string name="planner_pick_time">Pick a time</string>
@@ -128,9 +128,6 @@
     <string name="planner_platform">Platform %1$s</string>
     <string name="planner_share">Share connection</string>
     <string name="planner_live_at_stop">Live departures at %1$s</string>
-    <string name="timetables_city_slovakia">Slovakia</string>
-    <string name="timetables_city_zvolen">Zvolen</string>
-    <string name="timetables_city_banska_bystrica">B. Bystrica</string>
     <string name="timetables_from_label">From</string>
     <string name="timetables_to_label">To</string>
     <string name="timetables_search_button">Search</string>
@@ -138,7 +135,7 @@
     <string name="timetables_transfer_label">Change here</string>
     <string name="timetables_load_more">Show later connections</string>
     <string name="timetables_no_results">No connections found. Try another time or turn off “Direct only”.</string>
-    <string name="timetables_error">Could not load connections from cp.sk. Check your connection and try again.</string>
+    <string name="timetables_error">Could not load connections. Check your connection and try again.</string>
 
     <!-- History -->
     <string name="history_title">History</string>
@@ -482,7 +479,5 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• Automatic mode now keeps marking the bus with the app closed and the screen off. Allow location “All the time” in Settings → Community and location for regular rides that start by themselves.
-• Updating the app no longer stops following a bus.
-• The follow notification’s progress bar is lighter on long trips.</string>
+    <string name="whats_new_body">• The planner, other carriers on the departure boards and bus stop lists now come from our own server (open timetables of the Slovak bus carriers), no longer from cp.sk.\n• Type stops the short way: “z z p k” or “zvol zla po kon” finds Zvolen, Zlatý Potok konečná.\n• For now the planner has regional and long-distance buses only: no trains, and no city buses in Banská Bystrica and Zvolen (city buses still show live on the boards).\n• Journeys starred before this version need to be starred again.</string>
 </resources>

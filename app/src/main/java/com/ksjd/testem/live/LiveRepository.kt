@@ -78,13 +78,13 @@ class LiveRepository(context: Context) {
 
     suspend fun stopById(id: Int): LiveStop? = getStops().firstOrNull { it.id == id }
 
-    /** Best match for a stop name coming from another source (e.g. cp.sk). */
+    /** Best match for a stop name coming from another source (e.g. the timetable). */
     suspend fun matchStopByName(name: String): LiveStop? {
         val key = normalize(name)
         if (key.isBlank()) return null
         val all = getStops()
         all.firstOrNull { it.searchKey == key }?.let { return it }
-        // cp.sk often prefixes the town ("Banska Bystrica,,Namestie slobody").
+        // Timetable names often start with the town ("Banska Bystrica, Namestie slobody").
         return all
             .filter { it.searchKey.length >= 3 && key.endsWith(it.searchKey) }
             .maxByOrNull { it.searchKey.length }
@@ -123,8 +123,8 @@ class LiveRepository(context: Context) {
     }
 
     /**
-     * The whole board for a stop: sadzv's live departures plus other carriers' intercity buses
-     * from cp.sk's timetable (Slovak Lines, Arriva, FlixBus, …) that sadzv doesn't know.
+     * The whole board for a stop: sadzv's live departures plus other carriers' buses from
+     * emhub's timetable (SAD Lučenec, Arriva, Slovak Lines, …) that sadzv doesn't know.
      * Fails only when both sources fail.
      */
     suspend fun getBoard(stop: LiveStop): List<LiveDeparture> {
@@ -134,18 +134,18 @@ class LiveRepository(context: Context) {
         return (live.getOrDefault(emptyList()) + other.getOrDefault(emptyList())).sortedBy { it.secondsUntil }
     }
 
-    /** cp.sk stop per sadzv stop (null = none nearby), and its board with when it was fetched. */
+    /** Timetable station per sadzv stop (null = none nearby), and its board with when it was fetched. */
     private val cpStops = mutableMapOf<Int, com.ksjd.testem.CpStopSuggestion?>()
-    private val cpBoards = mutableMapOf<Int, Pair<Long, List<com.ksjd.testem.CpTimetableService.BoardRow>>>()
+    private val cpBoards = mutableMapOf<Int, Pair<Long, List<com.ksjd.testem.TimetableService.BoardRow>>>()
 
     private suspend fun otherCarriers(stop: LiveStop, live: List<LiveDeparture>): List<LiveDeparture> = withContext(Dispatchers.IO) {
         val cpStop = if (synchronized(cpStops) { stop.id in cpStops }) synchronized(cpStops) { cpStops[stop.id] }
-        else cp.intercityStopNear(stop.name, stop.lat, stop.lon).also { synchronized(cpStops) { cpStops[stop.id] = it } }
+        else timetable.intercityStopNear(stop.name, stop.lat, stop.lon).also { synchronized(cpStops) { cpStops[stop.id] = it } }
         cpStop ?: return@withContext emptyList()
         val now = System.currentTimeMillis()
         // The timetable doesn't change: every 2 min is plenty (the board refreshes every 15 s).
         val rows = synchronized(cpBoards) { cpBoards[stop.id] }?.takeIf { now - it.first < CP_BOARD_MS }?.second
-            ?: cp.intercityBoard(cpStop).also { synchronized(cpBoards) { cpBoards[stop.id] = now to it } }
+            ?: timetable.intercityBoard(cpStop).also { synchronized(cpBoards) { cpBoards[stop.id] = now to it } }
         rows.filter { row -> row.atMs > now - 60_000L && live.none { sameBus(it, row) } }.map { row ->
             LiveDeparture(
                 line = row.line,
@@ -161,15 +161,17 @@ class LiveRepository(context: Context) {
                 delaySeconds = null,
                 fetchedAtMs = now,
                 fromTimetable = true,
-                operator = row.operator
+                operator = row.operator,
+                scheduleUrl = row.tripUrl,
+                serviceDate = java.time.Instant.ofEpochMilli(row.atMs).atZone(zone).toLocalDate().toString()
             )
         }
     }
 
-    /** sadzv and cp.sk write lines differently ("606106" vs "106"): same minute and matching line. */
-    private fun sameBus(d: LiveDeparture, row: com.ksjd.testem.CpTimetableService.BoardRow): Boolean {
+    /** sadzv and the timetable write lines differently ("606106" vs "60106"): same minute and matching line. */
+    private fun sameBus(d: LiveDeparture, row: com.ksjd.testem.TimetableService.BoardRow): Boolean {
         val gap = abs(d.plannedSecondOfDay / 60 - row.minutes).let { minOf(it, 1440 - it) }
-        return gap <= 1 && (d.line == row.line || d.line.endsWith(row.line) || row.line.endsWith(d.line))
+        return gap <= 1 && com.ksjd.testem.TimetableService.sameLine(d.line, row.line)
     }
 
     suspend fun getVehicles(): List<LiveVehicle> = withContext(Dispatchers.IO) {
@@ -194,7 +196,7 @@ class LiveRepository(context: Context) {
         }
     }
 
-    private val cp = com.ksjd.testem.CpTimetableService()
+    private val timetable = com.ksjd.testem.TimetableService()
 
     /**
      * The trip with the best known position. Sources, best first: a rider's phone on the
@@ -204,7 +206,7 @@ class LiveRepository(context: Context) {
     suspend fun getTrip(ref: TripRef): TripDetail = withContext(Dispatchers.IO) {
         val base = when {
             ref.isScheduleOnly -> timetableTrip(ref)
-            // Another carrier's bus from cp.sk's board: sadzv knows nothing about it.
+            // A timetable bus without its trip link: sadzv knows nothing about it.
             ref.lineId == 0L -> timetableFallback(ref)?.let { t ->
                 t.copy(line = ref.line, destination = ref.destination.ifBlank { t.destination }, alightOrder = null, fromTimetable = true)
             } ?: TripDetail(ref.line, ref.destination, emptyList(), null)
@@ -255,28 +257,11 @@ class LiveRepository(context: Context) {
         return "${detail.line}|${first.name}|${first.scheduledMs}"
     }
 
-    /** Stop coordinates: sadzv platforms for sadzv trips, cp.sk for timetable stops (cached by name). */
-    private val coordinateCache = mutableMapOf<String, Pair<Double, Double>?>()
-
-    // cp.sk lookups block: run them off the main thread (the tracking service calls this from Main).
+    /** Stop coordinates: sadzv platforms for sadzv trips; timetable trips come with theirs from emhub. */
     suspend fun withCoordinates(ref: TripRef, detail: TripDetail): TripDetail = withContext(Dispatchers.IO) {
-        if (detail.stops.all { it.lat != null }) return@withContext detail
-        val platforms = if (ref.isScheduleOnly || detail.fromTimetable) emptyMap()
-        else runCatching { getStops() }.getOrDefault(emptyList()).flatMap { it.platforms }.associateBy { it.id }
-        // Town of the timetable: from the cp.sk link, else where the user boards (sadzv trips on cp.sk's times).
-        val boarding = ref.fromStopId.takeIf { it != 0 }?.let { runCatching { stopById(it) }.getOrNull() }?.let { it.lat to it.lon }
-        val city = Regex("""cp\.sk/([^/]+)/""").find(ref.scheduleUrl)?.groupValues?.get(1)?.takeIf { it != "bus" && it != "vlak" && it != "vlakbus" }
-            ?: boarding?.let { cityFor(it.first, it.second) } ?: "slovensko"
-        var near = boarding
-        val stops = detail.stops.map { stop ->
-            val key = "$city|${stop.name}"
-            val c = platforms[stop.platformId]?.let { it.lat to it.lon }
-                ?: synchronized(coordinateCache) { coordinateCache[key] }
-                ?: cp.coordinatesOf(stop.name, city, near).also { found -> synchronized(coordinateCache) { coordinateCache[key] = found } }
-            if (c != null) near = c
-            stop.copy(lat = c?.first, lon = c?.second)
-        }
-        detail.copy(stops = stops)
+        if (detail.stops.all { it.lat != null } || ref.isScheduleOnly || detail.fromTimetable) return@withContext detail
+        val platforms = runCatching { getStops() }.getOrDefault(emptyList()).flatMap { it.platforms }.associateBy { it.id }
+        detail.copy(stops = detail.stops.map { stop -> platforms[stop.platformId]?.let { stop.copy(lat = it.lat, lon = it.lon) } ?: stop })
     }
 
     private suspend fun liveTrip(ref: TripRef): TripDetail {
@@ -313,7 +298,7 @@ class LiveRepository(context: Context) {
         val lastPassed = stops.lastOrNull { it.isPassed }
         val passedDelay = lastPassed?.let { ((it.actualMs!! - it.scheduledMs) / 1000L).toInt() }
         if (stops.isEmpty()) {
-            // sadzv often has no stop list (its own site too). Quietly use cp.sk's timetable
+            // sadzv often has no stop list (its own site too). Quietly use the timetable
             // for this trip, keeping sadzv's live delay when the bus reports one.
             timetableFallback(ref)?.let { timetable ->
                 return timetable.copy(
@@ -347,18 +332,20 @@ class LiveRepository(context: Context) {
 
     private fun timetableTrip(ref: TripRef): TripDetail =
         synchronized(scheduleCache) { scheduleCache[ref.scheduleUrl] } ?: run {
-            val request = Request.Builder().url(ref.scheduleUrl).header("User-Agent", "Mozilla/5.0").get().build()
-            parseScheduledTrip(execute(request), ref, zone).also { parsed ->
+            // Links saved before 2.7 point at cp.sk, which the app no longer uses: such a trip has no stops.
+            val (id, from, to) = com.ksjd.testem.TimetableService.parseTripUrl(ref.scheduleUrl)
+                ?: return TripDetail(ref.line, ref.destination, emptyList(), null)
+            parseHubTrip(com.ksjd.testem.hub.HubClient.timetable("trip", mapOf("id" to id)), ref, from, to).also { parsed ->
                 if (parsed.stops.isNotEmpty()) synchronized(scheduleCache) { scheduleCache[ref.scheduleUrl] = parsed }
             }
         }
 
-    /** cp.sk lookups for live trips without a stop list: result (or miss) and when it was made. */
+    /** Timetable lookups for live trips without a stop list: result (or miss) and when it was made. */
     private val fallbackCache = mutableMapOf<String, Pair<TripDetail?, Long>>()
 
     /**
-     * The same trip on cp.sk: a direct connection from the boarding stop to the bus's
-     * destination at its departure time, with the same line. Misses are retried after 10 min.
+     * The same trip in the timetable: the same line leaving near the boarding stop at (almost)
+     * the same time. Misses are retried after 10 min.
      */
     private suspend fun timetableFallback(ref: TripRef): TripDetail? {
         if (ref.fromStopId == 0 || ref.plannedSecondOfDay < 0) return null
@@ -368,9 +355,7 @@ class LiveRepository(context: Context) {
         }
         val stop = stopById(ref.fromStopId) ?: return null
         val segment = runCatching {
-            cp.findTrip(stop.name, stop.lat, stop.lon, ref.line, ref.plannedSecondOfDay / 60 % (24 * 60),
-                // Other carriers' buses (lineId 0) are on the intercity timetable, not a city one.
-                if (ref.lineId == 0L) "slovensko" else cityFor(stop.lat, stop.lon))
+            timetable.findTrip(stop.lat, stop.lon, ref.line, ref.plannedSecondOfDay / 60 % (24 * 60))
         }.getOrNull()
         val detail = segment?.let { s ->
             runCatching {
@@ -485,65 +470,31 @@ class LiveRepository(context: Context) {
 
     companion object {
         /**
-         * Parses a cp.sk route page ("Dráha spoja"). Stops outside the user's part of the
-         * journey are marked inactive; the first active one is where they board, on
-         * [TripRef.serviceDate]. Days roll over wherever the clock goes backwards.
+         * A trip from emhub's timetable. [from] and [to] are the stop indexes where the user gets
+         * on and off (null: not chosen); where they get off, the arrival time counts.
          */
-        fun parseScheduledTrip(html: String, ref: TripRef, zone: ZoneId): TripDetail {
-            data class Row(val name: String, val departure: Int?, val arrival: Int?, val active: Boolean, val platform: String) {
-                val minutes: Int get() = departure ?: arrival!!
-            }
-            val rows = org.jsoup.Jsoup.parse(html).select("ul.line-itinerary li.item").mapNotNull { li ->
-                val name = li.selectFirst("strong.name")?.text().orEmpty()
-                    .split(",").map { it.trim() }.filter { it.isNotEmpty() }.joinToString(", ")
-                val departure = clockMinutes(li.selectFirst("span.departure")?.ownText().orEmpty())
-                val arrival = clockMinutes(li.selectFirst("span.arrival")?.ownText().orEmpty())
-                // Platform (nástupište) or track (koľaj), like on the connection list.
-                val platform = li.select("span[title]").firstOrNull {
-                    val title = it.attr("title").lowercase()
-                    title.startsWith("nást") || title.startsWith("koľ") || title.startsWith("kol")
-                }?.text()?.trim().orEmpty()
-                if (name.isBlank() || (departure == null && arrival == null)) null
-                else Row(name, departure, arrival, !li.hasClass("inactive"), platform)
-            }
-            if (rows.isEmpty()) return TripDetail(ref.line, ref.destination, emptyList(), null)
-            val boarding = rows.indexOfFirst { it.active }.takeIf { it >= 0 } ?: 0
-            val alight = rows.indexOfLast { it.active }.takeIf { it > boarding }
-            val date = runCatching { LocalDate.parse(ref.serviceDate) }.getOrElse { LocalDate.now(zone) }
-            val days = IntArray(rows.size)
-            for (i in boarding + 1 until rows.size) {
-                days[i] = days[i - 1] + if (rows[i].minutes < rows[i - 1].minutes) 1 else 0
-            }
-            for (i in boarding - 1 downTo 0) {
-                days[i] = days[i + 1] - if (rows[i].minutes > rows[i + 1].minutes) 1 else 0
-            }
-            val stops = rows.mapIndexed { i, row ->
-                // Where the user gets off, the arrival is what matters (long dwell times at bus stations).
-                val useArrival = i == alight && row.arrival != null
-                val minutes = if (useArrival) row.arrival!! else row.minutes
-                val day = days[i] - if (useArrival && row.arrival!! > row.minutes) 1 else 0
+        fun parseHubTrip(json: JsonObject, ref: TripRef, from: Int?, to: Int?): TripDetail {
+            val stops = json.getAsJsonArray("stops")?.mapIndexed { i, el ->
+                val o = el.asJsonObject
                 TripStop(
-                    name = row.name,
+                    name = o.str("name"),
                     platformId = i + 1,
                     order = i + 1,
-                    scheduledMs = date.plusDays(day.toLong()).atStartOfDay(zone).toInstant().toEpochMilli() + minutes * 60_000L,
+                    scheduledMs = (if (i == to) o.long("arrival") else o.long("departure")) ?: 0L,
                     actualMs = null,
-                    platform = row.platform
+                    platform = o.str("platform"),
+                    lat = o.get("lat")?.takeIf { it.isJsonPrimitive }?.asDouble,
+                    lon = o.get("lon")?.takeIf { it.isJsonPrimitive }?.asDouble
                 )
-            }
+            }.orEmpty()
             return TripDetail(
                 line = ref.line,
-                destination = stops.last().name,
+                destination = json.str("headsign").ifBlank { stops.lastOrNull()?.name.orEmpty() },
                 stops = stops,
                 delaySeconds = null,
-                boardingOrder = stops[boarding].order,
-                alightOrder = alight?.let { stops[it].order }
+                boardingOrder = (from ?: 0) + 1,
+                alightOrder = to?.plus(1)
             )
-        }
-
-        private fun clockMinutes(time: String): Int? {
-            val match = Regex("""(\d{1,2}):(\d{2})""").find(time) ?: return null
-            return match.groupValues[1].toInt() * 60 + match.groupValues[2].toInt()
         }
 
         private val JSON = "application/json; charset=utf-8".toMediaType()
@@ -557,13 +508,6 @@ class LiveRepository(context: Context) {
                 .replace(Regex("[^a-z0-9]+"), " ")
                 .trim()
         }
-
-        /** cp.sk city timetable for a stop: Zvolen or Banská Bystrica city buses, else all of Slovakia. */
-        fun cityFor(lat: Double, lon: Double): String =
-            listOf("zvolen" to (48.577 to 19.125), "banskabystrica" to (48.736 to 19.146))
-                .map { (slug, c) -> slug to distanceMeters(lat, lon, c.first, c.second) }
-                .filter { it.second < 12_000 }
-                .minByOrNull { it.second }?.first ?: "slovensko"
 
         fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Int {
             // Equirectangular approximation is plenty for "nearby stops".

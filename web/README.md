@@ -2,7 +2,7 @@
 
 The web version of the unofficial **testEM** client for `sadzv.qrbus.me`, mainly for iPhones. People open the site in Safari, tap **Share → Add to Home Screen**, and from then on it launches full screen like an app. No App Store needed.
 
-A browser can't talk to `sadzv.qrbus.me` or `cp.sk` directly (CORS, cross-site cookies), so this is **one small Node server** that serves the app from `public/` and fetches from those sites on the browser's behalf, the same way the Android app does.
+A browser can't talk to `sadzv.qrbus.me` or emhub directly (CORS, cross-site cookies), so this is **one small Node server** that serves the app from `public/` and fetches from those sites on the browser's behalf, the same way the Android app does.
 
 ## Features (v2)
 
@@ -10,7 +10,7 @@ A browser can't talk to `sadzv.qrbus.me` or `cp.sk` directly (CORS, cross-site c
 - **Departures**: stop search, favourites, nearby stops, live departure boards with delays, each trip's stop list. Works without signing in.
 - **Follow a bus**: a live card with the same progress bar as the Android notification (the bus moves along, squares mark where you get on and off). Push alerts before the bus reaches your stop (how many minutes is up to you, under Reminders), before you get off, and on arrival, even with the app closed (iOS 16.4+ from the Home Screen).
 - **Community delays** and **Will I catch it?**: the same opt-in features as Android, asked on first start and changeable under Account.
-- **Planner**: cp.sk connections for Slovakia, Banská Bystrica or Zvolen, suggestions, swap, time, direct only, saved and recent routes, platforms, share, later connections, all stops of a bus, live departures at a stop.
+- **Planner**: connections from emhub's timetables (regional and long-distance buses of Slovak carriers), stop shortcuts like `z z p k`, swap, time, direct only, saved and recent routes, platforms, share, later connections, all stops of a bus, live departures at a stop.
 - **History**: monthly spending chart, average fare, trips your credit covers, most-used stops, CSV export.
 - **Account and settings**: card details, validity, several cards, reminders, optional PIN lock (your saved password is then encrypted with AES-GCM using a key derived from the PIN), lock timeout, colour themes, dark mode and pure black, Slovak and English.
 - **Report a bug**: the app's recent log lines, with optional text, name and email, after the user agrees.
@@ -29,7 +29,7 @@ Node 18.17+ (20+ recommended).
 cd web
 npm install
 npm start          # http://localhost:3000
-node test.mjs      # self-check of the shared logic and the cp.sk parser
+node test.mjs      # self-check of the shared logic and the timetable trip parser
 ```
 
 | Variable | Default | Purpose |

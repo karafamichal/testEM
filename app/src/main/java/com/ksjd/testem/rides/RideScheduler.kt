@@ -11,7 +11,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import com.ksjd.testem.CpTimetableService
+import com.ksjd.testem.TimetableService
 import com.ksjd.testem.CredentialsManager
 import com.ksjd.testem.R
 import com.ksjd.testem.RecurringRide
@@ -29,7 +29,7 @@ import kotlin.math.abs
 
 /**
  * Recurring rides: an alarm [RecurringRide.leadMinutes] before each departure starts
- * following that day's bus (the tracker finds it on cp.sk), then the next one is scheduled.
+ * following that day's bus (the tracker finds it in the timetable), then the next one is scheduled.
  */
 object RideScheduler {
     private const val ACTION_FIRE = "com.ksjd.testem.RIDE_FIRE"
@@ -67,7 +67,7 @@ object RideScheduler {
     )
 
     /**
-     * That day's bus for [ride] among cp.sk's results: the same time and lines, else the same
+     * That day's bus for [ride] among the planner's results: the same time and lines, else the same
      * first line within 15 min, else any connection within 10 min. Pure logic.
      */
     fun pick(connections: List<TimetableConnection>, ride: RecurringRide, departure: ZonedDateTime): TimetableConnection? {
@@ -85,11 +85,11 @@ object RideScheduler {
             ?: connections.filter { gap(it) <= 10 }.minByOrNull(::gap)
     }
 
-    /** The buses to follow for [ride] leaving at [departure], or null when cp.sk has no such connection. */
+    /** The buses to follow for [ride] leaving at [departure], or null when the planner has no such connection. */
     suspend fun findLegs(ride: RecurringRide, departure: ZonedDateTime): List<TrackedTrip>? = withContext(Dispatchers.IO) {
         val search = departure.minusMinutes(2)
-        val result = CpTimetableService().searchConnections(
-            CpTimetableService.SearchRequest(
+        val result = TimetableService().searchConnections(
+            TimetableService.SearchRequest(
                 citySlug = ride.route.citySlug,
                 fromInput = ride.route.fromText,
                 toInput = ride.route.toText,
