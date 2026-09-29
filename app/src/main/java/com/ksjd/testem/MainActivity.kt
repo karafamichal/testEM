@@ -55,6 +55,14 @@ import com.ksjd.testem.ui.screens.UnlockDialog
 import com.ksjd.testem.ui.theme.TestEMTheme
 
 class MainActivity : AppCompatActivity() {
+    override fun onStart() {
+        super.onStart()
+        // Following stopped by an app update: pick the bus up again.
+        com.ksjd.testem.live.TripTracking.resume(this)
+        // A followed bus started from an alarm has no GPS in the background until the app is seen once.
+        com.ksjd.testem.live.TripTracking.promote(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Apply the saved language before any UI is inflated.
         val languageCode = CredentialsManager(this).getLanguageCode()

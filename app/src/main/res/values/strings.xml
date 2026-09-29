@@ -313,6 +313,8 @@
     <string name="catch_timetable_switch">Alert on timetable times too</string>
     <string name="catch_timetable_hint">Off: leave-now alerts only when the bus\'s real position is known</string>
     <string name="catch_location_needed">Allow precise location so the walking time is right.</string>
+    <string name="location_background_needed">Automatic mode needs location “Allow all the time”, or it works only while the app is open.</string>
+    <string name="location_background_allow">Allow all the time</string>
     <string name="community_delay_label">%1$s, reported by riders</string>
     <string name="bug_title">Report a bug</string>
     <string name="bug_hint">Something broken or wrong? Tell us</string>
@@ -472,5 +474,7 @@
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• testEM is now Plan&amp;Ride, with a new icon.\n• No account needed: use departures, the planner and following a bus without signing in. Add or remove your sadzv.qrbus.me account any time in Settings.\n• With an account, the app opens straight away; the ticket, credit and history stay hidden until you unlock with your PIN or fingerprint.\n• Star a connection in the planner and it appears under your ticket, ready to follow.\n• Regular rides: pick the days and dates, and the app follows your bus by itself before it leaves.\n• Pick a date in the planner, not only a time.\n• Departures show other carriers’ intercity buses too (Arriva, Slovak Lines, FlixBus and more).\n• GPS runs only when needed: your location is checked every 1–3 min on the way, and live GPS starts at the stop 4 min before the bus (earlier if it usually comes early).\n• Better detection of whether a bus stopped or drove past a stop.\n• Suggest a feature from Settings.\n• New website par.karafa.net with what’s new, support and the privacy policy; anonymous usage statistics can be turned off in Settings.\n• Your password is now stored encrypted, and PIN guessing is limited.</string>
+    <string name="whats_new_body">• Automatic mode now keeps marking the bus with the app closed and the screen off. Allow location “All the time” in Settings → Community and location for regular rides that start by themselves.
+• Updating the app no longer stops following a bus.
+• The follow notification’s progress bar is lighter on long trips.</string>
 </resources>

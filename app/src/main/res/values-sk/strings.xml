@@ -323,6 +323,8 @@
     <string name="catch_timetable_switch">Upozorňovať aj podľa cestovného poriadku</string>
     <string name="catch_timetable_hint">Vypnuté: upozornenie len keď je známa skutočná poloha autobusu</string>
     <string name="catch_location_needed">Povoľte presnú polohu, aby bol čas chôdze správny.</string>
+    <string name="location_background_needed">Automatický režim potrebuje polohu „Povoliť vždy“, inak funguje len pri otvorenej aplikácii.</string>
+    <string name="location_background_allow">Povoliť vždy</string>
     <string name="community_delay_label">%1$s, podľa cestujúcich</string>
     <string name="bug_title">Nahlásiť chybu</string>
     <string name="bug_hint">Niečo nefunguje? Napíšte nám</string>
@@ -483,5 +485,7 @@
     <string name="feature_send">Odoslať návrh</string>
     <string name="feature_sent_title">Návrh %1$s odoslaný</string>
     <string name="feature_sent_body">Ďakujeme za nápad. Ak ste nechali e-mail, ozveme sa, keď bude novinka.</string>
-    <string name="whats_new_body">• testEM je teraz Plan&amp;Ride, s novou ikonou.\n• Bez účtu: odchody, vyhľadávač a sledovanie autobusu fungujú aj bez prihlásenia. Účet sadzv.qrbus.me pridáte alebo odstránite kedykoľvek v Nastaveniach.\n• S účtom sa aplikácia otvorí hneď; lístok, kredit a história zostanú skryté, kým neodomknete PIN kódom alebo odtlačkom.\n• Označte spojenie hviezdičkou a zobrazí sa pod lístkom, pripravené na sledovanie.\n• Pravidelné jazdy: vyberte dni a dátumy a aplikácia pred odchodom sama začne sledovať váš autobus.\n• Vo vyhľadávači si vyberiete aj dátum, nielen čas.\n• Odchody ukazujú aj medzimestské autobusy iných dopravcov (Arriva, Slovak Lines, FlixBus a ďalší).\n• GPS beží len keď treba: cestou sa poloha overí každé 1–3 min a živé GPS sa zapne na zastávke 4 min pred autobusom (skôr, ak zvykne ísť skôr).\n• Presnejšie rozpoznanie, či autobus na zastávke zastavil alebo prešiel.\n• V Nastaveniach môžete navrhnúť funkciu.\n• Nová stránka par.karafa.net s novinkami, podporou a zásadami ochrany súkromia; anonymné štatistiky používania sa dajú vypnúť v Nastaveniach.\n• Heslo sa ukladá šifrované a hádanie PIN je obmedzené.</string>
+    <string name="whats_new_body">• Automatický režim teraz označuje autobus aj pri zatvorenej aplikácii a vypnutej obrazovke. Pre pravidelné jazdy, ktoré sa spúšťajú samy, povoľte polohu „Vždy“ v Nastaveniach → Komunita a poloha.
+• Aktualizácia aplikácie už nezastaví sledovanie autobusu.
+• Ukazovateľ priebehu v notifikácii sledovania je na dlhých spojoch jednoduchší.</string>
 </resources>

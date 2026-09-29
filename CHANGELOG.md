@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.6.1
+
+### Fixed
+- **Automatic mode with the app closed** (report EM-0009): the phone's GPS stopped once the app left the screen, so the bus was only marked while the app was open. It now keeps working with the screen off. Rides that start by themselves (regular rides) need location *Allow all the time*; *Settings → Community and location* offers it. Opening the app once also fixes a ride that's already being followed.
+- **Following survives app updates.** Updating the app used to stop the followed bus. Now it's picked up again right after the update, or when you next open the app.
+- The follow notification's progress bar no longer floods the logs on trips with more than 10 stops.
+
 ## 2.6.0
 
 ### New

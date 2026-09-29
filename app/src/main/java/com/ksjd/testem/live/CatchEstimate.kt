@@ -63,6 +63,12 @@ object Locations {
         ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
+    /** "All the time": lets a ride started by an alarm, or a restarted service, still get GPS. */
+    fun hasBackground(context: Context): Boolean =
+        android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
     /**
      * A fix no older than [maxAgeMs]: a recent cached one, else a fresh one (fused provider
      * first; it works with approximate permission too). [fallbackToLastKnown] returns an older

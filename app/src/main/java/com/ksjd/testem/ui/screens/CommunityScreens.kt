@@ -1,6 +1,7 @@
 package com.ksjd.testem.ui.screens
 
 import android.Manifest
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -150,6 +151,12 @@ fun CommunitySettings() {
         }
         TripTracking.refresh(context)
     }
+    var hasBackground by remember { mutableStateOf(Locations.hasBackground(context)) }
+    // Android 11+ opens the app's location settings page for this; the user picks "Allow all the time".
+    val background = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        hasBackground = Locations.hasBackground(context)
+        TripTracking.refresh(context)
+    }
     val setMode: (String) -> Unit = { m ->
         if (m == COMMUNITY_AUTO && !Locations.hasPrecise(context)) { pendingAuto = true; location.launch(LOCATION_PERMISSIONS) }
         else { mode = m; prefs.saveCommunityMode(m); TripTracking.refresh(context) }
@@ -175,6 +182,15 @@ fun CommunitySettings() {
                 trailing = { RadioButton(selected = mode == value, onClick = { setMode(value) }) }
             )
         }
+    }
+    if (mode == COMMUNITY_AUTO && hasLocation && !hasBackground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        Notice(
+            stringResource(R.string.location_background_needed),
+            modifier = Modifier.padding(16.dp),
+            tone = NoticeTone.Warning,
+            actionLabel = stringResource(R.string.location_background_allow),
+            onAction = { background.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }
+        )
     }
     var predict by remember { mutableStateOf(prefs.getPredictShift()) }
     Spacer(Modifier.height(8.dp))

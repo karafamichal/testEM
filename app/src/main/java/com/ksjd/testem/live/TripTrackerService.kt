@@ -50,7 +50,33 @@ data class TrackedTrip(
 object TripTracking {
     private val _active = MutableStateFlow<TrackedTrip?>(null)
     val active: StateFlow<TrackedTrip?> = _active
-    internal fun set(value: TrackedTrip?) { _active.value = value }
+    internal fun set(context: Context, value: TrackedTrip?) {
+        _active.value = value
+        // Kept on disk so an app update (which kills the service) can pick the bus up again.
+        val saved = context.getSharedPreferences(RESUME_PREFS, Context.MODE_PRIVATE).edit()
+        if (value == null) saved.clear() else saved.putString("trip", com.google.gson.Gson().toJson(value)).putLong("at", System.currentTimeMillis())
+        saved.apply()
+    }
+
+    /**
+     * After an app update (the old process is killed without stopping the service) or any other
+     * kill: follow the saved bus again. Called on MY_PACKAGE_REPLACED and when the app opens.
+     */
+    fun resume(context: Context) {
+        if (_active.value != null) return
+        val saved = context.getSharedPreferences(RESUME_PREFS, Context.MODE_PRIVATE)
+        val json = saved.getString("trip", null) ?: return
+        val trip = runCatching { com.google.gson.Gson().fromJson(json, TrackedTrip::class.java) }.getOrNull()
+        // A trip saved long ago is over; the service also stops by itself once the bus has arrived.
+        if (trip == null || System.currentTimeMillis() - saved.getLong("at", 0L) > RESUME_MAX_MS) {
+            saved.edit().clear().apply()
+            return
+        }
+        runCatching { start(context, trip) }.onFailure { _active.value = null }
+    }
+
+    private const val RESUME_PREFS = "trip_resume"
+    private const val RESUME_MAX_MS = 6 * 60 * 60 * 1000L
 
     fun start(context: Context, trip: TrackedTrip) {
         _active.value = trip
@@ -64,6 +90,15 @@ object TripTracking {
      */
     fun refresh(context: Context) {
         _active.value?.let { start(context, it) }
+    }
+
+    /**
+     * The app came to the foreground: if the service started without the location type (from an
+     * alarm or a restart), add it now, while Android allows it. Nothing else is restarted.
+     */
+    fun promote(context: Context) {
+        if (_active.value == null) return
+        runCatching { context.startService(Intent(context, TripTrackerService::class.java).setAction(TripTrackerService.ACTION_PROMOTE)) }
     }
 
     fun setAlightStop(context: Context, order: Int?) {
@@ -135,6 +170,8 @@ class TripTrackerService : Service() {
     private var lastRiderIndex = -1f
     private var lastRiderReportAt = 0L
     private var localFromGps = false
+    /** Android granted the location service type; without it no GPS arrives while the app is closed. */
+    private var hasLocationType = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -159,13 +196,22 @@ class TripTrackerService : Service() {
             reportPosition(intent.getIntExtra("stop", -1), leaving = intent.getBooleanExtra("leaving", false))
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_PROMOTE) {
+            val current = trip
+            if (current != null && !hasLocationType && wantsLocation()) {
+                val shown = getSystemService(android.app.NotificationManager::class.java)
+                    ?.activeNotifications?.firstOrNull { it.id == NOTIFICATION_ID }?.notification
+                startInForeground(shown ?: placeholderNotification(current))
+            }
+            return START_NOT_STICKY
+        }
         val requested = intent?.let(::readTrip) ?: run {
             finish()
             return START_NOT_STICKY
         }
         if (trip?.ref != requested.ref) resetTripState()
         trip = requested
-        TripTracking.set(requested)
+        TripTracking.set(this@TripTrackerService, requested)
         startInForeground(placeholderNotification(requested))
         loop?.cancel()
         loop = scope.launch { track() }
@@ -200,7 +246,7 @@ class TripTrackerService : Service() {
             val first = legs.first().copy(nextLegs = legs.drop(1))
             resetTripState()
             trip = first
-            TripTracking.set(first)
+            TripTracking.set(this@TripTrackerService, first)
             track()
         }
     }
@@ -231,7 +277,7 @@ class TripTrackerService : Service() {
     private fun changeTo(next: TrackedTrip, rest: List<TrackedTrip>, changeStop: String) {
         val leg = next.copy(nextLegs = rest)
         trip = leg
-        TripTracking.set(leg)
+        TripTracking.set(this@TripTrackerService, leg)
         resetTripState()
         notifyAlert("change", getString(R.string.journey_change_title, leg.ref.line), getString(R.string.journey_change_body, changeStop))
         NotificationManagerCompat.from(this).notifySafely(NOTIFICATION_ID, placeholderNotification(leg))
@@ -240,7 +286,7 @@ class TripTrackerService : Service() {
     override fun onDestroy() {
         stopRiderTracking()
         scope.cancel()
-        TripTracking.set(null)
+        TripTracking.set(this@TripTrackerService, null)
         super.onDestroy()
     }
 
@@ -249,13 +295,19 @@ class TripTrackerService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else 0
         // Location type keeps the catch estimate and automatic mode working with the screen off.
-        val wantsLocation = prefs.getCatchEnabled() || prefs.getCommunityMode() == COMMUNITY_AUTO
-        val location = if (wantsLocation && Locations.hasPermission(this) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val location = if (wantsLocation() && Locations.hasPermission(this) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         } else 0
-        runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, special or location) }
-            .onFailure { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, special) }
+        hasLocationType = runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, special or location) }
+            .onFailure {
+                // Started from the background without "all the time" location: GPS only while the app is open.
+                Log.w(GPS_TAG, "location type refused (background=${Locations.hasBackground(this)}): ${it.message}")
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, special)
+            }.isSuccess && location != 0
+        if (location != 0 && hasLocationType) Log.i(GPS_TAG, "foreground with location type")
     }
+
+    private fun wantsLocation() = prefs.getCatchEnabled() || prefs.getCommunityMode() == COMMUNITY_AUTO
 
     /** The rider's own report wins until the pooled community delay is newer. */
     private fun withLocalDelay(detail: TripDetail): TripDetail {
@@ -528,13 +580,13 @@ class TripTrackerService : Service() {
             if (board != null && current.boardingPlatformIds.isEmpty()) {
                 current = current.copy(boardingPlatformIds = listOf(board), alightOrder = current.alightOrder ?: fetched.alightOrder)
                 trip = current
-                TripTracking.set(current)
+                TripTracking.set(this@TripTrackerService, current)
             } else if (board != null && fetched.fromTimetable && fetched.stops.none { it.platformId in current.boardingPlatformIds }) {
                 // sadzv had no stop list, so stops come from cp.sk with its stop numbers: without this
                 // the boarding stop isn't found and the user counts as already on the bus (GPS on all the time).
                 current = current.copy(boardingPlatformIds = current.boardingPlatformIds + board)
                 trip = current
-                TripTracking.set(current)
+                TripTracking.set(this@TripTrackerService, current)
             }
             if (fetched != null && fetched.stops.isNotEmpty()) lastDetail = fetched
             val detail = fetched?.let(::withLocalDelay)
@@ -720,7 +772,11 @@ class TripTrackerService : Service() {
         val style = NotificationCompat.ProgressStyle()
             .setStyledByProgress(true)
             .setProgressTrackerIcon(IconCompat.createWithResource(this, R.drawable.ic_stat_bus))
-            .setProgressSegments(List(hops) { NotificationCompat.ProgressStyle.Segment(STEPS_PER_HOP).setColor(primary) })
+            // Android draws at most 10 segments and merges the rest into one (logging a warning each time).
+            .setProgressSegments(
+                if (hops <= MAX_SEGMENTS) List(hops) { NotificationCompat.ProgressStyle.Segment(STEPS_PER_HOP).setColor(primary) }
+                else listOf(NotificationCompat.ProgressStyle.Segment(hops * STEPS_PER_HOP).setColor(primary))
+            )
             .setProgress((p.position * STEPS_PER_HOP).roundToInt().coerceIn(0, hops * STEPS_PER_HOP))
         val points = buildList {
             p.boardingIndex?.let { add(it) }
@@ -782,7 +838,7 @@ class TripTrackerService : Service() {
         stopRiderTracking()
         loop?.cancel()
         trip = null
-        TripTracking.set(null)
+        TripTracking.set(this@TripTrackerService, null)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -791,6 +847,7 @@ class TripTrackerService : Service() {
         const val ACTION_STOP = "com.ksjd.testem.TRACK_STOP"
         const val ACTION_REPORT = "com.ksjd.testem.TRACK_REPORT"
         const val ACTION_RIDE = "com.ksjd.testem.TRACK_RIDE"
+        const val ACTION_PROMOTE = "com.ksjd.testem.TRACK_PROMOTE"
         private const val EXTRA_RIDE = "ride"
         private const val EXTRA_DEPARTURE = "departure"
 
@@ -818,6 +875,7 @@ class TripTrackerService : Service() {
         private const val REFRESH_MS = 15_000L
         private const val MAX_TRACKING_MS = 3L * 60 * 60 * 1000
         private const val STEPS_PER_HOP = 100
+        private const val MAX_SEGMENTS = 10
         private const val GPS_TAG = "RiderGps"
 
         fun intent(context: Context, trip: TrackedTrip): Intent =

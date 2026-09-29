@@ -150,5 +150,10 @@ class RideAlarmReceiver : BroadcastReceiver() {
 
 /** Alarms don't survive a reboot, an app update or a clock change: set them again. */
 class RideRescheduleReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) = RideScheduler.reschedule(context)
+    override fun onReceive(context: Context, intent: Intent) {
+        RideScheduler.reschedule(context)
+        // The update killed a followed bus; Android lets this broadcast start it again. If it
+        // refuses, the app resumes it when opened.
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) com.ksjd.testem.live.TripTracking.resume(context)
+    }
 }
