@@ -19,7 +19,7 @@ import com.ksjd.testem.SK_ZONE
 import com.ksjd.testem.TimetableConnection
 import com.ksjd.testem.live.TrackedTrip
 import com.ksjd.testem.live.TripTrackerService
-import com.ksjd.testem.live.scheduledTripRef
+import com.ksjd.testem.live.plannerTrip
 import com.ksjd.testem.parseClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -101,7 +101,7 @@ object RideScheduler {
             )
         ).getOrNull() ?: return@withContext null
         val connection = pick(result.connections, ride, departure) ?: return@withContext null
-        connection.segments.mapNotNull { s -> scheduledTripRef(s, s.line.trim().substringAfterLast(' '))?.let { TrackedTrip(it, emptyList()) } }
+        connection.segments.mapNotNull { s -> plannerTrip(s, s.line.trim().substringAfterLast(' ')) }
             .takeIf { it.isNotEmpty() }
     }
 

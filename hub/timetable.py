@@ -13,6 +13,7 @@ import bisect
 import collections
 import csv
 import io
+import json
 import math
 import os
 import re
@@ -47,6 +48,11 @@ MAX_VEHICLES = 6          # a connection uses at most this many buses
 MAX_TRAVEL_S = 24 * 3600  # and leaves within this long (a village's first bus may be tomorrow)
 SLACK_S, SLACK_SHARE = 10 * 60, 0.15  # a journey with fewer changes may arrive this much later
 MODES = {0: "tram", 2: "rail", 3: "bus", 11: "trolleybus", 200: "coach"}
+CITY_FEED = "sad-zvolen-as-city"   # S.A.D. Zvolen city buses read from sadzv (sadzv.collect)
+def city_operator(lat):
+    """sadzv doesn't say who runs a line (DPMBB or S.A.D. Zvolen in Banská Bystrica), so name the city's transport."""
+    return "MHD Banská Bystrica" if lat and lat > 48.66 else "MHD Zvolen"
+CITY_REUSE_DAYS = 14               # a day read from sadzv stands in for later days of its kind this long
 
 
 def mode_of(route_type):
@@ -125,8 +131,8 @@ def match_score(tokens, words):
 # ------------------------------------------------------------------ the loaded timetable
 
 class Timetable:
-    def __init__(self, feeds, today=None):
-        """feeds: {name: path to GTFS zip}."""
+    def __init__(self, feeds, today=None, city=()):
+        """feeds: {name: path to GTFS zip}; city: days of city buses read by sadzv.collect."""
         today = today or datetime.now(ZONE).date()
         self.built = time.time()
         self.first_day = today - timedelta(days=DAYS_BACK)
@@ -136,6 +142,8 @@ class Timetable:
         self.trip_index = {}
         self.services = {}       # (feed, service_id) -> set of day numbers since first_day
         self.feeds = {}
+        self.city = {}           # trip index -> (lineId, route, trip number, line, sadzv platform ids) of city buses
+        self.city_platforms = {} # sadzv platform id (str) -> [name, lat, lon, number, stop id]
         self._days = {}
         self._lock = threading.Lock()
         stops = {}               # (feed, stop_id) -> (name, lat, lon, platform)
@@ -161,7 +169,100 @@ class Timetable:
             for s in ids:
                 if s is not None:
                     self.weight[s] += 1
+        try:
+            self._add_city(city)
+        except Exception:  # noqa: BLE001 - the regional timetable still works without city buses
+            traceback.print_exc()
+            log("city buses: could not add them")
         self._footpaths()
+
+    def _add_city(self, collections):
+        """
+        S.A.D. Zvolen city buses, each read day also standing in for later days of the same kind
+        (sadzv only gives today). Their stops join our stations: the same-named one nearby, or in
+        the same town when ours has no position (then it gets sadzv's), else a new station.
+        """
+        if not collections:
+            return
+        collections = sorted(collections, key=lambda c: c["date"])
+        kind = lambda d: max(d.weekday(), 4)  # noqa: E731 - 4 workday, 5 Saturday, 6 Sunday; ponytail: holidays count as workdays
+        read = [date.fromisoformat(c["date"]) for c in collections]
+        use = {}
+        for n in range(DAYS_BACK + DAYS_AHEAD + 1):
+            d = self.first_day + timedelta(days=n)
+            pick = d if d in read else next((r for r in reversed(read)
+                                             if r < d and kind(r) == kind(d) and (d - r).days <= CITY_REUSE_DAYS), None)
+            if pick:
+                use.setdefault(pick, set()).add(n)
+        for c in collections:
+            self.city_platforms.update(c["platforms"])
+        stops = {}
+        for pid, (name, lat, lon, _, stop_id) in self.city_platforms.items():
+            stops.setdefault(stop_id, []).append((pid, name, lat, lon))
+        station_of = {}
+        for members in stops.values():
+            name = max({m[1] for m in members}, key=lambda n: sum(m[1] == n for m in members))
+            lat = sum(m[2] for m in members) / len(members)
+            lon = sum(m[3] for m in members) / len(members)
+            s = self._city_station(name, lat, lon)
+            for m in members:
+                station_of[m[0]] = s
+        count = 0
+        for c, day in zip(collections, read):
+            service = ("sadzv", c["date"])
+            self.services[service] = use.get(day, set())
+            if not self.services[service]:
+                continue
+            for t in c["trips"]:
+                rows = [(station_of[str(pid)], secs, str(pid)) for pid, secs in t["stops"] if str(pid) in station_of]
+                if len(rows) < 2:
+                    continue
+                trip_id = f'{c["date"].replace("-", "")}-{t["lineId"]}-{t["route"]}-{t["trip"]}'
+                self.trip_index[(CITY_FEED, trip_id)] = len(self.trips)
+                self.city[len(self.trips)] = (t["lineId"], t["route"], t["trip"], t["line"], tuple(r[2] for r in rows))
+                self.trips.append((CITY_FEED, trip_id, t["line"], clean_name(t["headsign"]), city_operator(self.lat[rows[0][0]]), "bus", service,
+                                   tuple(r[0] for r in rows), tuple(r[1] for r in rows), tuple(r[1] for r in rows),
+                                   tuple(str(self.city_platforms[r[2]][3]) for r in rows)))
+                for r in rows:
+                    self.weight[r[0]] += 1
+                count += 1
+        self.feeds[CITY_FEED] = count
+
+    def _city_station(self, name, lat, lon):
+        """Our station for a sadzv stop ("Námestie SNP" is "Zvolen, Nám.SNP"), or a new one."""
+        words = fold(name)
+
+        def named(s):
+            own = fold(self.names[s].split(",", 1)[1]) if "," in self.names[s] else self.words[s]
+            return own and words and (match_score(own, words) is not None or match_score(words, own) is not None)
+        near, town = [], None
+        for s in range(len(self.names)):
+            if self.lat[s] is None or abs(self.lat[s] - lat) > 0.05 or abs(self.lon[s] - lon) > 0.07:
+                continue
+            d = meters(lat, lon, self.lat[s], self.lon[s])
+            near.append((d, s))
+        near.sort()
+        for d, s in near:
+            if d <= 300 and named(s) or d <= 25:
+                return s
+        town = next((self.names[s].split(",")[0].strip() for d, s in near if "," in self.names[s] and d < 5000), None)
+        if town:
+            for s in range(len(self.names)):
+                if self.lat[s] is None and self.names[s].startswith(town + ",") and named(s):
+                    self.lat[s], self.lon[s] = lat, lon
+                    return s
+        display = clean_name(name if not town or fold(name)[:len(fold(town))] == fold(town) else f"{town}, {name}")
+        sid, n = " ".join(fold(display)), 1
+        while sid in self.by_id:
+            sid, n = f"{' '.join(fold(display))}~{n}", n + 1
+        self.station_ids.append(sid)
+        self.names.append(display)
+        self.lat.append(lat)
+        self.lon.append(lon)
+        self.words.append(fold(display))
+        self.weight.append(0)
+        self.by_id[sid] = len(self.names) - 1
+        return len(self.names) - 1
 
     def _read_feed(self, feed, path, stops, raw_trips):
         with zipfile.ZipFile(path) as zf:
@@ -319,6 +420,20 @@ class Timetable:
                        if self.lat[s] is not None and abs(self.lat[s] - lat) < 0.05 and abs(self.lon[s] - lon) < 0.07)
         return [dict(self.station_json(s), meters=round(d)) for d, s in found if d <= radius][:limit]
 
+    def town_center(self, s):
+        """Mean position of the stations of the town in station s's name ("Zvolen, AS" -> Zvolen), or None."""
+        town = self.names[s].split(",")[0].strip()
+        if not hasattr(self, "_towns"):
+            sums = {}
+            for i, name in enumerate(self.names):
+                if self.lat[i] is not None:
+                    acc = sums.setdefault(name.split(",")[0].strip(), [0.0, 0.0, 0])
+                    acc[0] += self.lat[i]
+                    acc[1] += self.lon[i]
+                    acc[2] += 1
+            self._towns = {k: (v[0] / v[2], v[1] / v[2]) for k, v in sums.items()}
+        return self._towns.get(town)
+
     def resolve(self, value):
         """A station id, or failing that the best name match (routes saved by name)."""
         if value in self.by_id:
@@ -337,7 +452,7 @@ class Timetable:
                     if dep < t0:
                         continue
                     trip, service_day = self.run_trip(day, run)
-                    if trip[0] in exclude:
+                    if any(trip[0].startswith(x) for x in exclude):  # "sad-zvolen-as" also drops its city buses
                         continue
                     rows.append((day.base + dep, trip, service_day, k, s))
         rows.sort(key=lambda r: r[0])
@@ -388,8 +503,12 @@ class Timetable:
             if not legs:
                 break
             journey = self._journey(day, legs)
+            buses = lambda j: sum(leg["type"] == "trip" for leg in j["legs"])  # noqa: E731
             if out and out[-1]["arrival"] == journey["arrival"]:
-                out[-1] = journey  # same arrival, later start: keep the later one
+                # Same arrival, later start: better only without an extra change. A city bus that
+                # catches the same regional bus further on must not replace that direct bus (EM-0014).
+                if buses(journey) <= buses(out[-1]):
+                    out[-1] = journey
             else:
                 out.append(journey)
             t = (day.conns[legs[0][1]][0] if legs[0][0] == "trip" else legs[0][2]) + 60
@@ -520,6 +639,16 @@ class Timetable:
                         "from": dict(self.station_json(first[2]), seq=first[5], platform=trip[10][first[5]]),
                         "to": dict(self.station_json(last[3]), seq=last[5] + 1, platform=trip[10][last[5] + 1]),
                         "departure": (day.base + first[0]) * 1000, "arrival": (day.base + last[1]) * 1000})
+            city = self.city.get(first[4] // 3)
+            if city:
+                # A city bus: the apps follow it live in sadzv (its stop order counts from 1).
+                line_id, route, number, line, pids = city
+                # sadzv only knows today's run: on another day the apps open the timetable trip instead
+                # (tripId with fromIndex/toIndex, the same as any timetable leg).
+                out[-1]["live"] = {"lineId": line_id, "routeNumber": route, "tripNumber": number, "line": line,
+                                   "stopId": self.city_platforms[pids[first[5]]][4], "fromIndex": first[5], "toIndex": last[5] + 1}
+                out[-1]["from"].update(platformId=int(pids[first[5]]), seq=first[5] + 1)
+                out[-1]["to"].update(platformId=int(pids[last[5] + 1]), seq=last[5] + 2)
         return {"departure": out[0]["departure"], "arrival": out[-1]["arrival"], "legs": out}
 
 
@@ -575,25 +704,44 @@ def download(folder, feeds):
     return changed
 
 
+def city_days(folder):
+    """The days of city buses read by sadzv.collect, oldest first."""
+    days = []
+    for path in sorted(Path(folder).glob("sadzv-*.json")):
+        try:
+            days.append(json.loads(path.read_text(encoding="utf-8")))
+        except Exception as error:  # noqa: BLE001
+            log(f"{path.name}: {error}")
+    return days
+
+
 def load(folder, feeds):
     global current
     started = time.time()
     paths = {f: folder / f"{f}.zip" for f in feeds if (folder / f"{f}.zip").exists()}
-    built = Timetable(paths)
+    built = Timetable(paths, city=city_days(folder))
     current = built
     failed = [f for f, n in built.feeds.items() if n == "failed"]
     log(f"loaded {len(built.trips)} trips, {len(built.names)} stations from {len(paths)} feeds "
         f"in {time.time() - started:.0f} s" + (f"; failed: {', '.join(failed)}" if failed else ""))
 
 
+_collect = None  # sadzv.collect, set by start(): today's city buses
+
+
 def update(folder, feeds, fetch=True):
-    """Download (optional) and rebuild; one at a time."""
+    """Download (optional), read today's city buses (once a day) and rebuild; one at a time."""
     if not _update_lock.acquire(blocking=False):
         return False
     try:
         if fetch:
             log(f"checking {len(feeds)} feeds for updates")
             download(folder, feeds)
+        if _collect:
+            try:
+                _collect(folder)
+            except Exception as error:  # noqa: BLE001 - the previous days still stand in
+                log(f"city buses not read: {error}")
         load(folder, feeds)
     except Exception as error:  # noqa: BLE001 - keep the previous timetable
         traceback.print_exc()
@@ -616,8 +764,10 @@ def refresher(folder, feeds):
         update(folder, feeds())
 
 
-def start(folder, feeds):
-    """feeds: a function returning the feed list (it can change in the dashboard)."""
+def start(folder, feeds, collect=None):
+    """feeds: a function returning the feed list (it can change in the dashboard); collect: sadzv.collect."""
+    global _collect
+    _collect = collect
     threading.Thread(target=refresher, args=(Path(folder), feeds), daemon=True).start()
 
 
@@ -634,6 +784,11 @@ def status(folder, feeds):
         files[feed] = {"size": path.stat().st_size if path.exists() else None,
                        "modified": int(path.stat().st_mtime) if path.exists() else None,
                        "trips": (t.feeds.get(feed) if t else None), **downloads.get(feed, {})}
+    days = sorted(Path(folder).glob("sadzv-*.json"))
+    if days:
+        files[CITY_FEED] = {"size": days[-1].stat().st_size, "modified": int(days[-1].stat().st_mtime),
+                            "trips": t.feeds.get(CITY_FEED) if t else None,
+                            "result": f"{len(days)} days read from sadzv, latest {days[-1].stem[6:]}", "at": int(days[-1].stat().st_mtime)}
     return {"ready": t is not None, "busy": _update_lock.locked(), "builtAt": int(t.built) if t else None,
             "trips": len(t.trips) if t else 0, "stations": len(t.names) if t else 0, "feeds": files,
             "log": [{"at": at, "text": text} for at, text in reversed(LOG)]}

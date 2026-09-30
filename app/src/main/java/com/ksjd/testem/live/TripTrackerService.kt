@@ -35,6 +35,17 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import kotlin.math.roundToInt
 
+/**
+ * A bus of the journey the user builds from boards: what to follow, and the same bus as a
+ * planner leg with its stop positions, so the journey can be starred or made a regular ride.
+ */
+data class DraftLeg(
+    val trip: TrackedTrip,
+    val segment: com.ksjd.testem.TimetableSegment?,
+    val from: Pair<Double, Double>?,
+    val to: Pair<Double, Double>?
+)
+
 /** What the user asked to follow. */
 data class TrackedTrip(
     val ref: TripRef,
@@ -107,9 +118,9 @@ object TripTracking {
     }
 
     /** A journey the user is putting together bus by bus (when the planner finds no connection). */
-    private val _draft = MutableStateFlow<List<TrackedTrip>>(emptyList())
-    val draft: StateFlow<List<TrackedTrip>> = _draft
-    fun addToDraft(leg: TrackedTrip) { _draft.value = _draft.value.filter { it.ref != leg.ref } + leg }
+    private val _draft = MutableStateFlow<List<DraftLeg>>(emptyList())
+    val draft: StateFlow<List<DraftLeg>> = _draft
+    fun addToDraft(leg: DraftLeg) { _draft.value = _draft.value.filter { it.trip.ref != leg.trip.ref } + leg }
     fun clearDraft() { _draft.value = emptyList() }
 
     /** Follows [legs] as one journey: each bus until its stop, then the next one. */

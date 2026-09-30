@@ -455,6 +455,17 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="rides_enabled">On</string>
     <string name="rides_pick_days">Pick at least one day or date.</string>
     <string name="rides_exact_needed">Allow alarms for Plan&amp;Ride so following starts on time. Without it you get a notification to tap instead.</string>
+    <string name="rides_weeks_same">Same every week</string>
+    <string name="rides_weeks_differ">Odd and even weeks differ</string>
+    <string name="rides_odd_weeks">Odd weeks</string>
+    <string name="rides_even_weeks">Even weeks</string>
+    <string name="rides_this_week">This is week %1$d, an %2$s week.</string>
+    <string name="rides_odd">odd</string>
+    <string name="rides_even">even</string>
+    <string name="rides_odd_even_label">Odd weeks: %1$s · Even weeks: %2$s</string>
+    <string name="rides_skip">Not on these dates</string>
+    <string name="rides_only_lines">Only lines %1$s</string>
+    <string name="rides_only_lines_hint">Off: any bus leaving at this time.</string>
     <string name="rides_delete">Delete this ride</string>
     <string name="rides_save">Save</string>
     <string name="rides_repeat">Repeat this ride regularly</string>
@@ -479,5 +490,5 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• The planner, other carriers on the departure boards and bus stop lists now come from our own server (open timetables of the Slovak bus carriers), no longer from cp.sk.\n• Type stops the short way: “z z p k” or “zvol zla po kon” finds Zvolen, Zlatý Potok konečná.\n• For now the planner has regional and long-distance buses only: no trains, and no city buses in Banská Bystrica and Zvolen (city buses still show live on the boards).\n• Journeys starred before this version need to be starred again.</string>
+    <string name="whats_new_body">• City buses of Zvolen and Banská Bystrica (S.A.D. Zvolen) are in the planner for any day now, with changes to and from regional buses.\n• Your own journey (built bus by bus from the boards) can be starred for the home tab or made a regular ride, like a planner result.\n• Regular rides: different days in odd and even weeks, dates to skip (e.g. holidays), and any bus at that time instead of the same lines.\n• Tap a regular ride on the home tab to change it.</string>
 </resources>

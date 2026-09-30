@@ -9,6 +9,36 @@ export const lineNumber = (line) => String(line || '').trim().split(' ').pop();
 export const readableStop = (name) =>
   String(name || '').split(',').map((s) => s.trim()).filter(Boolean).join(', ');
 
+/**
+ * A planner bus to follow: { ref, boardingPlatformIds, alightOrder }. A SAD Zvolen bus from the
+ * live data ("sadzv:trip?...") is followed live from the stop where the user gets on; any other
+ * bus by its timetable trip link, which knows the user's stops itself.
+ */
+export function plannerLeg(segment) {
+  const url = String(segment.routeUrl || '');
+  if (url.startsWith('sadzv:trip?')) {
+    const q = new URLSearchParams(url.slice('sadzv:trip?'.length));
+    // sadzv only knows today's run: a city bus on another day comes from the timetable, with that day's times.
+    if (q.get('tt') && segment.serviceDate && segment.serviceDate !== isoDate(todayLocal())) {
+      return plannerLeg({ ...segment, routeUrl: q.get('tt') });
+    }
+    const n = (k) => Number(q.get(k)) || 0;
+    return {
+      ref: { line: q.get('line') || lineNumber(segment.line), lineId: n('lineId'), routeNumber: q.get('route') || '', tripNumber: n('trip'),
+        destination: readableStop(segment.arrivalStop), scheduleUrl: '', serviceDate: segment.serviceDate || '',
+        fromStopId: n('stop'), plannedSecondOfDay: q.has('planned') ? n('planned') : -1 },
+      boardingPlatformIds: n('board') ? [n('board')] : [],
+      alightOrder: n('alight') || null,
+    };
+  }
+  return {
+    ref: { line: lineNumber(segment.line), lineId: 0, routeNumber: '', tripNumber: 0, destination: readableStop(segment.arrivalStop),
+      scheduleUrl: url, serviceDate: segment.serviceDate || '', fromStopId: 0, plannedSecondOfDay: -1 },
+    boardingPlatformIds: [],
+    alightOrder: null,
+  };
+}
+
 const bratislavaDate = (ms) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bratislava' }).format(new Date(ms));
 
 // ---------------------------------------------------------------- Slovak local time

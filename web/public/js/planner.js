@@ -1,8 +1,8 @@
 // Planner for the web client (same flow as the Android Planner tab), from emhub's timetables.
 import { t, lang } from './i18n.js';
 import { $, esc, apiJson, store, plate, toast, clock } from './core.js';
-import { readableStop, lineNumber, nextRideDeparture, localToEpoch, WORKDAYS, EVERY_DAY } from './logic.js';
-import { openScheduledTrip, scheduledRef, startJourney } from './live.js';
+import { readableStop, lineNumber, nextRideDeparture, localToEpoch, WORKDAYS, EVERY_DAY, plannerLeg } from './logic.js';
+import { openScheduledTrip, startJourney } from './live.js';
 import { rides, saveRides, rideDayText } from './rides.js';
 
 // One timetable for every region; the city is kept only because saved routes carry it.
@@ -158,7 +158,7 @@ function bind(el) {
     if (journey) {
       // Every bus of the connection, one after another: get-off alert, then the next bus.
       const legs = p.results[Number(journey.dataset.journey)].segments.filter((s) => s.routeUrl)
-        .map((s) => ({ ref: scheduledRef(s), boardingPlatformIds: [], alightOrder: null }));
+        .map(plannerLeg);
       startJourney(legs);
       return toast(t('journey_started'));
     }

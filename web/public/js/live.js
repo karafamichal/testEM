@@ -1,7 +1,7 @@
 // Departures, stop boards, trip sheet and "follow this bus" for the web client.
 import { t, lang } from './i18n.js';
 import { $, $$, esc, api, apiJson, store, config, clock, countdown, delayChip, delayInfo, plate, toast, openSheet, closeOverlay, log } from './core.js';
-import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, referenceAt, delayAt, nextCheckMs, stopPassDetector, earliestBoardingMs, LIVE_GPS_BEFORE_MS, RIDER_GPS_MAX_M } from './logic.js';
+import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, referenceAt, delayAt, nextCheckMs, stopPassDetector, earliestBoardingMs, LIVE_GPS_BEFORE_MS, RIDER_GPS_MAX_M, plannerLeg } from './logic.js';
 
 /** Helping with bus positions: 'off' | 'buttons' | 'auto' (earlier versions had an on/off switch). */
 export const communityMode = () => store.get('communityMode', store.get('communityOn', false) ? 'buttons' : 'off');
@@ -238,16 +238,11 @@ export function openTrip(ref, { boardingPlatformIds = [], alightOrder = null } =
   }).catch(() => { if (sheetTrip) Object.assign(sheetTrip, { loading: false, error: true }); renderTripSheet(); });
 }
 
-/** A planner bus as a trip: stops, times and the user's stops come from its timetable trip. */
-export const scheduledRef = (segment) => ({
-  line: lineNumber(segment.line), lineId: 0, routeNumber: '', tripNumber: 0,
-  destination: readableStop(segment.arrivalStop), scheduleUrl: segment.routeUrl, serviceDate: segment.serviceDate,
-});
-
-/** A bus from a planner result: stops and times from the timetable. */
+/** A bus from a planner result: live for SAD Zvolen city buses, else from the timetable. */
 export function openScheduledTrip(segment) {
   if (!segment.routeUrl) return;
-  openTrip(scheduledRef(segment));
+  const { ref, boardingPlatformIds, alightOrder } = plannerLeg(segment);
+  openTrip(ref, { boardingPlatformIds, alightOrder });
 }
 
 // Keep an open trip sheet fresh: riders' reports and the bus's position change all the time.

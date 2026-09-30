@@ -74,7 +74,7 @@ import com.ksjd.testem.CpStopSuggestion
 import com.ksjd.testem.PLANNER_ALL
 import com.ksjd.testem.live.TrackedTrip
 import com.ksjd.testem.live.TripTracking
-import com.ksjd.testem.live.scheduledTripRef
+import com.ksjd.testem.live.plannerTrip
 import com.ksjd.testem.R
 import com.ksjd.testem.RecurringRide
 import com.ksjd.testem.SK_ZONE
@@ -491,7 +491,7 @@ private fun ConnectionCard(
                 }
             }
             // A connection with changes: follow all its buses as one journey.
-            val legs = connection.segments.mapNotNull { s -> scheduledTripRef(s, lineNumber(s.line))?.let { TrackedTrip(it, emptyList()) } }
+            val legs = connection.segments.mapNotNull { s -> plannerTrip(s, lineNumber(s.line)) }
             if (legs.size > 1) {
                 val withNotifications = rememberWithNotifications()
                 Button(

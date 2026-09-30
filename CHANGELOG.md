@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.8.0
+
+### New
+- **City buses in the planner for any day:** emhub reads the whole day's timetable of S.A.D. Zvolen's city lines (Zvolen, Banská Bystrica) every morning, so connections with city buses, and changes between city and regional buses, are found for tomorrow and later too (reports EM-0011, EM-0012). They are followed live.
+- **Star or repeat your own journey:** a journey built bus by bus from the boards gets the same star (home tab) and repeat (regular ride) buttons as a planner result.
+- **Regular rides:** different days in odd and even weeks (or only one of them), dates to skip (holidays), and a switch between the same lines and any bus at that time. Tap a ride on the home tab to change it.
+
+## 2.7.1
+
+### Fixed
+- **City buses in the planner** (report EM-0010): Zvolen and Banská Bystrica city buses of S.A.D. Zvolen aren't in the open timetables, so a trip like Zvolen, Nám. SNP → Lipovec found nothing. The planner now also asks S.A.D. Zvolen's live data for direct buses between the two stops (for the next several hours), and you follow them live, with their delay and position. Changes between city lines aren't found this way yet.
+- The departure board no longer crashes when the operator lists the same bus twice.
+
 ## 2.7.0
 
 ### Changed

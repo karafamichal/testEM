@@ -53,9 +53,65 @@ data class LiveState(
     val previews: List<BoardState> = emptyList()
 )
 
-/** A planner bus as a trip: stops, times and the user's stops come from its timetable trip. */
+/**
+ * A planner bus to follow. A SAD Zvolen bus from the live data is followed live, from the stop
+ * where the user gets on; any other bus by its timetable trip, which knows the user's stops itself.
+ */
+fun plannerTrip(segment: TimetableSegment, line: String): TrackedTrip? {
+    val live = com.ksjd.testem.TimetableService.parseLiveUrl(segment.routeUrl)
+        ?: return scheduledTripRef(segment, line)?.let { TrackedTrip(it, emptyList()) }
+    // sadzv only knows today's run: a city bus on another day comes from the timetable, with that day's times.
+    if (live.timetable.isNotEmpty() && segment.serviceDate != java.time.LocalDate.now(com.ksjd.testem.SK_ZONE).toString()) {
+        return scheduledTripRef(segment.copy(routeUrl = live.timetable), line)?.let { TrackedTrip(it, emptyList()) }
+    }
+    val ref = TripRef(
+        line = live.line,
+        lineId = live.lineId,
+        routeNumber = live.routeNumber,
+        tripNumber = live.tripNumber,
+        destination = segment.arrivalStop,
+        serviceDate = segment.serviceDate,
+        fromStopId = live.stopId,
+        plannedSecondOfDay = live.plannedSecondOfDay
+    )
+    return TrackedTrip(ref, listOfNotNull(live.boardingPlatformId.takeIf { it != 0 }), live.alightOrder.takeIf { it != 0 })
+}
+
+/** The open trip as a bus of the user's own journey (see DraftLeg). */
+fun draftLeg(sheet: TripSheetState, detail: TripDetail): DraftLeg {
+    val trip = TrackedTrip(sheet.ref, sheet.boardingPlatformIds, sheet.alightOrder)
+    val stops = detail.stops
+    if (stops.size < 2) return DraftLeg(trip, null, null, null)
+    val ref = sheet.ref
+    val timetable = ref.isScheduleOnly || detail.fromTimetable
+    val board = (if (timetable) stops.indexOfFirst { it.order == detail.boardingOrder }
+        else stops.indexOfFirst { it.platformId in sheet.boardingPlatformIds }).takeIf { it >= 0 } ?: 0
+    val alight = stops.indexOfFirst { it.order == (sheet.alightOrder ?: detail.alightOrder) }.takeIf { it > board } ?: stops.lastIndex
+    val (b, a) = stops[board] to stops[alight]
+    fun local(ms: Long) = java.time.Instant.ofEpochMilli(ms).atZone(com.ksjd.testem.SK_ZONE)
+    val url = when {
+        ref.isScheduleOnly -> com.ksjd.testem.TimetableService.parseTripUrl(ref.scheduleUrl)
+            ?.let { (id, _, _) -> com.ksjd.testem.TimetableService.tripUrl(id, board, alight) }.orEmpty()
+        ref.lineId != 0L -> com.ksjd.testem.TimetableService.liveUrl(com.ksjd.testem.TimetableService.Companion.LiveLink(
+            ref.line, ref.lineId, ref.routeNumber, ref.tripNumber,
+            if (timetable) sheet.boardingPlatformIds.firstOrNull() ?: 0 else b.platformId, a.order, ref.fromStopId,
+            local(b.scheduledMs).toLocalTime().toSecondOfDay()))
+        else -> ""
+    }
+    fun clock(ms: Long) = local(ms).let { "%d:%02d".format(it.hour, it.minute) }
+    val segment = TimetableSegment(
+        line = "Bus ${ref.line}", operatorName = "",
+        departureTime = clock(b.scheduledMs), departureStop = b.name,
+        arrivalTime = clock(a.scheduledMs), arrivalStop = a.name,
+        departurePlatform = b.platform, arrivalPlatform = a.platform,
+        routeUrl = url, serviceDate = local(b.scheduledMs).toLocalDate().toString()
+    )
+    return DraftLeg(trip, segment, b.lat?.let { it to b.lon!! }, a.lat?.let { it to a.lon!! })
+}
+
+/** A planner bus as a timetable trip: stops, times and the user's stops come from its trip link. */
 fun scheduledTripRef(segment: TimetableSegment, line: String): TripRef? {
-    if (segment.routeUrl.isBlank()) return null
+    if (segment.routeUrl.isBlank() || segment.routeUrl.startsWith("sadzv:")) return null
     return TripRef(
         line = line,
         lineId = 0L,
@@ -241,9 +297,19 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
         loadTrip(TripSheetState(ref, boardingPlatformIds = boarding))
     }
 
+    /** Adds the open bus to the journey being built; its stops get positions so the journey can be starred or repeated. */
+    fun addToDraft(sheet: TripSheetState) {
+        val detail = sheet.detail ?: return
+        viewModelScope.launch {
+            val placed = runCatching { repo.withCoordinates(sheet.ref, detail) }.getOrDefault(detail)
+            TripTracking.addToDraft(draftLeg(sheet, placed))
+        }
+    }
+
     /** A bus from a planner result: no live data, so its stops and times come from the timetable. */
     fun openScheduledTrip(segment: TimetableSegment, line: String) {
-        loadTrip(TripSheetState(scheduledTripRef(segment, line) ?: return))
+        val trip = plannerTrip(segment, line) ?: return
+        loadTrip(TripSheetState(trip.ref, boardingPlatformIds = trip.boardingPlatformIds, alightOrder = trip.alightOrder))
     }
 
     /** The bus being followed, with the user's stops, e.g. after tapping its notification. */

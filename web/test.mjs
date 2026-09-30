@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { tripProgress, catchEstimate, communityKey, lineNumber, historyInsights, historyToCsv, snapToRoute, delayAt, nextCheckMs, stopPassDetector, nextRideDeparture, pickRideConnection, earliestBoardingMs, WORKDAYS, BUS_GPS_MAX_M, RIDER_GPS_MAX_M } from './public/js/logic.js';
 import { hubTrip, tripUrl, parseTripUrl, localToEpoch } from './transit.js';
+import { plannerLeg } from './public/js/logic.js';
 
 const T0 = Date.UTC(2026, 8, 24, 10, 0);
 const stops = [0, 5, 10, 15].map((m, i) => ({ name: `S${i}`, platformId: i + 1, order: i + 1, scheduledMs: T0 + m * 60000, actualMs: null }));
@@ -115,6 +116,18 @@ assert.equal(trip.stops[1].scheduledMs, at(23, 55));
 assert.equal(trip.stops[2].scheduledMs, at(0, 15, 25), 'alight uses arrival');
 assert.equal(trip.stops[2].lat, null);
 assert.equal(trip.destination, 'Brezno, AS');
+// A city bus from SAD Zvolen's live data is followed live, from the stop where the user gets on.
+const liveLeg = plannerLeg({ line: 'Bus 9', arrivalStop: 'Lipovec, Potraviny', serviceDate: '2026-09-29',
+  routeUrl: 'sadzv:trip?line=9&lineId=910009195&route=9004&trip=67&board=1296&alight=12&stop=4913&planned=78180' });
+assert.deepEqual(liveLeg, { ref: { line: '9', lineId: 910009195, routeNumber: '9004', tripNumber: 67, destination: 'Lipovec, Potraviny',
+  scheduleUrl: '', serviceDate: '2026-09-29', fromStopId: 4913, plannedSecondOfDay: 78180 }, boardingPlatformIds: [1296], alightOrder: 12 });
+// On another day a city bus opens from the timetable (sadzv only knows today's run).
+const tomorrowLeg = plannerLeg({ line: 'Bus 9', arrivalStop: 'Lipovec, Potraviny', serviceDate: '2099-01-01',
+  routeUrl: 'sadzv:trip?line=9&lineId=1&route=9004&trip=67&board=1296&alight=12&stop=4913&planned=78180&tt=' + encodeURIComponent(tripUrl('sad-zvolen-as-city:x:20990101', 6, 10)) });
+assert.deepEqual([tomorrowLeg.ref.lineId, tomorrowLeg.ref.scheduleUrl], [0, tripUrl('sad-zvolen-as-city:x:20990101', 6, 10)]);
+const ttLeg = plannerLeg({ line: 'Bus 60107', arrivalStop: 'Banská Bystrica, AS', serviceDate: '2026-09-30', routeUrl: tripUrl('x:y:20260930', 0, 5) });
+assert.equal(ttLeg.ref.scheduleUrl, tripUrl('x:y:20260930', 0, 5));
+assert.deepEqual([ttLeg.ref.line, ttLeg.boardingPlatformIds, ttLeg.alightOrder], ['60107', [], null]);
 // Europe/Bratislava is UTC+2 in September.
 assert.equal(localToEpoch(2026, 9, 24, 12, 0), Date.UTC(2026, 8, 24, 10, 0));
 

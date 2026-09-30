@@ -467,6 +467,17 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="rides_enabled">Zapnuté</string>
     <string name="rides_pick_days">Vyberte aspoň jeden deň alebo dátum.</string>
     <string name="rides_exact_needed">Povoľte budíky pre Plan&amp;Ride, aby sledovanie začalo načas. Inak dostanete upozornenie, na ktoré treba ťuknúť.</string>
+    <string name="rides_weeks_same">Každý týždeň rovnako</string>
+    <string name="rides_weeks_differ">Nepárne a párne týždne inak</string>
+    <string name="rides_odd_weeks">Nepárne týždne</string>
+    <string name="rides_even_weeks">Párne týždne</string>
+    <string name="rides_this_week">Teraz je %1$d. týždeň, %2$s.</string>
+    <string name="rides_odd">nepárny</string>
+    <string name="rides_even">párny</string>
+    <string name="rides_odd_even_label">Nepárne týždne: %1$s · Párne týždne: %2$s</string>
+    <string name="rides_skip">Nie v tieto dni</string>
+    <string name="rides_only_lines">Len linky %1$s</string>
+    <string name="rides_only_lines_hint">Vypnuté: ktorýkoľvek autobus v tomto čase.</string>
     <string name="rides_delete">Odstrániť túto jazdu</string>
     <string name="rides_save">Uložiť</string>
     <string name="rides_repeat">Opakovať túto jazdu pravidelne</string>
@@ -490,5 +501,5 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="feature_send">Odoslať návrh</string>
     <string name="feature_sent_title">Návrh %1$s odoslaný</string>
     <string name="feature_sent_body">Ďakujeme za nápad. Ak ste nechali e-mail, ozveme sa, keď bude novinka.</string>
-    <string name="whats_new_body">• Vyhľadávač spojení, autobusy ďalších dopravcov na tabuliach a zoznamy zastávok sú teraz z nášho servera (otvorené cestovné poriadky slovenských autobusových dopravcov), už nie z cp.sk.\n• Zastávky stačí písať skratkou: „z z p k“ alebo „zvol zla po kon“ nájde Zvolen, Zlatý Potok konečná.\n• Vyhľadávač zatiaľ pozná len regionálne a diaľkové autobusy: bez vlakov a bez MHD v Banskej Bystrici a vo Zvolene (MHD je naďalej naživo na tabuliach).\n• Spojenia označené hviezdičkou pred touto verziou treba označiť znova.</string>
+    <string name="whats_new_body">• MHD Zvolena a Banskej Bystrice (S.A.D. Zvolen) je vo vyhľadávači na ktorýkoľvek deň, aj s prestupmi na regionálne autobusy.\n• Vlastnú cestu (poskladanú autobus po autobuse z tabúľ) môžete označiť hviezdičkou na domovskú obrazovku alebo z nej spraviť pravidelnú jazdu, ako výsledok vyhľadávania.\n• Pravidelné jazdy: iné dni v nepárnych a párnych týždňoch, dni, keď sa nejazdí (napr. sviatky), a ktorýkoľvek autobus v danom čase namiesto rovnakých liniek.\n• Pravidelnú jazdu na domovskej obrazovke upravíte ťuknutím.</string>
 </resources>

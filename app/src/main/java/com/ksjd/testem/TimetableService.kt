@@ -51,7 +51,7 @@ class TimetableService {
         val root = HubClient.timetable("plan", mapOf("from" to from, "to" to to, "time" to epochS.toString(), "n" to "5",
             "direct" to if (direct) "1" else "0"))
         val connections = root.getAsJsonArray("connections").map { parseConnection(it.asJsonObject) }
-            .filter { it.id !in listed }
+            .filter { it.id !in listed }.distinctBy { it.id }
         val last = root.getAsJsonArray("connections").lastOrNull()?.asJsonObject?.get("departure")?.asLong
         val cursor = last?.let {
             TimetablePagingCursor(PLANNER_ALL, "", from, to, if (direct) "direct" else "all", (it / 1000 + 60).toString(),
@@ -133,7 +133,13 @@ class TimetableService {
                 arrivalStop = to.str("name"),
                 departurePlatform = from.str("platform"),
                 arrivalPlatform = to.str("platform"),
-                routeUrl = tripUrl(l.str("tripId"), from.get("seq").asInt, to.get("seq").asInt),
+                // A city bus from SAD Zvolen's live data is followed live; others by their timetable trip.
+                routeUrl = l.getAsJsonObject("live")?.let { live ->
+                    liveUrl(LiveLink(live.str("line"), live.get("lineId").asLong, live.str("routeNumber"), live.get("tripNumber").asInt,
+                        from.get("platformId").asInt, to.get("seq").asInt, live.get("stopId").asInt,
+                        Instant.ofEpochMilli(l.get("departure").asLong).atZone(SK_ZONE).toLocalTime().toSecondOfDay(),
+                        timetable = live.get("fromIndex")?.let { tripUrl(l.str("tripId"), it.asInt, live.get("toIndex").asInt) }.orEmpty()))
+                } ?: tripUrl(l.str("tripId"), from.get("seq").asInt, to.get("seq").asInt),
                 serviceDate = Instant.ofEpochMilli(l.get("departure").asLong).atZone(SK_ZONE).toLocalDate().toString()
             )
         }
@@ -169,6 +175,29 @@ class TimetableService {
             val params = url.substringAfter('?').split('&').associate { it.substringBefore('=') to it.substringAfter('=', "") }
             val id = params["id"]?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: return null
             return Triple(id, params["from"]?.toIntOrNull(), params["to"]?.toIntOrNull())
+        }
+
+        /** A bus in sadzv's live data: enough to follow it live, with where the user gets on and off. */
+        data class LiveLink(
+            val line: String, val lineId: Long, val routeNumber: String, val tripNumber: Int,
+            val boardingPlatformId: Int, val alightOrder: Int, val stopId: Int, val plannedSecondOfDay: Int,
+            /** The same bus as a timetable trip link: used on other days, since sadzv only knows today's run. */
+            val timetable: String = ""
+        )
+
+        fun liveUrl(l: LiveLink): String =
+            "sadzv:trip?line=${java.net.URLEncoder.encode(l.line, "UTF-8")}&lineId=${l.lineId}&route=${java.net.URLEncoder.encode(l.routeNumber, "UTF-8")}" +
+                "&trip=${l.tripNumber}&board=${l.boardingPlatformId}&alight=${l.alightOrder}&stop=${l.stopId}&planned=${l.plannedSecondOfDay}" +
+                (if (l.timetable.isNotEmpty()) "&tt=" + java.net.URLEncoder.encode(l.timetable, "UTF-8") else "")
+
+        fun parseLiveUrl(url: String): LiveLink? {
+            if (!url.startsWith("sadzv:trip?")) return null
+            val p = url.substringAfter('?').split('&').associate { it.substringBefore('=') to java.net.URLDecoder.decode(it.substringAfter('=', ""), "UTF-8") }
+            return LiveLink(
+                p["line"] ?: return null, p["lineId"]?.toLongOrNull() ?: return null, p["route"].orEmpty(), p["trip"]?.toIntOrNull() ?: return null,
+                p["board"]?.toIntOrNull() ?: 0, p["alight"]?.toIntOrNull() ?: 0, p["stop"]?.toIntOrNull() ?: 0, p["planned"]?.toIntOrNull() ?: -1,
+                p["tt"].orEmpty()
+            )
         }
 
         fun sameLine(a: String, b: String): Boolean = a == b || (a.isNotEmpty() && b.isNotEmpty() && (a.endsWith(b) || b.endsWith(a)))

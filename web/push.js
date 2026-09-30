@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import webpush from 'web-push';
 import { getLiveTrip, getScheduledTrip, searchConnections } from './transit.js';
-import { tripProgress, communityKey, nextRideDeparture, pickRideConnection, lineNumber, readableStop, todayLocal, localMinutes } from './public/js/logic.js';
+import { tripProgress, communityKey, nextRideDeparture, pickRideConnection, readableStop, todayLocal, localMinutes, plannerLeg } from './public/js/logic.js';
 
 const DATA_DIR = process.env.DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 const TICK_MS = 20_000;
@@ -110,7 +110,8 @@ async function tick() {
         if (next) {
           // A journey with changes: on to the next bus.
           await send(f, 'change-' + next.ref.line + '-' + next.ref.scheduleUrl, t.change(next.ref.line, p.lastStopName));
-          Object.assign(f, { ref: next.ref, boardingPlatformIds: [], alightOrder: null, nextLegs: rest, sent: new Set(f.sent) });
+          Object.assign(f, { ref: next.ref, boardingPlatformIds: next.boardingPlatformIds || [], alightOrder: next.alightOrder ?? null,
+            nextLegs: rest, sent: new Set(f.sent) });
           for (const k of ['arriving', 'alight']) f.sent.delete(k);
           continue;
         }
@@ -208,8 +209,8 @@ async function rideTick() {
         const t = TEXT[entry.lang];
         if (!legs.length) { await send(f, 'missing', t.rideMissing(rideLabel(ride), hhmm(departure)), '/'); continue; }
         startFollowing({
-          subscription: entry.subscription, ref: legs[0], boardingPlatformIds: [], alightOrder: null,
-          nextLegs: legs.slice(1).map((ref) => ({ ref })), lang: entry.lang,
+          subscription: entry.subscription, ref: legs[0].ref, boardingPlatformIds: legs[0].boardingPlatformIds, alightOrder: legs[0].alightOrder,
+          nextLegs: legs.slice(1), lang: entry.lang,
           arriveLeadMinutes: entry.arriveLeadMinutes, community: entry.community,
         }, hub);
         await send(f, 'started', t.rideStarted(rideLabel(ride), hhmm(departure)), `/?ride=${encodeURIComponent(ride.id)}&dep=${departure}`);
@@ -222,7 +223,7 @@ async function rideTick() {
   if (changed) saveRides();
 }
 
-/** That day's buses for a ride, as trip refs for following (timetable times). */
+/** That day's buses for a ride, as legs to follow ({ ref, boardingPlatformIds, alightOrder }). */
 async function findRideLegs(ride, departure) {
   const day = todayLocal(departure);
   const search = departure - 2 * 60000;
@@ -231,10 +232,7 @@ async function findRideLegs(ride, departure) {
     time: hhmm(search), date: `${day.day}.${day.month}.${day.year}`, directOnly: false,
   });
   const connection = pickRideConnection(r.connections, ride, departure);
-  return (connection?.segments || []).filter((s) => s.routeUrl).map((s) => ({
-    line: lineNumber(s.line), lineId: 0, routeNumber: '', tripNumber: 0, destination: readableStop(s.arrivalStop),
-    scheduleUrl: s.routeUrl, serviceDate: s.serviceDate, fromStopId: 0, plannedSecondOfDay: -1,
-  }));
+  return (connection?.segments || []).filter((s) => s.routeUrl).map(plannerLeg);
 }
 
 // Rides saved before a restart keep running.

@@ -77,7 +77,7 @@ import com.ksjd.testem.SavedJourney
 import com.ksjd.testem.readableStopName
 import com.ksjd.testem.live.TrackedTrip
 import com.ksjd.testem.live.TripTracking
-import com.ksjd.testem.live.scheduledTripRef
+import com.ksjd.testem.live.plannerTrip
 import com.ksjd.testem.ui.components.GroupDivider
 import com.ksjd.testem.ui.components.ListGroup
 import com.ksjd.testem.ui.components.ListRow
@@ -210,7 +210,7 @@ fun TicketScreen(
         }
 
         JourneysSection(timetable.savedJourneys, now, viewModel, onOpenPlanner)
-        RidesSection(timetable.rides, now, onOpenPlanner)
+        RidesSection(timetable.rides, now, viewModel)
 
         SectionLabel(stringResource(R.string.departures_favourites))
         if (live.favourites.isEmpty()) {
@@ -293,7 +293,7 @@ private fun JourneysSection(journeys: List<SavedJourney>, now: Long, viewModel: 
         upcoming.take(5).forEach { journey ->
             val c = journey.connection
             val legs = c.segments.mapNotNull { s ->
-                scheduledTripRef(s, s.line.trim().substringAfterLast(' '))?.let { TrackedTrip(it, emptyList()) }
+                plannerTrip(s, s.line.trim().substringAfterLast(' '))
             }
             val following = tracked != null && legs.any { it.ref == tracked?.ref }
             Surface(
@@ -350,7 +350,17 @@ private fun JourneysSection(journeys: List<SavedJourney>, now: Long, viewModel: 
 
 /** The next time each regular ride runs. */
 @Composable
-private fun RidesSection(rides: List<RecurringRide>, now: Long, onOpenPlanner: () -> Unit) {
+private fun RidesSection(rides: List<RecurringRide>, now: Long, viewModel: AppViewModel) {
+    var editing by remember { mutableStateOf<RecurringRide?>(null) }
+    editing?.let { ride ->
+        RideEditorDialog(
+            initial = ride,
+            isNew = false,
+            onSave = { viewModel.saveRide(it); editing = null },
+            onDelete = { viewModel.deleteRide(ride.id); editing = null },
+            onDismiss = { editing = null }
+        )
+    }
     val next = rides.mapNotNull { ride ->
         ride.nextDeparture(java.time.Instant.ofEpochMilli(now).atZone(SK_ZONE))?.let { ride to it }
     }.sortedBy { it.second }
@@ -362,7 +372,7 @@ private fun RidesSection(rides: List<RecurringRide>, now: Long, onOpenPlanner: (
             ListRow(
                 title = ride.label,
                 subtitle = stringResource(R.string.rides_next, rideDay(at), "%d:%02d".format(at.hour, at.minute)),
-                onClick = onOpenPlanner,
+                onClick = { editing = ride },
                 leading = { Icon(Icons.Outlined.EventRepeat, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             )
         }

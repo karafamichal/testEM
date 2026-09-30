@@ -440,12 +440,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _timetableState.value.savedJourneys.any { it.sameAs(connection) }
 
     /** Star / unstar a result; starred ones show under the ticket on the home tab. */
-    fun toggleSaveJourney(connection: TimetableConnection) {
+    fun toggleSaveJourney(connection: TimetableConnection, route: SavedRoute? = null) {
         val saved = _timetableState.value.savedJourneys
         val updated = if (saved.any { it.sameAs(connection) }) {
             saved.filterNot { it.sameAs(connection) }
         } else {
-            val route = searchedRoute ?: currentRoute() ?: return
+            val route = route ?: searchedRoute ?: currentRoute() ?: return
             // Journeys that already ended are of no use on the home tab.
             val now = System.currentTimeMillis()
             (saved.filter { it.arrivalMs == 0L || it.arrivalMs > now } +
@@ -472,8 +472,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ------------------------------------------------------------ recurring rides
 
     /** A ride from a planner result, prefilled for the editor: same stops, time and lines, workdays. */
-    fun rideFrom(connection: TimetableConnection): RecurringRide? {
-        val route = searchedRoute ?: currentRoute() ?: return null
+    fun rideFrom(connection: TimetableConnection, route: SavedRoute? = null): RecurringRide? {
+        val route = route ?: searchedRoute ?: currentRoute() ?: return null
         return RecurringRide(
             id = java.util.UUID.randomUUID().toString(),
             route = route,
@@ -481,6 +481,50 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             lines = connection.segments.map { it.line.trim().substringAfterLast(' ') },
             days = RecurringRide.WORKDAYS
         )
+    }
+
+    // ------------------------------------------------------------ the user's own journey (built bus by bus)
+
+    /** The journey built from boards as a planner connection, or null while a bus has no stops. */
+    fun draftConnection(legs: List<com.ksjd.testem.live.DraftLeg>): TimetableConnection? {
+        val segments = legs.map { it.segment ?: return null }.takeIf { it.isNotEmpty() } ?: return null
+        val first = segments.first()
+        val last = segments.last()
+        val minutes = ((SavedJourney.epochMs(last.serviceDate, last.arrivalTime) - SavedJourney.epochMs(first.serviceDate, first.departureTime)) / 60_000L)
+            .let { if (it < 0) it + 24 * 60 else it }.toInt()
+        return TimetableConnection(
+            id = "draft-" + segments.joinToString("|") { it.routeUrl.ifBlank { it.line + it.departureTime } }.hashCode(),
+            departureTime = first.departureTime,
+            arrivalTime = last.arrivalTime,
+            totalDuration = if (minutes < 60) "$minutes min" else "${minutes / 60} h ${minutes % 60} min",
+            segments = segments
+        )
+    }
+
+    /** Where the built journey starts and ends, as timetable stops found by position, so the planner can search it again. */
+    private suspend fun draftRoute(legs: List<com.ksjd.testem.live.DraftLeg>): SavedRoute? = withContext(Dispatchers.IO) {
+        val first = legs.firstOrNull() ?: return@withContext null
+        val last = legs.last()
+        val start = first.segment?.departureStop ?: return@withContext null
+        val end = last.segment?.arrivalStop ?: return@withContext null
+        fun stop(name: String, at: Pair<Double, Double>?) =
+            at?.let { runCatching { timetableService.intercityStopNear(name, it.first, it.second) }.getOrNull() }
+        val from = stop(start, first.from)
+        val to = stop(end, last.to)
+        SavedRoute(PLANNER_ALL, from?.selectedText ?: readableStopName(start), to?.selectedText ?: readableStopName(end), from, to)
+    }
+
+    /** Star / unstar the user's own journey, like a planner result. */
+    fun toggleSaveDraft(legs: List<com.ksjd.testem.live.DraftLeg>) {
+        val connection = draftConnection(legs) ?: return
+        if (isJourneySaved(connection)) return toggleSaveJourney(connection)
+        viewModelScope.launch { toggleSaveJourney(connection, draftRoute(legs) ?: return@launch) }
+    }
+
+    /** A regular ride from the user's own journey, prefilled for the editor. */
+    fun rideFromDraft(legs: List<com.ksjd.testem.live.DraftLeg>, onReady: (RecurringRide) -> Unit) {
+        val connection = draftConnection(legs) ?: return
+        viewModelScope.launch { draftRoute(legs)?.let { route -> rideFrom(connection, route)?.let(onReady) } }
     }
 
     fun saveRide(ride: RecurringRide) {

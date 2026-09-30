@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.EventRepeat
 import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Search
@@ -646,6 +647,7 @@ private val IntrinsicRowHeight = 52.dp
 @Composable
 private fun FollowControls(trip: TripSheetState) {
     val context = LocalContext.current
+    val liveViewModel: LiveViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val tracked by TripTracking.active.collectAsState()
     val following = tracked?.ref == trip.ref
     var denied by remember { mutableStateOf(false) }
@@ -691,7 +693,7 @@ private fun FollowControls(trip: TripSheetState) {
         }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(
-            onClick = { TripTracking.addToDraft(TrackedTrip(trip.ref, trip.boardingPlatformIds, trip.alightOrder)) },
+            onClick = { liveViewModel.addToDraft(trip) },
             enabled = trip.detail?.stops?.isNotEmpty() == true,
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
@@ -726,20 +728,39 @@ internal fun rememberWithNotifications(): (() -> Unit) -> Unit {
 @Composable
 internal fun JourneyDraftBar(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val app: com.ksjd.testem.AppViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val draft by TripTracking.draft.collectAsState()
-    if (draft.isEmpty()) return
+    val timetable by app.timetableState.collectAsState()
+    var editing by remember { mutableStateOf<com.ksjd.testem.RecurringRide?>(null) }
     val withNotifications = rememberWithNotifications()
+    editing?.let { ride ->
+        RideEditorDialog(ride, isNew = true, onSave = { app.saveRide(it); editing = null }, onDelete = { editing = null }, onDismiss = { editing = null })
+    }
+    if (draft.isEmpty()) return
+    val connection = app.draftConnection(draft)
+    val saved = connection != null && timetable.savedJourneys.any { it.sameAs(connection) }
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
         Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                stringResource(R.string.journey_draft, draft.joinToString(" → ") { it.ref.line }),
+                stringResource(R.string.journey_draft, draft.joinToString(" → ") { it.trip.ref.line }),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f)
             )
-            TextButton(onClick = TripTracking::clearDraft) { Text(stringResource(R.string.journey_clear)) }
+            // Like a planner result: star it for the home tab, or make it a regular ride.
+            IconButton(onClick = { app.toggleSaveDraft(draft) }, enabled = connection != null) {
+                Icon(
+                    if (saved) Icons.Outlined.Star else Icons.Outlined.StarOutline,
+                    stringResource(if (saved) R.string.planner_unsave_journey else R.string.planner_save_journey),
+                    tint = if (saved) TransitTheme.colors.amber else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = { app.rideFromDraft(draft) { editing = it } }, enabled = connection != null) {
+                Icon(Icons.Outlined.EventRepeat, stringResource(R.string.rides_repeat))
+            }
+            IconButton(onClick = TripTracking::clearDraft) { Icon(Icons.Outlined.Close, stringResource(R.string.journey_clear)) }
             Button(onClick = {
                 withNotifications {
-                    TripTracking.startJourney(context, draft)
+                    TripTracking.startJourney(context, draft.map { it.trip })
                     TripTracking.clearDraft()
                 }
             }) { Text(stringResource(R.string.journey_start)) }

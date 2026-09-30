@@ -119,7 +119,7 @@ class LiveRepository(context: Context) {
                 delaySeconds = if (realtime) computeDelay(now, real, plan) else null,
                 fetchedAtMs = now
             )
-        }.sortedBy { it.secondsUntil }
+        }.sortedBy { it.secondsUntil }.distinctBy { it.key } // sadzv can list one bus twice; the board keys rows by it
     }
 
     /**
@@ -131,7 +131,7 @@ class LiveRepository(context: Context) {
         val live = runCatching { getDepartures(stop) }
         val other = runCatching { otherCarriers(stop, live.getOrDefault(emptyList())) }
         if (live.isFailure && other.isFailure) throw live.exceptionOrNull()!!
-        return (live.getOrDefault(emptyList()) + other.getOrDefault(emptyList())).sortedBy { it.secondsUntil }
+        return (live.getOrDefault(emptyList()) + other.getOrDefault(emptyList())).sortedBy { it.secondsUntil }.distinctBy { it.key }
     }
 
     /** Timetable station per sadzv stop (null = none nearby), and its board with when it was fetched. */

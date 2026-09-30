@@ -41,9 +41,10 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import sadzv
 import timetable
 
-VERSION = "1.8.0"
+VERSION = "1.10.3"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -776,6 +777,17 @@ def when_param(value):
     return int((moment if moment.tzinfo else moment.replace(tzinfo=LOCAL_ZONE)).timestamp())
 
 
+def merge_live(journeys, live):
+    """Timetable and live (sadzv) connections by departure; the live copy of the same bus wins, it can be followed live."""
+    def same_bus(j, leg):
+        legs = [x for x in j["legs"] if x["type"] == "trip"]
+        a, b = (legs[0]["line"], leg["line"]) if legs else ("", "")
+        return len(legs) == 1 and abs(legs[0]["departure"] - leg["departure"]) <= 60_000 and \
+            (a == b or a.endswith(b) or b.endswith(a))
+    kept = [j for j in journeys if not any(same_bus(j, l["legs"][0]) for l in live)]
+    return sorted(kept + live, key=lambda j: (j["departure"], j["arrival"]))
+
+
 def timetable_query(route, query):
     """(HTTP status, body) for GET timetable/<route>."""
     t = timetable.current
@@ -807,7 +819,18 @@ def timetable_query(route, query):
         origin, target = t.resolve(query.get("from") or ""), t.resolve(query.get("to") or "")
         if origin is None or target is None:
             return 404, {"error": "Stop not found", "from": origin is not None, "to": target is not None}
-        journeys = t.plan(origin, target, when_param(query.get("time")), limit(5, 10), query.get("direct") in ("1", "true"))
+        when, count = when_param(query.get("time")), limit(5, 10)
+        journeys = t.plan(origin, target, when, count, query.get("direct") in ("1", "true"))
+        # Some city stops have no position in the feeds: take sadzv's stop of the same name.
+        a = (t.lat[origin], t.lon[origin]) if t.lat[origin] is not None else sadzv.locate(t.names[origin], t.town_center(origin))
+        b = (t.lat[target], t.lon[target]) if t.lat[target] is not None else sadzv.locate(t.names[target], t.town_center(target))
+        if a and b:
+            # City buses aren't in the open timetables: SAD Zvolen's live data adds its direct buses.
+            name_of = lambda lat, lon: next((s["name"] for s in t.near(lat, lon, 120, 1)), None)  # noqa: E731
+            live = sadzv.journeys(a, b, when, count, name_of)
+            for j in live:  # the bus runs between the two searched stops: show their names
+                j["legs"][0]["from"]["name"], j["legs"][0]["to"]["name"] = t.names[origin], t.names[target]
+            journeys = merge_live(journeys, live)[:count]
         return 200, {"from": t.station_json(origin), "to": t.station_json(target), "connections": journeys}
     return 404, {"error": "Not found"}
 
@@ -1617,7 +1640,7 @@ def main():
         return
     threading.Thread(target=mail_worker, daemon=True).start()
     if ENV("HUB_TIMETABLE", "on") != "off":
-        timetable.start(GTFS_DIR, gtfs_feeds)
+        timetable.start(GTFS_DIR, gtfs_feeds, collect=sadzv.collect)
     host, port = ENV("HUB_HOST", "0.0.0.0"), int(ENV("HUB_PORT", "8080"))
     print(f"[emhub] listening on {host}:{port}, public URL {PUBLIC_URL}", flush=True)
     Server((host, port), Handler).serve_forever()

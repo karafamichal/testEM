@@ -15,8 +15,8 @@ android {
         applicationId = "com.ksjd.testem"
         minSdk = 24
         targetSdk = 36
-        versionCode = 13
-        versionName = "2.7.0"
+        versionCode = 15
+        versionName = "2.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

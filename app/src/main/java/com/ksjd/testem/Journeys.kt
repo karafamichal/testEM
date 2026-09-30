@@ -60,8 +60,12 @@ data class RecurringRide(
     val time: String,
     /** Line numbers of the saved connection, in order: that day's bus is picked by them. */
     val lines: List<String> = emptyList(),
-    /** ISO days of the week (1 = Monday … 7 = Sunday). */
+    /** ISO days of the week (1 = Monday … 7 = Sunday); only in odd weeks when [evenDays] is set. */
     val days: Set<Int> = emptySet(),
+    /** Days in even weeks (ISO week numbers) when odd and even weeks differ; null = the same every week. */
+    val evenDays: Set<Int>? = null,
+    /** Dates it doesn't run (ISO), e.g. holidays: they win over everything else. */
+    val skipDates: List<String>? = null,
     /** Extra single dates (ISO), on top of [days]. */
     val dates: List<String> = emptyList(),
     /** Only between these dates (ISO, inclusive); null = no limit. Single [dates] ignore these. */
@@ -74,8 +78,10 @@ data class RecurringRide(
     val label: String get() = "${readableStopName(route.fromText)} → ${readableStopName(route.toText)}"
 
     fun runsOn(day: LocalDate): Boolean {
+        if (day.toString() in skipDates.orEmpty()) return false
         if (day.toString() in dates) return true
-        if (day.dayOfWeek.value !in days) return false
+        val weekDays = if (evenDays != null && !isOddWeek(day)) evenDays else days
+        if (day.dayOfWeek.value !in weekDays) return false
         val start = startDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
         val end = endDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
         return (start == null || !day.isBefore(start)) && (end == null || !day.isAfter(end))
@@ -94,9 +100,15 @@ data class RecurringRide(
             .firstOrNull { it.minusMinutes(leadMinutes.toLong()).isAfter(local) }
     }
 
+    /** Some day of the week is chosen, or a date. */
+    val hasDays: Boolean get() = days.isNotEmpty() || !evenDays.isNullOrEmpty() || dates.isNotEmpty()
+
     companion object {
         val WORKDAYS = setOf(1, 2, 3, 4, 5)
         val EVERY_DAY = (1..7).toSet()
+
+        /** ISO week numbers, as in school timetables. ponytail: a 53-week year gives two odd weeks in a row. */
+        fun isOddWeek(day: LocalDate): Boolean = day.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR) % 2 == 1
     }
 }
 

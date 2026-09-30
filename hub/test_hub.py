@@ -373,6 +373,28 @@ assert [(d["line"], hm(d["at"])) for d in board[:3]] == [("101", "30 06:20"), ("
 trip = tt.trip(board[1]["tripId"])
 assert [s["name"] for s in trip["stops"]] == ["Town, AS", "City, Station"] and hm(trip["stops"][1]["arrival"]) == "30 07:10"
 assert tt.trip("b:nope:20260930") is None
+# city buses read from sadzv: its stops join ours by position and name, the day read stands in for later days of its kind
+city_day = {"date": "2026-09-29", "platforms": {  # a Tuesday
+    "501": ["Námestie X", 48.7300, 19.1400, "1", 900], "502": ["Park", 48.71005, 19.12005, "2", 901]},
+    "trips": [{"lineId": 77, "line": "9", "route": "9001", "trip": 5, "headsign": "Zvolen, Park", "stops": [[501, 25200], [502, 25800]]}]}
+tc = timetable.Timetable({"a": os.path.join(folder, "a.zip"), "b": os.path.join(folder, "b.zip")}, today=datetime.date(2026, 9, 29), city=[city_day])
+assert tc.feeds[timetable.CITY_FEED] == 1 and tc.search("town namestie x")[0]["name"] == "Town, Námestie X", "a new stop gets its town"
+assert tc.resolve("town park") == tt.resolve("town park"), "sadzv's Park is our Town, Park (same place)"
+wed = tc.plan(tc.resolve("town namestie x"), tc.resolve("town park"), at("06:50"), 1)[0]["legs"][0]
+assert (wed["line"], hm(wed["departure"]), wed["live"]["lineId"], wed["from"]["platformId"], wed["to"]["seq"]) == ("9", "30 07:00", 77, 501, 2), wed
+assert (wed["live"]["fromIndex"], wed["live"]["toIndex"]) == (0, 1) and tc.trip(wed["tripId"])["stops"][1]["name"] == "Town, Park",     "on another day the apps open the timetable trip"
+sat = int(datetime.datetime(2026, 10, 3, 6, 50, tzinfo=timetable.ZONE).timestamp())
+assert tc.plan(tc.resolve("town namestie x"), tc.resolve("town park"), sat, 1) == [], "a workday's buses don't run on Saturday"
+x = tc.resolve("town namestie x")
+assert [(d["line"], hm(d["at"])) for d in tc.departures([x], at("06:00"), 5)][0] == ("9", "30 07:00")
+assert tc.departures([x], at("06:00"), 5, {"sad-zvolen-as"}) == [], "the apps show SAD Zvolen live instead"
+# EM-0014: a city bus that catches the same regional bus further on must not replace that direct bus
+gtfs(os.path.join(folder, "c.zip"), [("X", "Zvolen, Zlatý Potok konečná", 48.58, 19.14), ("M", "Zvolen, Kozáčeka", 48.575, 19.125),
+                                     ("Y", "Banská Bystrica, Tajovského školy", 48.74, 19.12)],
+     {"r101": ("60101", [("X", "06:40"), ("M", "06:53"), ("Y", "07:33")]), "c8": ("8", [("X", "06:45"), ("M", "06:50")])})
+tr = timetable.Timetable({"c": os.path.join(folder, "c.zip")}, today=datetime.date(2026, 9, 29))
+first = tr.plan(tr.resolve("zvolen zlaty potok konecna"), tr.resolve("bb tajovskeho skoly"), at("06:39"), 5)[0]
+assert [(leg["line"], hm(leg["departure"])) for leg in first["legs"]] == [("60101", "30 06:40")], first
 timetable.current = tt
 def app_get(path, key="dev-key"):
     req = urllib.request.Request(base + "/api/v1/timetable/" + path, headers={"X-App-Key": key})
@@ -391,6 +413,35 @@ st = json.loads(call("/admin/api/timetable/status", cookie=cookie)[2])
 assert st["ready"] and st["trips"] == 3 and "gtfs_feeds" not in st, st
 assert call("/admin/api/timetable/feeds", {"feeds": "a,b; rm -rf"}, cookie)[0] == 400
 assert json.loads(call("/admin/api/timetable/stops?q=city", cookie=cookie)[2])["stops"][0]["name"] == "City, Station"
+
+# ---- city buses from sadzv live data: direct buses between stops the timetable doesn't serve
+import sadzv  # noqa: E402
+import time as _time  # noqa: E402
+base = int(_time.time()) + 600
+wall = lambda epoch: int(datetime.datetime.fromtimestamp(epoch, timetable.ZONE).replace(tzinfo=datetime.timezone.utc).timestamp())  # noqa: E731
+fake = {
+    "getAllPlatforms": [[1, "Námestie SNP", 4870000, 1910000, "1", 10], [2, "Lipovec, Potraviny", 4880000, 1930000, "1", 20],
+                        [3, "Somewhere", 4890000, 1940000, "1", 30]],
+    "getDeparturesOnPlatformWeb": {"departures": [
+        {"lineNumberText": "9", "lineId": 91, "destinationName": "Sekier", "routeNumber": "9004", "tripNumber": 67, "real": 600},
+        {"lineNumberText": "4", "lineId": 94, "destinationName": "Elsewhere", "routeNumber": "4001", "tripNumber": 5, "real": 900}]},
+}
+trips = {91: [(1, 1, base), (3, 2, base + 300), (2, 3, base + 480)], 94: [(1, 1, base + 300), (3, 2, base + 600)]}
+def fake_call(path, body=None):
+    if path == "getPlatformsDataWithHistory":
+        return {"platforms": [{"platformId": p, "stopOrder": o, "stopName": f"S{p}", "departureTime": wall(at)} for p, o, at in trips[body["lineId"]]]}
+    return fake[path]
+sadzv._call, sadzv._cache = fake_call, {}
+found = sadzv.journeys((48.70, 19.10), (48.80, 19.30), base - 60, 5, name_of=lambda lat, lon: "Zvolen, Nám.SNP" if lat < 48.75 else None)
+assert len(found) == 1, found  # line 4 never reaches Lipovec
+leg = found[0]["legs"][0]
+assert (leg["line"], leg["from"]["name"], leg["to"]["name"], leg["to"]["seq"]) == ("9", "Zvolen, Nám.SNP", "Lipovec, Potraviny", 3), leg
+assert leg["departure"] == base * 1000 and leg["arrival"] == (base + 480) * 1000 and leg["live"]["lineId"] == 91
+assert sadzv.journeys((48.0, 17.0), (48.80, 19.30), base, 5) == [], "no sadzv stop at the start"
+assert sadzv.locate("Zvolen, Nám.SNP", (48.69, 19.09)) == (48.70, 19.10), "a stop without a position is found by name in its town"
+assert sadzv.locate("Zvolen, Nám.SNP", (47.0, 17.0)) is None, "not in another town"
+timetable_leg = {"legs": [{"type": "trip", "line": "60109", "departure": base * 1000}], "departure": base * 1000, "arrival": 0}
+assert hub.merge_live([timetable_leg], found) == found, "the live copy of the same bus replaces the timetable one"
 
 server.shutdown()
 print("ok")

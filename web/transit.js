@@ -185,6 +185,13 @@ const minutesOf = (ms) => { const [h, m] = clockOf(ms).split(':').map(Number); r
 
 /** A trip link: "hub:trip?id=<feed:trip:YYYYMMDD>&from=<stop index>&to=<stop index>", like the Android app's. */
 export const tripUrl = (id, from, to) => `hub:trip?id=${encodeURIComponent(id)}${from != null ? `&from=${from}` : ''}${to != null ? `&to=${to}` : ''}`;
+/** A live SAD Zvolen bus with where the user gets on and off (see plannerLeg in logic.js). */
+const liveUrl = (l) => `sadzv:trip?${new URLSearchParams({
+  line: l.live.line, lineId: l.live.lineId, route: l.live.routeNumber, trip: l.live.tripNumber, board: l.from.platformId,
+  alight: l.to.seq, stop: l.live.stopId, planned: minutesOf(l.departure) * 60,
+  // sadzv only knows today's run: on another day the bus opens as this timetable trip.
+  ...(l.live.fromIndex != null ? { tt: tripUrl(l.tripId, l.live.fromIndex, l.live.toIndex) } : {}),
+})}`;
 export function parseTripUrl(url) {
   if (!String(url || '').startsWith('hub:trip?')) return null;
   const q = new URLSearchParams(url.slice('hub:trip?'.length));
@@ -373,7 +380,8 @@ function connection(c) {
     departureTime: clockOf(l.departure), departureStop: l.from.name,
     arrivalTime: clockOf(l.arrival), arrivalStop: l.to.name,
     departurePlatform: l.from.platform || '', arrivalPlatform: l.to.platform || '',
-    routeUrl: tripUrl(l.tripId, l.from.seq, l.to.seq), serviceDate: dateOf(l.departure),
+    // A city bus from SAD Zvolen's live data is followed live; others by their timetable trip.
+    routeUrl: l.live ? liveUrl(l) : tripUrl(l.tripId, l.from.seq, l.to.seq), serviceDate: dateOf(l.departure),
   }));
   const minutes = Math.round((c.arrival - c.departure) / 60000);
   return {

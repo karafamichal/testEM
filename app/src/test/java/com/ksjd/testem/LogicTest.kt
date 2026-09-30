@@ -71,6 +71,22 @@ class LogicTest {
         assertNull(ride.copy(enabled = false).nextDeparture(from))
     }
 
+    @Test fun oddAndEvenWeeksCanDiffer_andSkippedDatesWin() {
+        // 2026-10-05 is a Monday of ISO week 41 (odd), 2026-10-12 of week 42 (even), 2026-10-19 of week 43.
+        val ride = RecurringRide("r", route, "07:00", days = setOf(1), evenDays = setOf(2), skipDates = listOf("2026-10-19"))
+        assertTrue(ride.runsOn(LocalDate.of(2026, 10, 5)))
+        assertTrue(!ride.runsOn(LocalDate.of(2026, 10, 6)))
+        assertTrue(!ride.runsOn(LocalDate.of(2026, 10, 12)))
+        assertTrue(ride.runsOn(LocalDate.of(2026, 10, 13)))
+        assertTrue(!ride.runsOn(LocalDate.of(2026, 10, 19)))
+        // After the skipped Monday (odd week 43): Tuesday 27th is week 44 (even), so it runs.
+        assertEquals(LocalDate.of(2026, 10, 27), ride.nextDeparture(ZonedDateTime.of(2026, 10, 20, 8, 0, 0, 0, SK_ZONE))!!.toLocalDate())
+        // Only even weeks: nothing in odd ones.
+        val evenOnly = RecurringRide("e", route, "07:00", days = emptySet(), evenDays = setOf(1))
+        assertEquals(LocalDate.of(2026, 10, 12), evenOnly.nextDeparture(ZonedDateTime.of(2026, 10, 5, 8, 0, 0, 0, SK_ZONE))!!.toLocalDate())
+        assertTrue(evenOnly.hasDays && !RecurringRide("n", route, "07:00", evenDays = emptySet()).hasDays)
+    }
+
     @Test fun picksTheSameBus() {
         fun conn(id: String, time: String, vararg lines: String) = TimetableConnection(id, time, "", "",
             lines.map { TimetableSegment("Bus $it", "", time, "A", time, "B", serviceDate = "2026-10-05") })
