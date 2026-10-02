@@ -1,5 +1,6 @@
 package com.ksjd.testem.hub
 
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.ksjd.testem.BuildConfig
@@ -44,7 +45,9 @@ data class BugReport(
     val device: String,
     val logs: String,
     /** "bug" or "feature" (a suggestion; emhub lists them separately). */
-    val kind: String = "bug"
+    val kind: String = "bug",
+    /** Base64 JPEGs, at most 3 (emhub rejects anything else). */
+    val images: List<String> = emptyList()
 )
 
 /** emhub: timetables (planner, other carriers, stop lists), bug reports and community bus delays. */
@@ -52,6 +55,7 @@ object HubClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS) // a report with photos on slow mobile data
         .build()
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
@@ -71,6 +75,7 @@ object HubClient {
             addProperty("device", report.device)
             addProperty("logs", report.logs)
             addProperty("consent", true)
+            add("images", JsonArray().apply { report.images.forEach(::add) })
         }
         post("bugs", body).get("code").asString
     }

@@ -1,7 +1,5 @@
 package com.ksjd.testem.ui.screens
 
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import android.content.Intent
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -87,6 +85,10 @@ import com.ksjd.testem.TimetableState
 import com.ksjd.testem.ui.components.LinePlate
 import com.ksjd.testem.ui.components.ListGroup
 import com.ksjd.testem.ui.components.ListRow
+import com.ksjd.testem.ui.components.DatePickDialog
+import com.ksjd.testem.ui.components.Haptics
+import com.ksjd.testem.ui.components.TimePickDialog
+import com.ksjd.testem.ui.components.rememberHaptic
 import com.ksjd.testem.ui.components.GroupDivider
 import com.ksjd.testem.ui.components.Notice
 import com.ksjd.testem.ui.components.NoticeTone
@@ -94,7 +96,6 @@ import com.ksjd.testem.ui.components.ScreenHeader
 import com.ksjd.testem.ui.components.SectionLabel
 import com.ksjd.testem.ui.theme.TimeStyle
 import kotlinx.coroutines.flow.distinctUntilChanged
-import java.util.Calendar
 
 @Composable
 fun PlannerScreen(
@@ -184,6 +185,8 @@ fun PlannerScreen(
 @Composable
 private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
     val context = LocalContext.current
+    val haptic = rememberHaptic()
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val canSearch = !state.isLoading && state.fromInput.isNotBlank() && state.toInput.isNotBlank()
     val isSaved = state.savedRoutes.any {
         it.fromText.equals(state.fromInput.trim(), true) && it.toText.equals(state.toInput.trim(), true)
@@ -215,13 +218,34 @@ private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
                         onPick = viewModel::selectTimetableToSuggestion
                     )
                 }
-                IconButton(onClick = viewModel::swapTimetableEnds) {
+                IconButton(onClick = { haptic(Haptics.TAP); viewModel.swapTimetableEnds() }) {
                     Icon(Icons.Outlined.SwapVert, stringResource(R.string.planner_swap))
                 }
             }
         }
         Spacer(Modifier.height(12.dp))
 
+        var pickTime by remember { mutableStateOf(false) }
+        var pickDate by remember { mutableStateOf(false) }
+        if (pickTime) {
+            val parts = state.timeInput.split(":").mapNotNull { it.toIntOrNull() }
+            val now = java.time.LocalTime.now(SK_ZONE)
+            TimePickDialog(
+                initial = java.time.LocalTime.of(parts.getOrNull(0) ?: now.hour, parts.getOrNull(1) ?: now.minute),
+                onPick = { pickTime = false; viewModel.setTimetableTime("%02d:%02d".format(it.hour, it.minute)) },
+                onDismiss = { pickTime = false },
+                onNow = { pickTime = false; viewModel.setTimetableTime("") }
+            )
+        }
+        if (pickDate) {
+            val today = LocalDate.now(SK_ZONE)
+            DatePickDialog(
+                initial = runCatching { LocalDate.parse(state.dateInput) }.getOrNull() ?: today,
+                onPick = { pickDate = false; viewModel.setTimetableDate(if (it == today) "" else it.toString()) },
+                onDismiss = { pickDate = false },
+                earliest = today
+            )
+        }
         Row(
             Modifier.horizontalScroll(rememberScrollState()),
             verticalAlignment = Alignment.CenterVertically,
@@ -234,17 +258,7 @@ private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
             )
             FilterChip(
                 selected = state.timeInput.isNotBlank(),
-                onClick = {
-                    val now = Calendar.getInstance()
-                    val parts = state.timeInput.split(":").mapNotNull { it.toIntOrNull() }
-                    TimePickerDialog(
-                        context,
-                        { _, h, m -> viewModel.setTimetableTime("%02d:%02d".format(h, m)) },
-                        parts.getOrNull(0) ?: now.get(Calendar.HOUR_OF_DAY),
-                        parts.getOrNull(1) ?: now.get(Calendar.MINUTE),
-                        true
-                    ).show()
-                },
+                onClick = { haptic(Haptics.TAP); pickTime = true },
                 label = {
                     Text(
                         if (state.timeInput.isBlank()) stringResource(R.string.planner_pick_time)
@@ -254,16 +268,7 @@ private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
             )
             FilterChip(
                 selected = state.dateInput.isNotBlank(),
-                onClick = {
-                    val today = LocalDate.now(SK_ZONE)
-                    val current = runCatching { LocalDate.parse(state.dateInput) }.getOrNull() ?: today
-                    DatePickerDialog(context, { _, y, m, d ->
-                        val picked = LocalDate.of(y, m + 1, d)
-                        viewModel.setTimetableDate(if (picked == today) "" else picked.toString())
-                    }, current.year, current.monthValue - 1, current.dayOfMonth).apply {
-                        datePicker.minDate = System.currentTimeMillis() - 1000
-                    }.show()
-                },
+                onClick = { haptic(Haptics.TAP); pickDate = true },
                 label = {
                     Text(
                         runCatching { LocalDate.parse(state.dateInput) }.getOrNull()
@@ -280,7 +285,7 @@ private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(
-                onClick = viewModel::loadTimetables,
+                onClick = { focusManager.clearFocus(); haptic(Haptics.TAP); viewModel.loadTimetables() },
                 enabled = canSearch,
                 modifier = Modifier
                     .weight(1f)
@@ -408,6 +413,7 @@ private fun ConnectionCard(
     onOpenTrip: (TimetableSegment, String) -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = rememberHaptic()
     val shareTitle = stringResource(R.string.planner_share)
     val shareText = shareText(connection)
     Surface(
@@ -495,7 +501,7 @@ private fun ConnectionCard(
             if (legs.size > 1) {
                 val withNotifications = rememberWithNotifications()
                 Button(
-                    onClick = { withNotifications { TripTracking.startJourney(context, legs) } },
+                    onClick = { withNotifications { haptic(Haptics.CONFIRM); TripTracking.startJourney(context, legs) } },
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().padding(end = 12.dp, top = 8.dp)
                 ) { Text(stringResource(R.string.journey_follow)) }

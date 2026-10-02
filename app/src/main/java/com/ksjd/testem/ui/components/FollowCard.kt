@@ -1,0 +1,217 @@
+package com.ksjd.testem.ui.components
+
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DirectionsBus
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.ksjd.testem.R
+import com.ksjd.testem.live.FollowView
+import com.ksjd.testem.live.TrackedTrip
+import com.ksjd.testem.live.TripTracking
+import com.ksjd.testem.ui.Format
+import kotlin.math.ceil
+
+/**
+ * The followed bus on the home screen, like its live notification: countdown, delay, and the bus
+ * gliding along the line between your stops. Tap: its stops; ×: stop following.
+ */
+@Composable
+fun FollowCard(trip: TrackedTrip, view: FollowView?, now: Long, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val haptic = rememberHaptic()
+    val scheme = MaterialTheme.colorScheme
+    val on = scheme.onPrimary
+    val p = view?.progress
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = Color.Transparent,
+        modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).clickable { haptic(Haptics.TAP); TripTracking.requestShow() }
+    ) {
+        Column(
+            Modifier
+                .background(Brush.linearGradient(listOf(scheme.primary, lerp(scheme.primary, scheme.tertiary, 0.55f))))
+                .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 18.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LiveBadge(view?.live == true, on)
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = { haptic(Haptics.CONFIRM); TripTracking.stop(context) }) {
+                    Icon(Icons.Outlined.Close, stringResource(R.string.track_stop), tint = on)
+                }
+            }
+            Column(Modifier.padding(end = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.clip(RoundedCornerShape(8.dp)).background(on).padding(horizontal = 10.dp, vertical = 3.dp)) {
+                        Text(trip.ref.line, color = scheme.primary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text("→ " + (view?.detail?.destination ?: trip.ref.destination), color = on, style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(14.dp))
+                if (p == null) {
+                    Text(stringResource(R.string.track_loading), color = on.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyLarge)
+                } else {
+                    val target = if (p.onBoard) p.nextExpectedMs else p.boardingExpectedMs
+                    val minutes = ceil((target - now) / 60_000.0).toInt()
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            when {
+                                minutes <= 0 -> stringResource(R.string.countdown_now)
+                                minutes > 90 -> Format.clock(target)
+                                else -> stringResource(R.string.countdown_minutes, minutes)
+                            },
+                            color = on, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            if (p.onBoard) stringResource(R.string.follow_until_next, p.nextStopName ?: p.lastStopName)
+                            else stringResource(R.string.follow_until_departure, p.boardingStopName),
+                            color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    DelayPill(view.detail.delaySeconds, on)
+                    Spacer(Modifier.height(16.dp))
+                    RouteTrack(view, on)
+                    Spacer(Modifier.height(6.dp))
+                    Row {
+                        Text(p.boardingStopName, color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Spacer(Modifier.width(12.dp))
+                        Text(p.alightStopName ?: p.lastStopName, color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    view.catchLine?.let {
+                        Spacer(Modifier.height(10.dp))
+                        Text(it, color = on, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A pulsing dot and "Live", or a still dot and "Timetable". */
+@Composable
+private fun LiveBadge(live: Boolean, on: Color) {
+    val pulse = rememberInfiniteTransition(label = "live")
+    val scale by pulse.animateFloat(1f, if (live) 2.2f else 1f, infiniteRepeatable(tween(1100), RepeatMode.Restart), label = "scale")
+    val alpha by pulse.animateFloat(0.6f, if (live) 0f else 0.6f, infiniteRepeatable(tween(1100), RepeatMode.Restart), label = "alpha")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(18.dp)) {
+            Box(Modifier.size(8.dp).scale(scale).clip(CircleShape).background(on.copy(alpha = alpha)))
+            Box(Modifier.size(8.dp).clip(CircleShape).background(on))
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(
+            stringResource(if (live) R.string.follow_live else R.string.follow_timetable).uppercase(),
+            color = on, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun DelayPill(delaySeconds: Int?, on: Color) {
+    val minutes = Math.round((delaySeconds ?: return) / 60.0).toInt()
+    val text = when {
+        minutes >= 1 -> stringResource(R.string.delay_late, minutes)
+        minutes <= -1 -> stringResource(R.string.delay_early, -minutes)
+        else -> stringResource(R.string.delay_on_time)
+    }
+    Box(Modifier.clip(RoundedCornerShape(50)).background(on.copy(alpha = if (minutes >= 3) 0.32f else 0.18f)).padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Text(text, color = on, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+/**
+ * Your part of the line, from your stop to where you get off: a dot per stop and the bus moving smoothly
+ * between updates. Before it reaches your stop it waits, faded, at the start, with how many stops away it is.
+ */
+@Composable
+private fun RouteTrack(view: FollowView, on: Color) {
+    val p = view.progress
+    val last = (view.detail.stops.size - 1).coerceAtLeast(1)
+    val start = (p.boardingIndex ?: 0).coerceIn(0, last - 1)
+    val end = (p.alightIndex ?: last).coerceIn(start + 1, last)
+    val hops = end - start
+    val target = (p.position - start).coerceIn(0f, hops.toFloat())
+    val position by animateFloatAsState(target, tween(1400, easing = FastOutSlowInEasing), label = "bus")
+    val away = kotlin.math.ceil(start - p.position).toInt()
+    if (away > 0) {
+        Text(androidx.compose.ui.res.pluralStringResource(R.plurals.follow_stops_away, away, away),
+            color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.labelMedium)
+        Spacer(Modifier.height(6.dp))
+    }
+    val halo = rememberInfiniteTransition(label = "halo")
+    val ring by halo.animateFloat(1f, if (view.live) 1.6f else 1f, infiniteRepeatable(tween(1400), RepeatMode.Restart), label = "ring")
+    val ringAlpha by halo.animateFloat(if (view.live) 0.45f else 0f, 0f, infiniteRepeatable(tween(1400), RepeatMode.Restart), label = "ringAlpha")
+    BoxWithConstraints(Modifier.fillMaxWidth().height(34.dp), contentAlignment = Alignment.CenterStart) {
+        val marker = 30.dp
+        val trackWidth = maxWidth - marker
+        Canvas(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = marker / 2)) {
+            val y = size.height / 2
+            val x = { i: Float -> i / hops * size.width }
+            drawLine(on.copy(alpha = 0.3f), Offset(0f, y), Offset(size.width, y), 5.dp.toPx(), StrokeCap.Round)
+            drawLine(on.copy(alpha = 0.85f), Offset(0f, y), Offset(x(position), y), 5.dp.toPx(), StrokeCap.Round)  // ridden
+            if (hops <= 40) for (i in 0..hops) drawCircle(on.copy(alpha = 0.6f), 2.dp.toPx(), Offset(x(i.toFloat()), y))
+            listOf(0f, hops.toFloat()).forEach {
+                drawCircle(on, 6.dp.toPx(), Offset(x(it), y))
+                drawCircle(Color.Black.copy(alpha = 0.15f), 3.dp.toPx(), Offset(x(it), y))
+            }
+        }
+        Box(Modifier.offset(x = trackWidth * (position / hops)).size(marker).then(if (away > 0) Modifier.alpha(0.6f) else Modifier),
+            contentAlignment = Alignment.Center) {
+            Box(Modifier.size(marker).scale(ring).clip(CircleShape).background(on.copy(alpha = ringAlpha)))
+            Box(Modifier.size(marker).clip(CircleShape).background(on), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.DirectionsBus, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}

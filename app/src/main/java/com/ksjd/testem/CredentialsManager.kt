@@ -228,6 +228,10 @@ class CredentialsManager(context: Context) {
     fun getCommunityEnabled(): Boolean = getCommunityMode() != COMMUNITY_OFF
 
     /** Use the phone's location (on the phone only) to say whether the user will catch the bus. */
+    /** Short vibrations on taps and actions (Haptics); on unless turned off. */
+    fun getHapticsEnabled(): Boolean = prefs.getBoolean("haptics_enabled", true)
+    fun saveHapticsEnabled(enabled: Boolean) = prefs.edit().putBoolean("haptics_enabled", enabled).apply()
+
     /** Opt-in: after an update, show what changed once (see WhatsNewDialog). */
     fun getWhatsNewEnabled(): Boolean = prefs.getBoolean("whats_new_enabled", false)
     fun saveWhatsNewEnabled(enabled: Boolean) = prefs.edit().putBoolean("whats_new_enabled", enabled).apply()

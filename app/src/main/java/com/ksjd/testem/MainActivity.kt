@@ -66,9 +66,16 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Apply the saved language before any UI is inflated.
         val languageCode = CredentialsManager(this).getLanguageCode()
-        if (AppCompatDelegate.getApplicationLocales().toLanguageTags() != languageCode) {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            // AppCompat ignores this before an activity exists (fresh install): English UI, "Slovenčina" in Settings.
+            val locales = getSystemService(android.app.LocaleManager::class.java)
+            if (locales.applicationLocales.toLanguageTags() != languageCode) {
+                locales.applicationLocales = android.os.LocaleList.forLanguageTags(languageCode)
+            }
+        } else if (AppCompatDelegate.getApplicationLocales().toLanguageTags() != languageCode) {
             AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(languageCode))
         }
+        com.ksjd.testem.ui.components.Haptics.enabled = CredentialsManager(this).getHapticsEnabled()
         com.ksjd.testem.hub.AppLogs.installCrashRecorder(applicationContext)
         // Cheap, and catches a changed alarm permission or a missed reboot.
         com.ksjd.testem.rides.RideScheduler.reschedule(applicationContext)
@@ -187,6 +194,7 @@ private fun MainScaffold(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
+            val view = androidx.compose.ui.platform.LocalView.current
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
                 tabs.forEach { tab ->
                     val icon = when (tab) {
@@ -199,7 +207,7 @@ private fun MainScaffold(
                     val label = if (tab == AppTab.Account && !appState.hasAccount) R.string.settings_title else tab.labelRes
                     NavigationBarItem(
                         selected = selected == tab,
-                        onClick = { selected = tab },
+                        onClick = { if (selected != tab) com.ksjd.testem.ui.components.Haptics.perform(view); selected = tab },
                         icon = { Icon(icon, contentDescription = null) },
                         label = { Text(stringResource(label), maxLines = 1) },
                         colors = NavigationBarItemDefaults.colors(

@@ -1,8 +1,15 @@
 package com.ksjd.testem.ui.screens
 
 import android.Manifest
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.net.Uri
 import android.os.Build
+import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,9 +31,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -63,6 +72,7 @@ import com.ksjd.testem.hub.HubClient
 import com.ksjd.testem.live.Locations
 import com.ksjd.testem.live.TripTracking
 import com.ksjd.testem.ui.components.GroupDivider
+import com.ksjd.testem.ui.components.Haptics
 import com.ksjd.testem.ui.components.ListGroup
 import com.ksjd.testem.ui.components.ListRow
 import com.ksjd.testem.ui.components.Notice
@@ -71,6 +81,8 @@ import com.ksjd.testem.ui.components.SectionLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.IOException
 
 /** Location permission for the catch estimate: precise if the user allows it. */
 @Composable
@@ -88,18 +100,35 @@ fun PrivacyDialog(onDone: () -> Unit) {
     val prefs = remember { CredentialsManager(context) }
     var mode by remember { mutableStateOf(prefs.getCommunityMode()) }
     var catch by remember { mutableStateOf(false) }
+    var disclosure by remember { mutableStateOf(false) }
+    val background = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        TripTracking.refresh(context)
+        onDone()
+    }
+    // Automatic works with the app closed only with "Allow all the time": ask right away, not later in Settings.
+    val askBackground = {
+        if (mode == COMMUNITY_AUTO && Locations.hasPrecise(context) && !Locations.hasBackground(context) &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) disclosure = true else onDone()
+    }
     val location = rememberLocationRequest { granted ->
         if (!Locations.hasPrecise(context)) {
             if (!granted) prefs.saveCatchEnabled(false)
             if (prefs.getCommunityMode() == COMMUNITY_AUTO) prefs.saveCommunityMode(COMMUNITY_BUTTONS)
         }
-        onDone()
+        askBackground()
     }
     val finish = {
         prefs.saveCommunityMode(mode)
         prefs.saveCatchEnabled(catch)
         prefs.markPrivacyAsked()
-        if ((catch || mode == COMMUNITY_AUTO) && !Locations.hasPrecise(context)) location.launch(LOCATION_PERMISSIONS) else onDone()
+        if ((catch || mode == COMMUNITY_AUTO) && !Locations.hasPrecise(context)) location.launch(LOCATION_PERMISSIONS) else askBackground()
+    }
+    if (disclosure) {
+        BackgroundDisclosure(
+            onContinue = { disclosure = false; background.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) },
+            onNotNow = { disclosure = false; onDone() }
+        )
+        return
     }
     AlertDialog(
         onDismissRequest = {},
@@ -140,11 +169,13 @@ fun CommunitySettings() {
     var timetable by remember { mutableStateOf(prefs.getCatchTimetableAlerts()) }
     var hasLocation by remember { mutableStateOf(Locations.hasPrecise(context)) }
     var pendingAuto by remember { mutableStateOf(false) }
+    var disclosure by remember { mutableStateOf(false) }
     val location = rememberLocationRequest { granted ->
         hasLocation = Locations.hasPrecise(context)
         if (pendingAuto) {
             pendingAuto = false
             if (hasLocation) { mode = COMMUNITY_AUTO; prefs.saveCommunityMode(COMMUNITY_AUTO) }
+            if (hasLocation && !Locations.hasBackground(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) disclosure = true
         } else {
             catch = granted
             prefs.saveCatchEnabled(granted)
@@ -152,7 +183,6 @@ fun CommunitySettings() {
         TripTracking.refresh(context)
     }
     var hasBackground by remember { mutableStateOf(Locations.hasBackground(context)) }
-    var disclosure by remember { mutableStateOf(false) }
     // Android 11+ opens the app's location settings page for this; the user picks "Allow all the time".
     val background = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         hasBackground = Locations.hasBackground(context)
@@ -160,7 +190,10 @@ fun CommunitySettings() {
     }
     val setMode: (String) -> Unit = { m ->
         if (m == COMMUNITY_AUTO && !Locations.hasPrecise(context)) { pendingAuto = true; location.launch(LOCATION_PERMISSIONS) }
-        else { mode = m; prefs.saveCommunityMode(m); TripTracking.refresh(context) }
+        else {
+            mode = m; prefs.saveCommunityMode(m); TripTracking.refresh(context)
+            if (m == COMMUNITY_AUTO && !hasBackground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) disclosure = true
+        }
     }
 
     Text(
@@ -195,16 +228,9 @@ fun CommunitySettings() {
     }
     // Google Play: a prominent disclosure must come before the "all the time" permission request.
     if (disclosure) {
-        AlertDialog(
-            onDismissRequest = { disclosure = false },
-            title = { Text(stringResource(R.string.location_background_title)) },
-            text = { Text(stringResource(R.string.location_background_disclosure)) },
-            confirmButton = {
-                Button(onClick = { disclosure = false; background.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }) {
-                    Text(stringResource(R.string.location_background_continue))
-                }
-            },
-            dismissButton = { TextButton(onClick = { disclosure = false }) { Text(stringResource(R.string.location_background_not_now)) } }
+        BackgroundDisclosure(
+            onContinue = { disclosure = false; background.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) },
+            onNotNow = { disclosure = false }
         )
     }
     var predict by remember { mutableStateOf(prefs.getPredictShift()) }
@@ -244,6 +270,18 @@ fun CommunitySettings() {
             onAction = { location.launch(LOCATION_PERMISSIONS) }
         )
     }
+}
+
+/** Google Play: this prominent disclosure must come right before the "Allow all the time" request. */
+@Composable
+private fun BackgroundDisclosure(onContinue: () -> Unit, onNotNow: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onNotNow,
+        title = { Text(stringResource(R.string.location_background_title)) },
+        text = { Text(stringResource(R.string.location_background_disclosure)) },
+        confirmButton = { Button(onClick = onContinue) { Text(stringResource(R.string.location_background_continue)) } },
+        dismissButton = { TextButton(onClick = onNotNow) { Text(stringResource(R.string.location_background_not_now)) } }
+    )
 }
 
 /** Off / Buttons / Automatic, compact for the first-run dialog. */
@@ -330,10 +368,36 @@ private val CATEGORIES = listOf(
     "other" to R.string.bug_cat_other
 )
 
+/** A picked photo for a report: at most 1600 px on the longer side, re-encoded as JPEG (which drops EXIF, e.g. GPS), base64. */
+private fun encodeReportImage(context: Context, uri: Uri): String {
+    val resolver = context.contentResolver
+    val bitmap = if (Build.VERSION.SDK_INT >= 28) {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(resolver, uri)) { decoder, info, _ ->
+            val scale = minOf(1f, 1600f / maxOf(info.size.width, info.size.height))
+            decoder.setTargetSize(maxOf(1, (info.size.width * scale).toInt()), maxOf(1, (info.size.height * scale).toInt()))
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+    } else {
+        // ponytail: Android 7-8 ignore the photo's EXIF rotation; add androidx.exifinterface if testers there need it.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1600) sample *= 2
+        val decoded = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+            ?: throw IOException("Can't read the image")
+        val scale = minOf(1f, 1600f / maxOf(decoded.width, decoded.height))
+        Bitmap.createScaledBitmap(decoded, maxOf(1, (decoded.width * scale).toInt()), maxOf(1, (decoded.height * scale).toInt()), true)
+    }
+    val out = ByteArrayOutputStream()
+    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
+    return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean = false) {
     val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
     val ticket by viewModel.ticketState.collectAsState()
     val app by viewModel.appState.collectAsState()
     val scope = rememberCoroutineScope()
@@ -353,6 +417,10 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
     var error by remember { mutableStateOf("") }
     var sentCode by rememberSaveable { mutableStateOf("") }
     var logs by remember { mutableStateOf("") }
+    var images by remember { mutableStateOf(listOf<Uri>()) }
+    val pickImages = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(3)) { picked ->
+        images = (images + picked).distinct().take(3)
+    }
     LaunchedEffect(Unit) { logs = withContext(Dispatchers.IO) { AppLogs.collect(context) } }
 
     if (sentCode.isNotEmpty()) {
@@ -396,6 +464,20 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
     }
     if (email.isBlank() && !feature) {
         Notice(stringResource(R.string.bug_no_email), modifier = Modifier.padding(horizontal = 16.dp), tone = NoticeTone.Warning)
+    }
+    Spacer(Modifier.height(8.dp))
+    ListGroup {
+        ListRow(
+            stringResource(R.string.bug_images),
+            subtitle = if (images.isEmpty()) stringResource(R.string.bug_images_hint) else stringResource(R.string.bug_images_count, images.size),
+            onClick = if (images.size < 3) ({ pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) else null
+        )
+    }
+    if (images.isNotEmpty()) FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        images.forEachIndexed { i, uri ->
+            InputChip(selected = false, onClick = { images = images - uri }, label = { Text(stringResource(R.string.bug_image, i + 1)) },
+                trailingIcon = { Icon(Icons.Outlined.Close, stringResource(R.string.bug_image_remove), Modifier.size(18.dp)) })
+        }
     }
     Spacer(Modifier.height(8.dp))
     if (!feature) ListGroup {
@@ -453,12 +535,13 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
             error = ""
             scope.launch {
                 runCatching {
+                    val encoded = withContext(Dispatchers.IO) { images.map { encodeReportImage(context, it) } }
                     HubClient.submitBug(
                         BugReport(category, title.trim(), description.trim(), name.trim(), email.trim(), AppLogs.device(),
-                            if (attachLogs) logs else "", kind = if (feature) "feature" else "bug")
+                            if (attachLogs) logs else "", kind = if (feature) "feature" else "bug", images = encoded)
                     )
-                }.onSuccess { sentCode = it }
-                    .onFailure { error = failed.replace("%s", it.message ?: "?") }
+                }.onSuccess { sentCode = it; Haptics.perform(view, Haptics.CONFIRM) }
+                    .onFailure { error = failed.replace("%s", it.message ?: "?"); Haptics.perform(view, Haptics.REJECT) }
                 sending = false
             }
         },

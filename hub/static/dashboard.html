@@ -148,7 +148,7 @@
 </head>
 <body>
 <aside class="rail">
-  <div class="rail-brand"><strong>emhub</strong><span>testEM operations</span></div>
+  <div class="rail-brand"><strong>emhub</strong><span>Plan&amp;Ride operations</span></div>
   <nav>
     <a href="#bugs" data-nav="bugs">Bugs <span class="count" id="count-new" hidden></span></a>
     <a href="#ideas" data-nav="ideas">Suggestions <span class="count" id="count-ideas" hidden></span></a>
@@ -307,7 +307,10 @@ async function renderBug(id) {
       <button role="tab" aria-selected="true" data-tab="report">Report</button>
       <button role="tab" aria-selected="false" data-tab="logs">Logs (${bug.logs ? bug.logs.split("\n").length : 0} lines)</button>
     </div>
-    <div data-panel="report"><p class="desc">${esc(bug.description)}</p></div>
+    <div data-panel="report"><p class="desc">${esc(bug.description)}</p>
+      ${bug.images?.length ? `<div class="row" style="gap:10px;margin-top:14px">${bug.images.map((i) =>
+        `<a href="/admin/api/bugs/${bug.id}/images/${i.id}" target="_blank" rel="noopener" title="Open full size">
+          <img src="/admin/api/bugs/${bug.id}/images/${i.id}" alt="Image from the reporter" style="max-height:220px;max-width:100%;border:1px solid var(--line);border-radius:4px"></a>`).join("")}</div>` : ""}</div>
     <div data-panel="logs" hidden>
       ${bug.logs ? `<div class="logs-tools"><input class="input" id="log-filter" type="search" placeholder="Filter lines" style="flex:1"><button class="btn quiet" id="log-dl" type="button">Download</button></div><div class="logs" id="logs"></div>` : `<p class="muted">No logs were attached.</p>`}
     </div>
@@ -699,7 +702,7 @@ async function renderSettings(flag) {
             ${field("smtp_user", "Username", cfg.smtp_user, 'autocomplete="off"')}
           </div>
           ${secretField("smtp_pass", "Password", cfg.smtp_pass_set)}
-          ${field("mail_from", "Sender", cfg.mail_from, 'placeholder="testEM &lt;noreply@karafa.network&gt;"')}
+          ${field("mail_from", "Sender", cfg.mail_from, 'placeholder="Plan&amp;Ride &lt;noreply@karafa.network&gt;"')}
           ${field("mail_reply_to", "Replies go to (optional)", cfg.mail_reply_to, 'placeholder="support@karafa.network"')}
           ${field("admin_email", "New bug alerts go to (empty = every admin's email)", cfg.admin_email, 'placeholder="you@example.com"')}
           <div class="row"><button class="btn" type="submit">Save email settings</button><button class="btn quiet" id="test-mail" type="button">Send test email to me</button>

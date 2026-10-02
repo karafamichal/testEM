@@ -336,11 +336,16 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="bug_name">Name</string>
     <string name="bug_email">Email for our reply</string>
     <string name="bug_email_hint">Optional. Leave it empty if you don\'t want a reply.</string>
+    <string name="bug_images">Add screenshots or photos</string>
+    <string name="bug_images_hint">Up to 3, e.g. a screenshot with what you mean marked on it. Location and other photo details are removed.</string>
+    <string name="bug_images_count">%1$d of 3 attached, tap to add more</string>
+    <string name="bug_image">Image %1$d</string>
+    <string name="bug_image_remove">Remove image</string>
     <string name="bug_logs">Attach app logs</string>
     <string name="bug_logs_hint">Recent log lines from this app and the last crash. Passwords and tokens are removed.</string>
     <string name="bug_logs_show">Show what will be sent</string>
     <string name="bug_logs_hide">Hide logs</string>
-    <string name="bug_consent">I agree that this report, the name and email above, device model, app version and (if attached) the logs are sent to the Plan&amp;Ride developer to fix the bug and reply to me.</string>
+    <string name="bug_consent">I agree that this report, the name and email above, device model, app version and (if attached) the logs and images are sent to the Plan&amp;Ride developer to fix the bug and reply to me.</string>
     <string name="bug_send">Send report</string>
     <string name="bug_sending">Sending…</string>
     <string name="bug_sent_title">Report %1$s sent</string>
@@ -392,6 +397,22 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="journey_change_title">Change to bus %1$s</string>
     <string name="journey_change_body">Get off at %1$s. Now following your next bus.</string>
     <string name="journey_alight_change">Get off at %1$s and change to bus %2$s</string>
+    <string name="follow_live">Live</string>
+    <string name="follow_timetable">Timetable</string>
+    <string name="follow_until_departure">until it leaves %1$s</string>
+    <string name="follow_until_next">to %1$s</string>
+    <plurals name="follow_stops_away">
+        <item quantity="one">The bus is %1$d stop away</item>
+        <item quantity="other">The bus is %1$d stops away</item>
+    </plurals>
+    <string name="pin_show">Show PIN</string>
+    <string name="pin_hide">Hide PIN</string>
+    <string name="haptics_switch">Haptic feedback</string>
+    <string name="haptics_switch_hint">A short vibration on taps and when something is done, like following a bus</string>
+    <string name="picker_time_title">Time</string>
+    <string name="picker_now">Now</string>
+    <string name="picker_type">Type the time</string>
+    <string name="picker_dial">Clock</string>
     <string name="whats_new_switch">What’s new after updates</string>
     <string name="whats_new_switch_hint">A short summary once after each update, with a link to the full changelog</string>
     <string name="whats_new_title">What’s new in %1$s</string>
@@ -485,10 +506,14 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="feature_hint">An idea for the app? Tell us</string>
     <string name="feature_summary">Your idea in a few words</string>
     <string name="feature_description">What should the app do, and how would it help you?</string>
-    <string name="feature_consent">I agree that this suggestion, the name and email above, device model and app version are sent to the Plan&amp;Ride developer to consider it and reply to me.</string>
+    <string name="feature_consent">I agree that this suggestion, the name and email above, device model, app version and any attached images are sent to the Plan&amp;Ride developer to consider it and reply to me.</string>
     <string name="feature_send">Send suggestion</string>
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• City buses of Zvolen and Banská Bystrica (S.A.D. Zvolen) are in the planner for any day now, with changes to and from regional buses.\n• Your own journey (built bus by bus from the boards) can be starred for the home tab or made a regular ride, like a planner result.\n• Regular rides: different days in odd and even weeks, dates to skip (e.g. holidays), and any bus at that time instead of the same lines.\n• Tap a regular ride on the home tab to change it.</string>
+    <string name="whats_new_body">• Bug reports and suggestions can carry up to 3 screenshots or photos (EM-0016). They are made smaller and their location and other details are removed before sending.\n• New calendar and clock for picking the day and time, with Today, Tomorrow and Now shortcuts.
+• Haptic feedback on taps and actions (can be turned off in Settings).
+• Automatic bus positions ask for “Allow all the time” right away.
+• Fixed: a new install showed the app in English although Slovenčina was selected.
+• Emails from the developer now come from Plan&amp;Ride.</string>
 </resources>

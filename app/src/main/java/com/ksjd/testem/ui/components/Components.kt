@@ -146,10 +146,11 @@ fun ListRow(
     trailing: (@Composable () -> Unit)? = null,
     titleColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
+    val haptic = rememberHaptic()
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.clickable { haptic(Haptics.TAP); onClick() } else Modifier)
             .defaultMinSize(minHeight = 56.dp)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically

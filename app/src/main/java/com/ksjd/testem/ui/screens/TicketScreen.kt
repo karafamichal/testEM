@@ -1,5 +1,7 @@
 package com.ksjd.testem.ui.screens
 
+import com.ksjd.testem.ui.components.Haptics
+import com.ksjd.testem.ui.components.rememberHaptic
 import android.view.WindowManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -152,6 +154,16 @@ fun TicketScreen(
         )
 
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // The followed bus first, sliding in when following starts.
+            val followed by com.ksjd.testem.live.TripTracking.active.collectAsState()
+            val followView by com.ksjd.testem.live.TripTracking.view.collectAsState()
+            androidx.compose.animation.AnimatedVisibility(
+                visible = followed != null,
+                enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(),
+                exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()
+            ) {
+                followed?.let { com.ksjd.testem.ui.components.FollowCard(it, followView?.takeIf { v -> v.trip.ref == it.ref }, now) }
+            }
             if (unlocked && ticket.phase == TicketPhase.SignedOut) {
                 Notice(
                     stringResource(R.string.ticket_signed_out),
@@ -286,6 +298,7 @@ private fun JourneysSection(journeys: List<SavedJourney>, now: Long, viewModel: 
     val upcoming = journeys.filter { it.arrivalMs == 0L || it.arrivalMs > now }.sortedBy { it.departureMs }
     if (upcoming.isEmpty()) return
     val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
     val withNotifications = rememberWithNotifications()
     val tracked by TripTracking.active.collectAsState()
     SectionLabel(stringResource(R.string.home_journeys))
@@ -337,6 +350,7 @@ private fun JourneysSection(journeys: List<SavedJourney>, now: Long, viewModel: 
                         } else if (legs.isNotEmpty()) {
                             FilledTonalButton(onClick = {
                                 withNotifications {
+                                    Haptics.perform(view, Haptics.CONFIRM)
                                     if (legs.size == 1) TripTracking.start(context, legs.first()) else TripTracking.startJourney(context, legs)
                                 }
                             }) { Text(stringResource(R.string.journey_start)) }

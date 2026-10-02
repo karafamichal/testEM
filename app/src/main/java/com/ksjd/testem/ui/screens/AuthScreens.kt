@@ -109,8 +109,23 @@ private fun AuthFrame(
     }
 }
 
+/** The eye on password and PIN fields: show what is typed, or hide it again. */
+@Composable
+internal fun RevealButton(shown: Boolean, pin: Boolean = true, onToggle: () -> Unit) {
+    IconButton(onClick = onToggle) {
+        Icon(
+            if (shown) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+            contentDescription = stringResource(
+                if (pin) (if (shown) R.string.pin_hide else R.string.pin_show)
+                else (if (shown) R.string.password_hide else R.string.password_show)
+            )
+        )
+    }
+}
+
 @Composable
 private fun PinField(value: String, onValueChange: (String) -> Unit, label: String, imeAction: ImeAction, onIme: () -> Unit) {
+    var show by remember { mutableStateOf(false) }
     OutlinedTextField(
         value = value,
         onValueChange = { if (it.length <= 8 && it.all(Char::isDigit)) onValueChange(it) },
@@ -119,7 +134,8 @@ private fun PinField(value: String, onValueChange: (String) -> Unit, label: Stri
         modifier = Modifier.fillMaxWidth(),
         textStyle = MaterialTheme.typography.headlineSmall,
         shape = RoundedCornerShape(12.dp),
-        visualTransformation = PasswordVisualTransformation(),
+        visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = { RevealButton(show) { show = !show } },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = imeAction),
         keyboardActions = KeyboardActions(onNext = { onIme() }, onDone = { onIme() })
     )

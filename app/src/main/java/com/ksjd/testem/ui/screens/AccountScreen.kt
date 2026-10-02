@@ -241,6 +241,19 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
                 trailing = { Switch(whatsNew, setWhatsNew) }
             )
             GroupDivider()
+            var haptics by remember { mutableStateOf(prefs.getHapticsEnabled()) }
+            val setHaptics: (Boolean) -> Unit = { on ->
+                haptics = on
+                prefs.saveHapticsEnabled(on)
+                com.ksjd.testem.ui.components.Haptics.enabled = on
+            }
+            ListRow(
+                stringResource(R.string.haptics_switch),
+                subtitle = stringResource(R.string.haptics_switch_hint),
+                onClick = { setHaptics(!haptics) },
+                trailing = { Switch(haptics, setHaptics) }
+            )
+            GroupDivider()
             // Firebase remembers this itself; the switch only reads and changes it.
             var stats by remember { mutableStateOf(prefs.getAnalyticsEnabled()) }
             val setStats: (Boolean) -> Unit = { on ->
@@ -557,13 +570,15 @@ private fun ChangePinDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
     val mismatch = stringResource(R.string.change_pin_error_mismatch)
     val incorrect = stringResource(R.string.change_pin_error_incorrect)
 
+    var show by remember { mutableStateOf(false) }
     @Composable
     fun field(value: String, label: String, onChange: (String) -> Unit) = OutlinedTextField(
         value = value,
         onValueChange = { if (it.length <= 8 && it.all(Char::isDigit)) onChange(it) },
         label = { Text(label) },
         singleLine = true,
-        visualTransformation = PasswordVisualTransformation(),
+        visualTransformation = if (show) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = { RevealButton(show) { show = !show } },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
         modifier = Modifier.fillMaxWidth()
     )

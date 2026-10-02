@@ -346,11 +346,16 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="bug_name">Meno</string>
     <string name="bug_email">E-mail pre odpoveď</string>
     <string name="bug_email_hint">Nepovinné. Nechajte prázdne, ak odpoveď nechcete.</string>
+    <string name="bug_images">Pridať snímky obrazovky alebo fotky</string>
+    <string name="bug_images_hint">Najviac 3, napr. snímka obrazovky s vyznačeným miestom. Poloha a ďalšie údaje fotky sa odstránia.</string>
+    <string name="bug_images_count">Priložené: %1$d z 3, ťuknutím pridáte ďalšie</string>
+    <string name="bug_image">Obrázok %1$d</string>
+    <string name="bug_image_remove">Odstrániť obrázok</string>
     <string name="bug_logs">Priložiť záznamy aplikácie</string>
     <string name="bug_logs_hint">Posledné riadky záznamu tejto aplikácie a posledný pád. Heslá a tokeny sú odstránené.</string>
     <string name="bug_logs_show">Zobraziť, čo sa odošle</string>
     <string name="bug_logs_hide">Skryť záznamy</string>
-    <string name="bug_consent">Súhlasím, že toto hlásenie, meno a e-mail vyššie, model zariadenia, verzia aplikácie a (ak sú priložené) záznamy sa odošlú vývojárovi Plan&amp;Ride na opravu chyby a odpoveď.</string>
+    <string name="bug_consent">Súhlasím, že toto hlásenie, meno a e-mail vyššie, model zariadenia, verzia aplikácie a (ak sú priložené) záznamy a obrázky sa odošlú vývojárovi Plan&amp;Ride na opravu chyby a odpoveď.</string>
     <string name="bug_send">Odoslať hlásenie</string>
     <string name="bug_sending">Odosiela sa…</string>
     <string name="bug_sent_title">Hlásenie %1$s odoslané</string>
@@ -404,6 +409,24 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="journey_change_title">Prestúpte na autobus %1$s</string>
     <string name="journey_change_body">Vystúpte na zastávke %1$s. Teraz sledujeme váš ďalší autobus.</string>
     <string name="journey_alight_change">Vystúpte na zastávke %1$s a prestúpte na autobus %2$s</string>
+    <string name="follow_live">Naživo</string>
+    <string name="follow_timetable">Podľa poriadku</string>
+    <string name="follow_until_departure">do odchodu zo zastávky %1$s</string>
+    <string name="follow_until_next">do zastávky %1$s</string>
+    <plurals name="follow_stops_away">
+        <item quantity="one">Autobus je %1$d zastávku pred vami</item>
+        <item quantity="few">Autobus je %1$d zastávky pred vami</item>
+        <item quantity="many">Autobus je %1$d zastávok pred vami</item>
+        <item quantity="other">Autobus je %1$d zastávok pred vami</item>
+    </plurals>
+    <string name="pin_show">Zobraziť PIN</string>
+    <string name="pin_hide">Skryť PIN</string>
+    <string name="haptics_switch">Haptická odozva</string>
+    <string name="haptics_switch_hint">Krátke zavibrovanie pri ťuknutí a keď sa niečo podarí, napr. sledovanie autobusu</string>
+    <string name="picker_time_title">Čas</string>
+    <string name="picker_now">Teraz</string>
+    <string name="picker_type">Zadať čas ručne</string>
+    <string name="picker_dial">Ciferník</string>
     <string name="whats_new_switch">Novinky po aktualizácii</string>
     <string name="whats_new_switch_hint">Krátke zhrnutie raz po každej aktualizácii s odkazom na celý zoznam zmien</string>
     <string name="whats_new_title">Čo je nové vo verzii %1$s</string>
@@ -497,9 +520,13 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="feature_hint">Máte nápad pre aplikáciu? Napíšte nám</string>
     <string name="feature_summary">Váš nápad v pár slovách</string>
     <string name="feature_description">Čo by mala aplikácia robiť a ako by vám to pomohlo?</string>
-    <string name="feature_consent">Súhlasím, že tento návrh, meno a e-mail vyššie, model zariadenia a verzia aplikácie sa odošlú vývojárovi Plan&amp;Ride na posúdenie a odpoveď.</string>
+    <string name="feature_consent">Súhlasím, že tento návrh, meno a e-mail vyššie, model zariadenia, verzia aplikácie a priložené obrázky sa odošlú vývojárovi Plan&amp;Ride na posúdenie a odpoveď.</string>
     <string name="feature_send">Odoslať návrh</string>
     <string name="feature_sent_title">Návrh %1$s odoslaný</string>
     <string name="feature_sent_body">Ďakujeme za nápad. Ak ste nechali e-mail, ozveme sa, keď bude novinka.</string>
-    <string name="whats_new_body">• MHD Zvolena a Banskej Bystrice (S.A.D. Zvolen) je vo vyhľadávači na ktorýkoľvek deň, aj s prestupmi na regionálne autobusy.\n• Vlastnú cestu (poskladanú autobus po autobuse z tabúľ) môžete označiť hviezdičkou na domovskú obrazovku alebo z nej spraviť pravidelnú jazdu, ako výsledok vyhľadávania.\n• Pravidelné jazdy: iné dni v nepárnych a párnych týždňoch, dni, keď sa nejazdí (napr. sviatky), a ktorýkoľvek autobus v danom čase namiesto rovnakých liniek.\n• Pravidelnú jazdu na domovskej obrazovke upravíte ťuknutím.</string>
+    <string name="whats_new_body">• K hláseniu chyby alebo návrhu môžete priložiť až 3 snímky obrazovky alebo fotky (EM-0016). Pred odoslaním sa zmenšia a odstráni sa z nich poloha a ďalšie údaje.\n• Nový kalendár a hodiny na výber dňa a času, so skratkami Dnes, Zajtra a Teraz.
+• Haptická odozva pri ťuknutí a akciách (vypnete v Nastaveniach).
+• Automatické polohy autobusov hneď požiadajú o „Povoliť vždy“.
+• Opravené: nová inštalácia ukazovala aplikáciu po anglicky, hoci bola zvolená slovenčina.
+• E-maily od vývojára už prichádzajú od Plan&amp;Ride.</string>
 </resources>

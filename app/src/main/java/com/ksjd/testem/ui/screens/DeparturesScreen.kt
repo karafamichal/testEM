@@ -1,5 +1,7 @@
 package com.ksjd.testem.ui.screens
 
+import com.ksjd.testem.ui.components.Haptics
+import com.ksjd.testem.ui.components.rememberHaptic
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -253,6 +255,7 @@ private fun StopFinder(state: LiveState, vm: LiveViewModel) {
 
 @Composable
 private fun StopRow(stop: LiveStop, favourite: Boolean, distanceMeters: Int?, onOpen: () -> Unit, onToggleFavourite: () -> Unit) {
+    val haptic = rememberHaptic()
     val platforms = pluralStringResource(R.plurals.platform_count, stop.platforms.size, stop.platforms.size)
     val subtitle = if (distanceMeters != null) {
         stringResource(R.string.departures_distance, formatDistance(distanceMeters), platforms)
@@ -264,7 +267,7 @@ private fun StopRow(stop: LiveStop, favourite: Boolean, distanceMeters: Int?, on
         subtitle = subtitle,
         onClick = onOpen,
         trailing = {
-            IconButton(onClick = onToggleFavourite) {
+            IconButton(onClick = { haptic(Haptics.CONFIRM); onToggleFavourite() }) {
                 Icon(
                     if (favourite) Icons.Outlined.Star else Icons.Outlined.StarOutline,
                     contentDescription = stringResource(if (favourite) R.string.favourite_remove else R.string.favourite_add),
@@ -292,6 +295,7 @@ private fun StopBoard(
     onOpenTrip: (LiveDeparture) -> Unit
 ) {
     val colors = TransitTheme.colors
+    val haptic = rememberHaptic()
     // Tick every second so countdowns move between network refreshes.
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
@@ -326,7 +330,7 @@ private fun StopBoard(
                     color = colors.boardDim
                 )
             }
-            IconButton(onClick = onToggleFavourite) {
+            IconButton(onClick = { haptic(Haptics.CONFIRM); onToggleFavourite() }) {
                 Icon(
                     if (isFavourite) Icons.Outlined.Star else Icons.Outlined.StarOutline,
                     contentDescription = stringResource(if (isFavourite) R.string.favourite_remove else R.string.favourite_add),
@@ -651,7 +655,8 @@ private fun FollowControls(trip: TripSheetState) {
     val tracked by TripTracking.active.collectAsState()
     val following = tracked?.ref == trip.ref
     var denied by remember { mutableStateOf(false) }
-    val start = { TripTracking.start(context, TrackedTrip(trip.ref, trip.boardingPlatformIds, trip.alightOrder)) }
+    val haptic = rememberHaptic()
+    val start = { haptic(Haptics.CONFIRM); TripTracking.start(context, TrackedTrip(trip.ref, trip.boardingPlatformIds, trip.alightOrder)) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         denied = !granted
         if (granted) start()
@@ -728,6 +733,7 @@ internal fun rememberWithNotifications(): (() -> Unit) -> Unit {
 @Composable
 internal fun JourneyDraftBar(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
     val app: com.ksjd.testem.AppViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val draft by TripTracking.draft.collectAsState()
     val timetable by app.timetableState.collectAsState()
@@ -760,6 +766,7 @@ internal fun JourneyDraftBar(modifier: Modifier = Modifier) {
             IconButton(onClick = TripTracking::clearDraft) { Icon(Icons.Outlined.Close, stringResource(R.string.journey_clear)) }
             Button(onClick = {
                 withNotifications {
+                    Haptics.perform(view, Haptics.CONFIRM)
                     TripTracking.startJourney(context, draft.map { it.trip })
                     TripTracking.clearDraft()
                 }

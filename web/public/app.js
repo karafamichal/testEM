@@ -797,6 +797,21 @@ function about(body) {
 const site = (page) => `https://par.karafa.net/${lang() === 'en' ? 'en/' : ''}${page}`;
 
 const CATEGORIES = ['crash', 'ticket', 'departures', 'planner', 'tracking', 'account', 'other'];
+
+/** A photo for a bug report: at most 1600 px on the longer side, JPEG, as base64 (a phone photo is ~200 kB then). */
+async function shrinkImage(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((done) => canvas.toBlob(done, 'image/jpeg', 0.8));
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
 /** feature: a suggestion (no category, no logs); emhub lists them apart from bugs. */
 function bugReport(body, feature = false) {
   if (!config.hub) { body.innerHTML = `<div class="notice warn">${t('bug_off')}</div>`; return; }
@@ -811,6 +826,7 @@ function bugReport(body, feature = false) {
     <label class="field">${t('bug_name')}<input name="name" maxlength="120" value="${esc(name)}" autocomplete="name"></label>
     <label class="field">${t('bug_email')}<input name="email" type="email" maxlength="200" value="${esc(email)}" autocomplete="email"><small class="hint">${t('bug_email_hint')}</small></label>
     <div class="notice warn" id="no-email" ${email || feature ? 'hidden' : ''}>${t('bug_no_email')}</div>
+    <label class="field">${t('bug_images')}<input type="file" name="images" accept="image/*" multiple><small class="hint">${t('bug_images_hint')}</small></label>
     ${feature ? '' : `<ul class="list">${switchRow('attach-logs', t('bug_logs'), t('bug_logs_hint'), true)}</ul>
     <details><summary>${t('bug_logs_show')}</summary><pre class="logs">${esc(logs)}</pre></details>`}
     <label class="consent"><input type="checkbox" name="consent" required> <span>${t(feature ? 'feature_consent' : 'bug_consent')}</span></label>
@@ -831,9 +847,10 @@ function bugReport(body, feature = false) {
     send.disabled = true;
     send.textContent = t('bug_sending');
     try {
+      const images = await Promise.all([...form.images.files].slice(0, 3).map(shrinkImage));
       const r = await apiJson('/api/hub/bugs', {
         kind: feature ? 'feature' : 'bug', category: feature ? 'feature' : f.category, title: f.title.trim(), description: f.description.trim(), name: f.name.trim(), email: f.email.trim(),
-        appVersion: VERSION, device: navigator.userAgent, logs: withLogs() ? logs : '', consent: true,
+        appVersion: VERSION, device: navigator.userAgent, logs: withLogs() ? logs : '', consent: true, images,
       });
       closeOverlay('page');
       toast(t(feature ? 'feature_sent' : 'bug_sent', r.code));

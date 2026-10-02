@@ -1,7 +1,5 @@
 package com.ksjd.testem.ui.screens
 
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -44,7 +42,9 @@ import com.ksjd.testem.RecurringRide
 import com.ksjd.testem.SK_ZONE
 import com.ksjd.testem.parseClock
 import com.ksjd.testem.rides.RideScheduler
+import com.ksjd.testem.ui.components.DatePickDialog
 import com.ksjd.testem.ui.components.GroupDivider
+import com.ksjd.testem.ui.components.TimePickDialog
 import com.ksjd.testem.ui.components.ListGroup
 import com.ksjd.testem.ui.components.ListRow
 import com.ksjd.testem.ui.components.Notice
@@ -125,11 +125,6 @@ private fun dayName(day: DayOfWeek): String = day.getDisplayName(TextStyle.SHORT
 private fun shortDate(iso: String): String =
     runCatching { LocalDate.parse(iso) }.getOrNull()?.let { "${it.dayOfMonth}.${it.monthValue}.${it.year}" } ?: iso
 
-/** Shows the date picker and hands back an ISO date. */
-private fun pickDate(context: android.content.Context, initial: String?, onPick: (String) -> Unit) {
-    val start = initial?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.now(SK_ZONE)
-    DatePickerDialog(context, { _, y, m, d -> onPick(LocalDate.of(y, m + 1, d).toString()) }, start.year, start.monthValue - 1, start.dayOfMonth).show()
-}
 
 /**
  * Everything about a regular ride: time, days (different in odd and even weeks if wanted), a
@@ -146,7 +141,26 @@ internal fun RideEditorDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    // The open date picker: its first day and what to do with the picked ISO date.
+    var datePick by remember { mutableStateOf<Pair<String?, (String) -> Unit>?>(null) }
+    fun pickDate(initial: String?, onPick: (String) -> Unit) { datePick = initial to onPick }
+    var timePick by remember { mutableStateOf(false) }
+    datePick?.let { (initial, onPick) ->
+        DatePickDialog(
+            initial = initial?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.now(SK_ZONE),
+            onPick = { datePick = null; onPick(it.toString()) },
+            onDismiss = { datePick = null }
+        )
+    }
     var ride by remember { mutableStateOf(initial) }
+    if (timePick) {
+        val t = parseClock(ride.time)
+        TimePickDialog(
+            initial = java.time.LocalTime.of(t?.hour ?: 7, t?.minute ?: 0),
+            onPick = { timePick = false; ride = ride.copy(time = "%02d:%02d".format(it.hour, it.minute)) },
+            onDismiss = { timePick = false }
+        )
+    }
     var canExact by remember { mutableStateOf(RideScheduler.canScheduleExact(context)) }
     val withNotifications = rememberWithNotifications()
 
@@ -168,10 +182,7 @@ internal fun RideEditorDialog(
                 }
                 // Departure time
                 AssistChip(
-                    onClick = {
-                        val t = parseClock(ride.time)
-                        TimePickerDialog(context, { _, h, m -> ride = ride.copy(time = "%02d:%02d".format(h, m)) }, t?.hour ?: 7, t?.minute ?: 0, true).show()
-                    },
+                    onClick = { timePick = true },
                     label = { Text(stringResource(R.string.rides_departs, ride.time)) }
                 )
                 // Days of the week, the same every week or different in odd and even weeks
@@ -209,10 +220,10 @@ internal fun RideEditorDialog(
                 // Date range
                 Text(stringResource(R.string.rides_range), style = MaterialTheme.typography.titleSmall)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    DateChip(stringResource(R.string.rides_from), ride.startDate, { pickDate(context, ride.startDate) { ride = ride.copy(startDate = it) } }) {
+                    DateChip(stringResource(R.string.rides_from), ride.startDate, { pickDate(ride.startDate) { ride = ride.copy(startDate = it) } }) {
                         ride = ride.copy(startDate = null)
                     }
-                    DateChip(stringResource(R.string.rides_until), ride.endDate, { pickDate(context, ride.endDate ?: ride.startDate) { ride = ride.copy(endDate = it) } }) {
+                    DateChip(stringResource(R.string.rides_until), ride.endDate, { pickDate(ride.endDate ?: ride.startDate) { ride = ride.copy(endDate = it) } }) {
                         ride = ride.copy(endDate = null)
                     }
                 }
@@ -228,7 +239,7 @@ internal fun RideEditorDialog(
                         )
                     }
                     AssistChip(
-                        onClick = { pickDate(context, null) { if (it !in ride.dates) ride = ride.copy(dates = ride.dates + it) } },
+                        onClick = { pickDate(null) { if (it !in ride.dates) ride = ride.copy(dates = ride.dates + it) } },
                         label = { Text(stringResource(R.string.rides_add_date)) }
                     )
                 }
@@ -244,7 +255,7 @@ internal fun RideEditorDialog(
                         )
                     }
                     AssistChip(
-                        onClick = { pickDate(context, null) { if (it !in ride.skipDates.orEmpty()) ride = ride.copy(skipDates = ride.skipDates.orEmpty() + it) } },
+                        onClick = { pickDate(null) { if (it !in ride.skipDates.orEmpty()) ride = ride.copy(skipDates = ride.skipDates.orEmpty() + it) } },
                         label = { Text(stringResource(R.string.rides_add_date)) }
                     )
                 }

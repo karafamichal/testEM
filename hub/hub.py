@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-emhub: bug reports + community bus delays for testEM, and the Plan&Ride website.
+emhub: bug reports + community bus delays for Plan&Ride (testEM), and the Plan&Ride website.
 
 One stdlib-only process:
   /, /privacy, /support, /changelog (and /en/...)   public website, pages edited in the dashboard
@@ -44,7 +44,7 @@ from pathlib import Path
 import sadzv
 import timetable
 
-VERSION = "1.10.3"
+VERSION = "1.12.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -57,7 +57,7 @@ APP_KEYS = {k.strip() for k in ENV("HUB_APP_KEYS", "dev-key").split(",") if k.st
 # database. These environment variables are only the starting values.
 SETTINGS = {  # key: (env var, default, is secret)
     "admin_email": ("HUB_ADMIN_EMAIL", "", False),
-    "mail_from": ("HUB_MAIL_FROM", "testEM <noreply@karafa.network>", False),
+    "mail_from": ("HUB_MAIL_FROM", "Plan&Ride <noreply@karafa.network>", False),
     "mail_reply_to": ("HUB_MAIL_REPLY_TO", "", False),
     "smtp_host": ("HUB_SMTP_HOST", "localhost", False),
     "smtp_port": ("HUB_SMTP_PORT", "25", False),
@@ -140,6 +140,13 @@ CREATE TABLE IF NOT EXISTS bugs (
   device TEXT NOT NULL DEFAULT '',
   logs TEXT NOT NULL DEFAULT '',
   consent_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS bug_images (
+  id INTEGER PRIMARY KEY,
+  bug_id INTEGER NOT NULL REFERENCES bugs(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  mime TEXT NOT NULL,
+  data BLOB NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bug_messages (
   id INTEGER PRIMARY KEY,
@@ -427,6 +434,60 @@ def mail_worker():
 
 def bug_code(bug_id):
     return f"EM-{bug_id:04d}"
+
+
+MAX_IMAGES, MAX_IMAGE_BYTES, MAX_IMAGE_SIDE = 3, 4_000_000, 8000
+# Start-of-frame markers (baseline, progressive, ...): they carry the picture size.
+JPEG_SOF = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+
+
+def clean_jpeg(blob):
+    """Rebuild a JPEG from its own segments, or raise ValueError. Drops APP1..APP15 and comments (EXIF with GPS,
+    XMP, anything smuggled in) and bytes after the end marker (a polyglot's HTML/ZIP tail); caps the picture size
+    so a tiny file can't decode into gigabytes in the dashboard."""
+    if not blob.startswith(b"\xff\xd8"):
+        raise ValueError("Only JPEG images")
+    out, i, size = [b"\xff\xd8"], 2, None
+    while True:
+        if i + 4 > len(blob) or blob[i] != 0xFF:
+            raise ValueError("An image is damaged")
+        marker, length = blob[i + 1], int.from_bytes(blob[i + 2:i + 4], "big")
+        segment = blob[i:i + 2 + length]
+        if length < 2 or len(segment) != 2 + length:
+            raise ValueError("An image is damaged")
+        if marker in JPEG_SOF and length >= 7:
+            size = int.from_bytes(segment[5:7], "big"), int.from_bytes(segment[7:9], "big")
+        if marker == 0xDA:  # start of scan: picture data follows up to the end marker
+            end = blob.rfind(b"\xff\xd9")
+            if size is None or end < i:
+                raise ValueError("An image is damaged")
+            out.append(blob[i:end + 2])
+            break
+        if not (0xE1 <= marker <= 0xEF or marker == 0xFE):
+            out.append(segment)
+        i += 2 + length
+    if not all(0 < side <= MAX_IMAGE_SIDE for side in size):
+        raise ValueError(f"An image is too large (max {MAX_IMAGE_SIDE} px)")
+    return b"".join(out)
+
+
+def bug_images(values):
+    """Screenshots or photos sent with a bug report: base64 JPEG (the apps re-encode whatever the user picks),
+    at most 3 of 4 MB each. Only JPEG: one format to check, and nothing a browser could run as a script."""
+    if not values:
+        return []
+    if not isinstance(values, list) or len(values) > MAX_IMAGES:
+        raise ValueError(f"At most {MAX_IMAGES} images")
+    images = []
+    for value in values:
+        try:
+            blob = base64.b64decode(str(value), validate=True)
+        except ValueError:
+            raise ValueError("An image could not be read") from None
+        if len(blob) > MAX_IMAGE_BYTES:
+            raise ValueError("An image is too large (max 4 MB)")
+        images.append(("image/jpeg", clean_jpeg(blob)))
+    return images
 
 
 def bug_values(bug, **extra):
@@ -887,7 +948,7 @@ class Handler(BaseHTTPRequestHandler):
     def error(self, status, message, cors=False):
         self.send(status, {"error": message}, headers=self.cors() if cors else None)
 
-    MAX_BODY = 2_000_000
+    MAX_BODY = 20_000_000  # a bug report may carry a few photos
 
     def read_body(self, limit=1_000_000):
         """The body dispatch() already read (every request's body is always consumed)."""
@@ -1170,7 +1231,7 @@ class Handler(BaseHTTPRequestHandler):
     def submit_bug(self):
         if not bug_limiter.allow(self.client_ip()):
             return self.error(429, "Too many reports, try again later", cors=True)
-        data = self.json_body(limit=1_200_000)
+        data = self.json_body(limit=18_000_000)
         if data.get("consent") is not True:
             return self.error(400, "Consent is required", cors=True)
         kind = data.get("kind") if data.get("kind") in BUG_KINDS else "bug"
@@ -1188,6 +1249,7 @@ class Handler(BaseHTTPRequestHandler):
         if email and not EMAIL_RE.match(email):
             return self.error(400, "Email address looks wrong", cors=True)
         category = "feature" if kind == "feature" else data.get("category") if data.get("category") in BUG_CATEGORIES else "other"
+        images = bug_images(data.get("images"))
         t = now()
         with db() as conn:
             cur = conn.execute(
@@ -1198,9 +1260,12 @@ class Handler(BaseHTTPRequestHandler):
                  logs, t, kind),
             )
             bug = conn.execute("SELECT * FROM bugs WHERE id=?", (cur.lastrowid,)).fetchone()
+            for mime, blob in images:
+                conn.execute("INSERT INTO bug_images(bug_id, created_at, mime, data) VALUES (?,?,?,?)", (bug["id"], t, mime, blob))
             conn.execute(
                 "INSERT INTO bug_messages(bug_id, created_at, kind, author, body) VALUES (?,?,?,?,?)",
-                (bug["id"], t, "system", "", "Report received" + (", confirmation sent to reporter" if email else "")),
+                (bug["id"], t, "system", "", "Report received" + (f" with {len(images)} image(s)" if images else "")
+                 + (", confirmation sent to reporter" if email else "")),
             )
         code = bug_code(bug["id"])
         admin_to = setting("admin_email") or ",".join(
@@ -1290,7 +1355,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.error(403, "Wrong origin")
         if route == "timetable/status":
             return self.send(200, dict(timetable.status(GTFS_DIR, gtfs_feeds()), feedList=setting("gtfs_feeds"),
-                                       source=timetable.FEED_URL))
+                                       source=" then ".join(u for u in (timetable.CIS_URL, timetable.FEED_URL) if u)))
         if method == "POST" and route == "timetable/update":
             timetable.request_update()
             return self.send(202, {"ok": True})
@@ -1343,7 +1408,7 @@ class Handler(BaseHTTPRequestHandler):
                 rows = conn.execute(sql + " ORDER BY updated_at DESC LIMIT 300", args).fetchall()
                 return self.send(200, [dict(r, code=bug_code(r["id"])) for r in rows])
             if parts[0] == "bugs" and len(parts) >= 2 and parts[1].isdigit():
-                return self.admin_bug(conn, user, method, int(parts[1]), parts[2] if len(parts) > 2 else "")
+                return self.admin_bug(conn, user, method, int(parts[1]), "/".join(parts[2:]))
             if method == "GET" and route == "community/trips":
                 # Default: the last 6 hours; ?day=YYYY-MM-DD for any past day, ?line= to narrow it.
                 span = local_day_range(query["day"]) if query.get("day") else (now() - 6 * 3600, now() + 60)
@@ -1574,7 +1639,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.error(404, "No such bug")
         if method == "GET" and not action:
             messages = conn.execute("SELECT * FROM bug_messages WHERE bug_id=? ORDER BY id", (bug_id,)).fetchall()
-            return self.send(200, dict(bug, code=bug_code(bug_id), messages=[dict(m) for m in messages]))
+            images = conn.execute("SELECT id, mime, length(data) size FROM bug_images WHERE bug_id=? ORDER BY id", (bug_id,)).fetchall()
+            return self.send(200, dict(bug, code=bug_code(bug_id), messages=[dict(m) for m in messages],
+                                       images=[dict(i) for i in images]))
+        if method == "GET" and action.startswith("images/") and action[7:].isdigit():
+            image = conn.execute("SELECT mime, data FROM bug_images WHERE id=? AND bug_id=?", (int(action[7:]), bug_id)).fetchone()
+            if not image:
+                return self.error(404, "No such image")
+            # Reporter-supplied bytes: never sniffed, scripted or framed, even when opened on their own.
+            return self.send(200, bytes(image["data"]), image["mime"], {
+                "Cache-Control": "private, max-age=86400", "Content-Security-Policy": "default-src 'none'; sandbox",
+                "Content-Disposition": f'inline; filename="{bug_code(bug_id)}-{action[7:]}.jpg"'})
         if method != "POST":
             return self.error(404, "Not found")
         data = self.json_body()

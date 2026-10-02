@@ -527,8 +527,9 @@ setInterval(() => {
 // ---------------------------------------------------------------------------
 const app = express();
 app.disable('x-powered-by');
-// Bug reports carry logs, so allow more than the 100 kB default.
-app.use(express.json({ limit: '1.5mb' }));
+// Bug reports carry logs and up to 3 photos; every other route keeps a small body limit.
+const smallJson = express.json({ limit: '1.5mb' }), bugJson = express.json({ limit: '16mb' });
+app.use((req, res, next) => (req.path === '/api/hub/bugs' ? bugJson : smallJson)(req, res, next));
 
 // Security headers. Scripts only from this server; inline styles are used for bar heights etc.
 app.use((req, res, next) => {
@@ -705,13 +706,13 @@ app.post('/api/rides', wrap((req) => {
 // ---------------------------------------------------------------------------
 // emhub proxy: bug reports and community delays.
 // ---------------------------------------------------------------------------
-async function hubRequest(route, { method = 'GET', body, clientIp } = {}) {
+async function hubRequest(route, { method = 'GET', body, clientIp, timeout = 15000 } = {}) {
   if (!HUB_URL || !HUB_APP_KEY) throw Object.assign(new Error('Bug reports and community delays are not set up on this server'), { status: 503 });
   const res = await fetch(`${HUB_URL}/api/v1/${route}`, {
     method,
     headers: { 'X-App-Key': HUB_APP_KEY, 'Content-Type': 'application/json', ...(clientIp ? { 'X-Forwarded-For': clientIp } : {}) },
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(timeout),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(json.error || `emhub HTTP ${res.status}`), { status: res.status });
@@ -725,7 +726,7 @@ const clientIp = (req) => {
 };
 
 app.post('/api/hub/bugs', wrap((req) =>
-  hubRequest('bugs', { method: 'POST', body: { ...req.body, platform: 'web' }, clientIp: clientIp(req) })));
+  hubRequest('bugs', { method: 'POST', body: { ...req.body, platform: 'web' }, clientIp: clientIp(req), timeout: 60000 })));
 app.post('/api/hub/report', wrap((req) =>
   hubRequest('community/reports', { method: 'POST', body: { ...req.body, platform: 'web' }, clientIp: clientIp(req) })));
 app.get('/api/hub/delay', wrap((req) =>

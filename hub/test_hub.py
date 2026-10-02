@@ -298,6 +298,26 @@ assert app_post({"consent": True, "description": "x"}, key="wrong")[0] == 401
 status, idea = app_post({"consent": True, "kind": "feature", "title": "Dark map\r\nBcc: evil@example.com", "logs": "secret log"})
 assert status == 201, idea
 status, bug = app_post({"consent": True, "kind": "bug", "description": "Crash on start"})
+# photos with a report (EM-0016): JPEG only, cleaned (no EXIF, nothing after the end), admins only
+def jpeg(w=10, h=10, tail=b""):
+    seg = lambda m, body: b"\xff" + bytes([m]) + (len(body) + 2).to_bytes(2, "big") + body
+    return (b"\xff\xd8" + seg(0xE0, b"JFIF\0\1\1\0\0\1\0\1\0\0") + seg(0xE1, b"Exif\0\0GPS 48.57N 19.12E")
+            + seg(0xC0, b"\x08" + h.to_bytes(2, "big") + w.to_bytes(2, "big") + b"\x01\x01\x11\x00")
+            + seg(0xDA, b"\x01\x01\x00\x00\x3f\x00") + b"\x12\x34\xff\x00" + b"\xff\xd9" + tail)
+b64 = lambda blob: base64.b64encode(blob).decode()
+status, pic = app_post({"consent": True, "description": "Wrong bus", "images": [b64(jpeg(tail=b"<script>alert(1)</script>"))]})
+assert status == 201, (status, pic)
+detail = json.loads(call("/admin/api/bugs/%d" % pic["id"], cookie=cookie)[2])
+assert len(detail["images"]) == 1 and detail["images"][0]["mime"] == "image/jpeg", detail["images"]
+status, headers, body = call("/admin/api/bugs/%d/images/%d" % (pic["id"], detail["images"][0]["id"]), cookie=cookie)
+assert status == 200 and headers["Content-Type"] == "image/jpeg" and headers["X-Content-Type-Options"] == "nosniff"
+assert "sandbox" in headers["Content-Security-Policy"], headers
+assert body.startswith(b"\xff\xd8\xff\xe0") and body.endswith(b"\xff\xd9") and b"GPS" not in body and b"script" not in body, body
+assert call("/admin/api/bugs/%d/images/%d" % (pic["id"], detail["images"][0]["id"]))[0] == 401, "admins only"
+for bad in [b"\x89PNG\r\n\x1a\n" + b"\0" * 32, b"GIF89a....", jpeg(w=60000, h=60000), jpeg()[:30], b"\xff\xd8<svg onload=alert(1)>"]:
+    assert app_post({"consent": True, "description": "x", "images": [b64(bad)]})[0] == 400, bad[:12]
+assert app_post({"consent": True, "description": "x", "images": [b64(jpeg())] * 4})[0] == 400
+assert app_post({"consent": True, "description": "x", "images": ["not base64!"]})[0] == 400
 ideas = json.loads(call("/admin/api/bugs?kind=feature&status=all", cookie=cookie)[2])
 bugs = json.loads(call("/admin/api/bugs?status=all", cookie=cookie)[2])
 assert [b["id"] for b in ideas] == [idea["id"]] and idea["id"] not in [b["id"] for b in bugs] and bug["id"] in [b["id"] for b in bugs]
@@ -359,6 +379,7 @@ tt = timetable.Timetable({"a": os.path.join(folder, "a.zip"), "b": os.path.join(
 assert [s["name"] for s in tt.search("v z p k")] == ["Village, Zlatý Potok, konečná"], "initials, in order"
 assert [s["name"] for s in tt.search("vill zla po kon")] == ["Village, Zlatý Potok, konečná"]
 assert tt.search("t as")[0]["name"] == "Town, AS" and tt.search("zzz") == []
+assert tt.search("town parkovisko")[0]["name"] == "Town, Park", "a full word finds the abbreviated name (EM-0016: nábr.)"
 assert len([n for n in tt.names if n == "Town, AS"]) == 1, "one station for both carriers"
 at = lambda hm: int(datetime.datetime(2026, 9, 30, *map(int, hm.split(":")), tzinfo=timetable.ZONE).timestamp())  # noqa: E731
 hm = lambda ms: datetime.datetime.fromtimestamp(ms / 1000, timetable.ZONE).strftime("%d %H:%M")  # noqa: E731
@@ -463,3 +484,27 @@ assert "allowed again" in out, out
 assert conn.execute("SELECT oidc_only FROM users").fetchone()[0] == 0
 conn.close()
 print("ok migration")
+
+# feeds: our CIS conversion first, transiq only for what it doesn't build (404); a copy from transiq
+# is replaced by ours even when ours is older
+import functools, http.server, time as _t  # noqa: E401,E402
+served = {name: tempfile.mkdtemp() for name in ("cis", "transiq")}
+gtfs(os.path.join(served["cis"], "a.zip"), [("1", "A", 48.7, 19.1), ("2", "B", 48.71, 19.11)], {"t": ("1", [("1", "08:00"), ("2", "08:10")])})
+gtfs(os.path.join(served["transiq"], "b.zip"), [("1", "C", 48.7, 19.1), ("2", "D", 48.71, 19.11)], {"t": ("2", [("1", "08:00"), ("2", "08:10")])})
+os.utime(os.path.join(served["cis"], "a.zip"), (1_000_000_000, 1_000_000_000))  # older than anything we have
+ports = {}
+for name, root in served.items():
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(http.server.SimpleHTTPRequestHandler, directory=root))
+    srv.RequestHandlerClass.log_message = lambda *a: None
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    ports[name] = srv.server_address[1]
+timetable.CIS_URL = f"http://127.0.0.1:{ports['cis']}/{{}}.zip"
+timetable.FEED_URL = f"http://127.0.0.1:{ports['transiq']}/{{}}.zip"
+local = __import__("pathlib").Path(tempfile.mkdtemp())
+(local / "a.zip").write_bytes(b"old transiq copy")
+(local / "a.src").write_text(timetable.FEED_URL.format("a"))
+assert timetable.download(local, ["a", "b"]) == 2, timetable.downloads
+assert "cis" in timetable.downloads["a"]["result"] and "transiq" in timetable.downloads["b"]["result"], timetable.downloads
+assert zipfile.ZipFile(local / "a.zip").read("routes.txt").endswith(b",1,,3")
+assert timetable.download(local, ["a", "b"]) == 0 and timetable.downloads["a"]["result"] == "unchanged", timetable.downloads
+print("ok feeds")

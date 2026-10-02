@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.9.0
+
+### New
+- **The followed bus on the home screen:** a live card with the countdown, the delay and the bus moving along your part of the route (your stop to where you get off), with a pulsing *Live* badge when its real position is known. Tap it for the stops, × to stop following.
+- **Screenshots and photos in bug reports and suggestions** (report EM-0016): attach up to 3. The app makes them smaller (1600 px) and re-saves them as JPEG, which removes the location and other photo details; emhub checks and cleans them again and only the developer can see them.
+
+- **New day and time pickers** in the planner and for regular rides: a calendar with Today and Tomorrow shortcuts, and a 24-hour clock you can also type into, with a Now button.
+- **Show the PIN while typing** it (the eye button), like the password.
+- **Haptic feedback** on taps and actions (following a bus, starring a stop, picking a time). It can be turned off in Settings; the phone's own touch-feedback setting is respected too.
+
+### Changed
+- **Many more connections:** emhub now converts the CIS timetables (portal.cp.sk) itself instead of using transiq's feeds, which dropped trips not starting at a line's first stop; about 60 % more trips have their times (report EM-0016).
+- Emails about your reports now come from Plan&Ride instead of testEM.
+- **Automatic bus positions** ask for location "Allow all the time" right after "While using the app", on first start and in Settings, instead of only showing a warning there.
+
+### Fixed
+- A new install (Android 13 and later) showed the app in English while Settings said Slovenčina.
+- Typing a full stop name like "Štadlerovo nábrežie" now finds stops the timetable abbreviates ("Štadlerovo nábr.").
+
 ## 2.8.0
 
 ### New

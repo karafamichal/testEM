@@ -57,12 +57,27 @@ data class TrackedTrip(
     val nextLegs: List<TrackedTrip> = emptyList()
 )
 
+/** The followed bus as the notification shows it, for the home screen's live card. */
+data class FollowView(
+    val trip: TrackedTrip,
+    val detail: TripDetail,
+    val progress: TripProgress,
+    /** "You'll make it" etc., when the catch estimate is on. */
+    val catchLine: String?,
+    /** The bus's position is really known (vehicle, riders), not only the timetable. */
+    val live: Boolean
+)
+
 /** Shared between the tracking service and the UI. */
 object TripTracking {
     private val _active = MutableStateFlow<TrackedTrip?>(null)
     val active: StateFlow<TrackedTrip?> = _active
+    private val _view = MutableStateFlow<FollowView?>(null)
+    val view: StateFlow<FollowView?> = _view
+    internal fun publish(value: FollowView?) { _view.value = value }
     internal fun set(context: Context, value: TrackedTrip?) {
         _active.value = value
+        if (value == null || _view.value?.trip?.ref != value.ref) _view.value = null
         // Kept on disk so an app update (which kills the service) can pick the bus up again.
         val saved = context.getSharedPreferences(RESUME_PREFS, Context.MODE_PRIVATE).edit()
         if (value == null) saved.clear() else saved.putString("trip", com.google.gson.Gson().toJson(value)).putLong("at", System.currentTimeMillis())
@@ -480,9 +495,9 @@ class TripTrackerService : Service() {
     private fun redraw(current: TrackedTrip, raw: TripDetail) {
         val detail = withLocalDelay(raw)
         val progress = TripProgress.from(detail, current)
-        NotificationManagerCompat.from(this).notifySafely(
-            NOTIFICATION_ID, liveNotification(current, detail, progress, catchLine(detail, progress))
-        )
+        val catch = catchLine(detail, progress)
+        TripTracking.publish(FollowView(current, detail, progress, catch, positionKnown(detail)))
+        NotificationManagerCompat.from(this).notifySafely(NOTIFICATION_ID, liveNotification(current, detail, progress, catch))
     }
 
     // ------------------------------------------------------------ catch estimate
@@ -623,9 +638,9 @@ class TripTrackerService : Service() {
                 updateLocation(current, progress)
                 updateRiderTracking(current, fetched ?: detail, progress)
                 val estimate = updateCatch(detail, progress)
-                NotificationManagerCompat.from(this).notifySafely(
-                    NOTIFICATION_ID, liveNotification(current, detail, progress, catchLine(detail, progress))
-                )
+                val catch = catchLine(detail, progress)
+                TripTracking.publish(FollowView(current, detail, progress, catch, positionKnown(detail)))
+                NotificationManagerCompat.from(this).notifySafely(NOTIFICATION_ID, liveNotification(current, detail, progress, catch))
                 sendAlerts(current, progress)
                 estimate?.let { sendCatchAlerts(current, detail, progress, it) }
             }

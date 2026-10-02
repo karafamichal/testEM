@@ -1,5 +1,6 @@
 """
-Timetables for the app's planner, boards and trips, from open GTFS feeds (transiq mirror).
+Timetables for the app's planner, boards and trips, from GTFS feeds: our own conversion of the CIS CP
+timetables (cis/cis.py on the web server, over the tunnel) and transiq for the rest.
 
 Feeds are downloaded once a day into HUB_GTFS_DIR, loaded into memory (about 620k stop
 times for all of Slovakia) and swapped in whole, so requests never see a half-built one.
@@ -31,6 +32,8 @@ from zoneinfo import ZoneInfo
 
 ZONE = ZoneInfo("Europe/Bratislava")
 FEED_URL = os.environ.get("HUB_GTFS_URL", "https://transiq.xhyrom.dev/gtfs/sk/{}.zip")
+# Our own CIS conversion; a feed it doesn't build (404) comes from FEED_URL. Empty: FEED_URL only.
+CIS_URL = os.environ.get("HUB_CIS_URL", "http://10.99.153.2:8090/{}.zip")
 # Buses only for now: add "zsr" for trains (zssk.zip is the same feed again).
 DEFAULT_FEEDS = ",".join([
     "sad-zvolen-as", "sad-lucenec-as", "sad-zilina-as", "sad-trencin-as", "sad-prievidza-as",
@@ -93,6 +96,8 @@ def prefix_match(token, words, i):
     if i >= len(words):
         return 0
     w = words[i]
+    if len(w) >= 3 and len(token) > len(w) and token.startswith(w):
+        return 1  # the timetable abbreviates, the rider doesn't: "nabrezie" -> "Štadlerovo nábr."
     for k in range(min(len(token), len(w)), 0, -1):
         if token[:k] != w[:k]:
             continue
@@ -677,25 +682,48 @@ def log(text):
     print(f"[timetable] {text}", flush=True)
 
 
+def fetch(url, path):
+    """The feed at url if it changed since our copy (which must have come from the same place), else None."""
+    source = path.with_suffix(".src")  # where our copy came from: a copy from elsewhere is never "unchanged"
+    request = urllib.request.Request(url, headers={"User-Agent": "emhub (Plan&Ride)"})
+    if path.exists() and source.exists() and source.read_text() == url:
+        request.add_header("If-Modified-Since", formatdate(path.stat().st_mtime, usegmt=True))
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            data = response.read()
+    except urllib.error.HTTPError as error:
+        if error.code == 304:
+            return None
+        raise
+    zipfile.ZipFile(io.BytesIO(data)).testzip()
+    tmp = path.with_suffix(".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(path)
+    source.write_text(url)
+    return data
+
+
 def download(folder, feeds):
-    """Fetch feeds that changed (If-Modified-Since); a failed download keeps the previous file."""
+    """Fetch feeds that changed (If-Modified-Since); a failed download keeps the previous file.
+    Our CIS conversion first; only a feed it doesn't have (404) falls back to transiq."""
     folder.mkdir(parents=True, exist_ok=True)
     changed = 0
     for feed in feeds:
         path = folder / f"{feed}.zip"
-        request = urllib.request.Request(FEED_URL.format(feed), headers={"User-Agent": "emhub (Plan&Ride)"})
-        if path.exists():
-            request.add_header("If-Modified-Since", formatdate(path.stat().st_mtime, usegmt=True))
         try:
-            with urllib.request.urlopen(request, timeout=120) as response:
-                data = response.read()
-            zipfile.ZipFile(io.BytesIO(data)).testzip()
-            tmp = path.with_suffix(".tmp")
-            tmp.write_bytes(data)
-            tmp.replace(path)
-            result, changed = f"updated ({len(data) // 1024} kB)", changed + 1
+            try:
+                url = CIS_URL.format(feed) if CIS_URL else FEED_URL.format(feed)
+                data = fetch(url, path)
+            except urllib.error.HTTPError as error:
+                if not CIS_URL or error.code != 404:
+                    raise
+                url = FEED_URL.format(feed)
+                data = fetch(url, path)
+            origin = "cis" if url != FEED_URL.format(feed) else "transiq"
+            result = "unchanged" if data is None else f"updated ({len(data) // 1024} kB, {origin})"
+            changed += data is not None
         except urllib.error.HTTPError as error:
-            result = "unchanged" if error.code == 304 else f"HTTP {error.code}"
+            result = f"HTTP {error.code}"
         except Exception as error:  # noqa: BLE001
             result = f"failed: {error}"
         downloads[feed] = {"at": int(time.time()), "result": result}
@@ -753,7 +781,8 @@ def update(folder, feeds, fetch=True):
 
 def refresher(folder, feeds):
     """Load at start (downloading anything missing), then refresh every night at 04:30 or when asked."""
-    update(folder, feeds(), fetch=any(not (folder / f"{f}.zip").exists() for f in feeds()))
+    # A feed we don't have, or don't know the source of (from before 1.12.0), is fetched right away.
+    update(folder, feeds(), fetch=any(not (folder / f"{f}.zip").exists() or not (folder / f"{f}.src").exists() for f in feeds()))
     while True:
         now = datetime.now(ZONE)
         wake = now.replace(hour=4, minute=30, second=0, microsecond=0)
