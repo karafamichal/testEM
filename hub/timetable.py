@@ -446,30 +446,39 @@ class Timetable:
         hit = self.search(value, 1)
         return self.by_id[hit[0]["id"]] if hit else None
 
-    def departures(self, stations, when, limit=30, exclude=()):
+    def departures(self, stations, when, limit=30, exclude=(), ending=False):
+        """Buses leaving the stations from `when`. ending: also buses that end their trip there ("ends": true);
+        sadzv lists those as departures too (Banská Bystrica city buses at a terminus, EM-0019)."""
         d = datetime.fromtimestamp(when, ZONE).date()
         rows = []
         for day in (self.day(d - timedelta(days=1)), self.day(d)):
             t0 = when - day.base
             for s in stations:
-                for c in day.from_station.get(s, ()):
-                    dep, _, _, _, run, k = day.conns[c]
-                    if dep < t0:
+                conns = [(c, False) for c in day.from_station.get(s, ())]
+                if ending:
+                    conns += [(c, True) for c in day.to_station.get(s, ())]
+                for c, arriving in conns:
+                    dep, arr, _, _, run, k = day.conns[c]
+                    at = arr if arriving else dep
+                    if at < t0:
                         continue
                     trip, service_day = self.run_trip(day, run)
+                    if arriving and k + 2 != len(trip[7]):  # only the trip's last stop
+                        continue
                     if any(trip[0].startswith(x) for x in exclude):  # "sad-zvolen-as" also drops its city buses
                         continue
-                    rows.append((day.base + dep, trip, service_day, k, s))
+                    rows.append((day.base + at, trip, service_day, k + arriving, s, arriving))
         rows.sort(key=lambda r: r[0])
         out, seen = [], set()
-        for at, trip, service_day, k, s in rows:
+        for at, trip, service_day, k, s, arriving in rows:
             key = (trip[0], trip[1], service_day)
             if key in seen:
                 continue
             seen.add(key)
             out.append({"at": at * 1000, "tripId": f"{trip[0]}:{trip[1]}:{service_day:%Y%m%d}", "line": trip[2],
                         "headsign": trip[3] or self.names[trip[7][-1]], "operator": trip[4], "mode": trip[5],
-                        "platform": trip[10][k], "stop": self.station_json(s), "seq": k, "feed": trip[0]})
+                        "platform": trip[10][k], "stop": self.station_json(s), "seq": k, "feed": trip[0],
+                        **({"ends": True} if arriving else {})})
             if len(out) >= limit:
                 break
         return out
@@ -663,9 +672,10 @@ class Day:
         self.deps = [c[0] for c in conns]
         self.by_arrival = sorted(range(len(conns)), key=lambda i: conns[i][1])
         self.arrivals = [conns[i][1] for i in self.by_arrival]
-        self.from_station = {}
+        self.from_station, self.to_station = {}, {}
         for i, c in enumerate(conns):
             self.from_station.setdefault(c[2], []).append(i)
+            self.to_station.setdefault(c[3], []).append(i)
 
 
 # ------------------------------------------------------------------ downloads, the daily refresh, the log

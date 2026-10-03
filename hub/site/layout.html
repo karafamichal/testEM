@@ -45,6 +45,7 @@
   .lead { font-size: 19px; color: var(--muted); }
   .actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0 8px; }
   .btn { text-decoration: none; }
+  .btn[aria-disabled] { cursor: default; }
   .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 28px; }
   .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
   .card h3 { margin: 0 0 4px; font-size: 19px; }
@@ -77,7 +78,7 @@
     <span>© {{year}} Plan&amp;Ride</span>
     <a href="mailto:ksjd.apps@gmail.com">ksjd.apps@gmail.com</a>
     <a href="https://github.com/karafamichal/testEM">GitHub</a>
-    <a class="admin" href="/login">{{admin_label}}</a>
+    <a class="admin" href="/dashboard">{{admin_label}}</a>
   </div>
 </footer>
 </body>

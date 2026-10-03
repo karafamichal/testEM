@@ -314,6 +314,9 @@ assert status == 200 and headers["Content-Type"] == "image/jpeg" and headers["X-
 assert "sandbox" in headers["Content-Security-Policy"], headers
 assert body.startswith(b"\xff\xd8\xff\xe0") and body.endswith(b"\xff\xd9") and b"GPS" not in body and b"script" not in body, body
 assert call("/admin/api/bugs/%d/images/%d" % (pic["id"], detail["images"][0]["id"]))[0] == 401, "admins only"
+status, headers, _ = call("/login", cookie=cookie)
+assert status in (302, 303) and headers["Location"].endswith("/dashboard"), "signed in: /login goes to the dashboard"
+assert call("/login")[0] == 200
 for bad in [b"\x89PNG\r\n\x1a\n" + b"\0" * 32, b"GIF89a....", jpeg(w=60000, h=60000), jpeg()[:30], b"\xff\xd8<svg onload=alert(1)>"]:
     assert app_post({"consent": True, "description": "x", "images": [b64(bad)]})[0] == 400, bad[:12]
 assert app_post({"consent": True, "description": "x", "images": [b64(jpeg())] * 4})[0] == 400
@@ -394,6 +397,10 @@ assert [(d["line"], hm(d["at"])) for d in board[:3]] == [("101", "30 06:20"), ("
 trip = tt.trip(board[1]["tripId"])
 assert [s["name"] for s in trip["stops"]] == ["Town, AS", "City, Station"] and hm(trip["stops"][1]["arrival"]) == "30 07:10"
 assert tt.trip("b:nope:20260930") is None
+city = tt.resolve("city station")
+assert tt.departures([city], at("06:00"), 5) == [], "nothing leaves the end of the line"
+ends = tt.departures([city], at("06:00"), 5, ending=True)
+assert [(d["line"], hm(d["at"]), d.get("ends")) for d in ends[:2]] == [("202", "30 07:10", True), ("202", "30 08:10", True)], ends
 # city buses read from sadzv: its stops join ours by position and name, the day read stands in for later days of its kind
 city_day = {"date": "2026-09-29", "platforms": {  # a Tuesday
     "501": ["Námestie X", 48.7300, 19.1400, "1", 900], "502": ["Park", 48.71005, 19.12005, "2", 901]},

@@ -421,6 +421,11 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     </plurals>
     <string name="pin_show">Zobraziť PIN</string>
     <string name="pin_hide">Skryť PIN</string>
+    <string name="board_ends_here">Končí tu</string>
+    <string name="widget_description">Sledovaný autobus, vaše cesty s hviezdičkou a najbližšie spoje z obľúbených zastávok</string>
+    <string name="widget_empty">Označte zastávku alebo spojenie v aplikácii hviezdičkou a zobrazí sa tu.</string>
+    <string name="widget_follow">Sledovať</string>
+    <string name="widget_updated">Aktualizované %1$s</string>
     <string name="haptics_switch">Haptická odozva</string>
     <string name="haptics_switch_hint">Krátke zavibrovanie pri ťuknutí a keď sa niečo podarí, napr. sledovanie autobusu</string>
     <string name="picker_time_title">Čas</string>
@@ -524,9 +529,6 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="feature_send">Odoslať návrh</string>
     <string name="feature_sent_title">Návrh %1$s odoslaný</string>
     <string name="feature_sent_body">Ďakujeme za nápad. Ak ste nechali e-mail, ozveme sa, keď bude novinka.</string>
-    <string name="whats_new_body">• K hláseniu chyby alebo návrhu môžete priložiť až 3 snímky obrazovky alebo fotky (EM-0016). Pred odoslaním sa zmenšia a odstráni sa z nich poloha a ďalšie údaje.\n• Nový kalendár a hodiny na výber dňa a času, so skratkami Dnes, Zajtra a Teraz.
-• Haptická odozva pri ťuknutí a akciách (vypnete v Nastaveniach).
-• Automatické polohy autobusov hneď požiadajú o „Povoliť vždy“.
-• Opravené: nová inštalácia ukazovala aplikáciu po anglicky, hoci bola zvolená slovenčina.
-• E-maily od vývojára už prichádzajú od Plan&amp;Ride.</string>
+    <string name="whats_new_body">• Nový widget na plochu: sledovaný autobus naživo, alebo vaše cesty s hviezdičkou (ťuknutím ich začnete sledovať) a najbližšie spoje z obľúbených zastávok.
+• MHD Banskej Bystrice na tabuliach odchodov ukazuje, kam ide, aj zastávky; spoje, ktoré na zastávke končia, majú „Končí tu“.</string>
 </resources>

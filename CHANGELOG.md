@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.10.0
+
+### New
+- **Home-screen widget** (report EM-0017): one widget that changes with what you're doing. Following a bus, it is the live card from the home tab (countdown, delay, progress between your stops, × to stop). Otherwise it lists your starred journeys (tap one to start following it) and the next buses at your first two favourite stops, scrollable. It refreshes with every follow update, when you open the app, and every 30 min.
+
+### Fixed
+- **Banská Bystrica city buses on the departure boards** (report EM-0019): sadzv sends them without a destination or stop list. The board now takes both from emhub's timetable; buses that end their trip at the stop (sadzv lists those too, e.g. at B.B. Roosevelt hospital, platform 12) say *Ends here* and show their stops up to it. Needs emhub 1.13.0.
+
 ## 2.9.0
 
 ### New

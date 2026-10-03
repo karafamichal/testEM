@@ -276,6 +276,7 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             _state.update { it.copy(previews = boards) }
+            com.ksjd.testem.widget.PlanRideWidget.refresh(getApplication())
         }
     }
 

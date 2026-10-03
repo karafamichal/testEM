@@ -407,6 +407,11 @@ On the next screen, choose “Allow all the time”.</string>
     </plurals>
     <string name="pin_show">Show PIN</string>
     <string name="pin_hide">Hide PIN</string>
+    <string name="board_ends_here">Ends here</string>
+    <string name="widget_description">The bus you follow, your starred journeys and the next buses at your favourite stops</string>
+    <string name="widget_empty">Star a stop or a journey in the app, and it shows here.</string>
+    <string name="widget_follow">Follow</string>
+    <string name="widget_updated">Updated %1$s</string>
     <string name="haptics_switch">Haptic feedback</string>
     <string name="haptics_switch_hint">A short vibration on taps and when something is done, like following a bus</string>
     <string name="picker_time_title">Time</string>
@@ -511,9 +516,6 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• Bug reports and suggestions can carry up to 3 screenshots or photos (EM-0016). They are made smaller and their location and other details are removed before sending.\n• New calendar and clock for picking the day and time, with Today, Tomorrow and Now shortcuts.
-• Haptic feedback on taps and actions (can be turned off in Settings).
-• Automatic bus positions ask for “Allow all the time” right away.
-• Fixed: a new install showed the app in English although Slovenčina was selected.
-• Emails from the developer now come from Plan&amp;Ride.</string>
+    <string name="whats_new_body">• New home-screen widget: the bus you follow live, or your starred journeys (tap one to follow it) and the next buses at your favourite stops.
+• Banská Bystrica city buses on the departure boards show where they go and their stops; buses ending at the stop say “Ends here”.</string>
 </resources>

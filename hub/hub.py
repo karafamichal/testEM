@@ -44,7 +44,7 @@ from pathlib import Path
 import sadzv
 import timetable
 
-VERSION = "1.12.0"
+VERSION = "1.13.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -871,7 +871,8 @@ def timetable_query(route, query):
         else:
             return 400, {"error": "stop or lat and lon are required"}
         exclude = {f for f in (query.get("exclude") or "").split(",") if f}
-        return 200, {"departures": t.departures(stations, when_param(query.get("time")), limit(30, 200), exclude),
+        return 200, {"departures": t.departures(stations, when_param(query.get("time")), limit(30, 200), exclude,
+                                                ending=query.get("ending") in ("1", "true")),
                      "stops": [t.station_json(s) for s in stations]}
     if route == "trip":
         trip = t.trip(query.get("id") or "") if re.fullmatch(r"[^:]+:.+:\d{8}", query.get("id") or "") else None
@@ -1039,7 +1040,8 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/mark.png":
             return self.static("mark.png", "image/png")
         if method == "GET" and path == "/login":
-            return self.static("login.html")
+            # Already signed in (e.g. from the website's Admin link): straight to the dashboard.
+            return self.redirect("/dashboard") if self.current_user() else self.static("login.html")
         if method == "GET" and path == "/dashboard":
             return self.static("dashboard.html") if self.current_user() else self.redirect("/login")
         if method == "GET" and path == "/brand.css":

@@ -57,6 +57,17 @@
                 android:value="Live progress of the bus trip the user chose to follow" />
         </service>
         <receiver
+            android:name=".widget.PlanRideWidgetReceiver"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/plan_ride_widget" />
+        </receiver>
+        <receiver
             android:name=".rides.RideAlarmReceiver"
             android:exported="false" />
         <receiver

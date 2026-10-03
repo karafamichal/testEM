@@ -74,9 +74,16 @@ object TripTracking {
     val active: StateFlow<TrackedTrip?> = _active
     private val _view = MutableStateFlow<FollowView?>(null)
     val view: StateFlow<FollowView?> = _view
-    internal fun publish(value: FollowView?) { _view.value = value }
+    internal fun publish(context: Context, value: FollowView?) { _view.value = value; refreshWidget(context) }
+    private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** The home-screen widget shows the followed bus too (EM-0017). */
+    private fun refreshWidget(context: Context) {
+        val app = context.applicationContext
+        widgetScope.launch { com.ksjd.testem.widget.PlanRideWidget.refresh(app) }
+    }
     internal fun set(context: Context, value: TrackedTrip?) {
         _active.value = value
+        refreshWidget(context)
         if (value == null || _view.value?.trip?.ref != value.ref) _view.value = null
         // Kept on disk so an app update (which kills the service) can pick the bus up again.
         val saved = context.getSharedPreferences(RESUME_PREFS, Context.MODE_PRIVATE).edit()
@@ -496,7 +503,7 @@ class TripTrackerService : Service() {
         val detail = withLocalDelay(raw)
         val progress = TripProgress.from(detail, current)
         val catch = catchLine(detail, progress)
-        TripTracking.publish(FollowView(current, detail, progress, catch, positionKnown(detail)))
+        TripTracking.publish(this, FollowView(current, detail, progress, catch, positionKnown(detail)))
         NotificationManagerCompat.from(this).notifySafely(NOTIFICATION_ID, liveNotification(current, detail, progress, catch))
     }
 
@@ -639,7 +646,7 @@ class TripTrackerService : Service() {
                 updateRiderTracking(current, fetched ?: detail, progress)
                 val estimate = updateCatch(detail, progress)
                 val catch = catchLine(detail, progress)
-                TripTracking.publish(FollowView(current, detail, progress, catch, positionKnown(detail)))
+                TripTracking.publish(this, FollowView(current, detail, progress, catch, positionKnown(detail)))
                 NotificationManagerCompat.from(this).notifySafely(NOTIFICATION_ID, liveNotification(current, detail, progress, catch))
                 sendAlerts(current, progress)
                 estimate?.let { sendCatchAlerts(current, detail, progress, it) }

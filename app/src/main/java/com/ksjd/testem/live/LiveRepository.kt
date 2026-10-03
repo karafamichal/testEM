@@ -30,6 +30,7 @@ import kotlin.math.sqrt
  * operator's own map page calls.
  */
 class LiveRepository(context: Context) {
+    private val appContext = context.applicationContext
     private val prefs = com.ksjd.testem.CredentialsManager(context)
     private val baseUrl = "https://sadzv.qrbus.me/index"
     private val cacheFile = File(context.cacheDir, "live_platforms.json")
@@ -129,28 +130,53 @@ class LiveRepository(context: Context) {
      */
     suspend fun getBoard(stop: LiveStop): List<LiveDeparture> {
         val live = runCatching { getDepartures(stop) }
-        val other = runCatching { otherCarriers(stop, live.getOrDefault(emptyList())) }
-        if (live.isFailure && other.isFailure) throw live.exceptionOrNull()!!
-        return (live.getOrDefault(emptyList()) + other.getOrDefault(emptyList())).sortedBy { it.secondsUntil }.distinctBy { it.key }
+        val rows = runCatching { timetableRows(stop) }
+        if (live.isFailure && rows.isFailure) throw live.exceptionOrNull()!!
+        val timetable = rows.getOrDefault(emptyList())
+        val endsHere = appContext.getString(com.ksjd.testem.R.string.board_ends_here)
+        // sadzv sends Banská Bystrica's city buses without a destination (EM-0019): take it from the timetable.
+        val withDestinations = live.getOrDefault(emptyList()).map { d ->
+            if (d.destination.isNotBlank()) d
+            else timetableRow(d, timetable)?.let { r -> d.copy(destination = if (r.ends) endsHere else readable(r.destination)) } ?: d
+        }
+        return (withDestinations + otherCarriers(timetable, withDestinations)).sortedBy { it.secondsUntil }.distinctBy { it.key }
     }
+
+    /** The timetable bus a sadzv departure is: same line within 2 min, the same platform first. */
+    private fun timetableRow(d: LiveDeparture, rows: List<com.ksjd.testem.TimetableService.BoardRow>) =
+        rows.filter { r ->
+            val gap = abs(d.plannedSecondOfDay / 60 - r.minutes).let { minOf(it, 1440 - it) }
+            gap <= 2 && com.ksjd.testem.TimetableService.sameLine(d.line, r.line)
+        }.minByOrNull { r -> (if (r.platform == d.platformNumber) 0 else 10) + abs(d.plannedSecondOfDay / 60 - r.minutes) }
+
+    private fun readable(name: String) = name.split(",").map { it.trim() }.filter { it.isNotEmpty() }.joinToString(", ")
 
     /** Timetable station per sadzv stop (null = none nearby), and its board with when it was fetched. */
     private val cpStops = mutableMapOf<Int, com.ksjd.testem.CpStopSuggestion?>()
     private val cpBoards = mutableMapOf<Int, Pair<Long, List<com.ksjd.testem.TimetableService.BoardRow>>>()
 
-    private suspend fun otherCarriers(stop: LiveStop, live: List<LiveDeparture>): List<LiveDeparture> = withContext(Dispatchers.IO) {
+    /** Every timetable bus at the stop (incl. S.A.D. Zvolen and those ending here), fetched every 2 min. */
+    private suspend fun timetableRows(stop: LiveStop): List<com.ksjd.testem.TimetableService.BoardRow> = withContext(Dispatchers.IO) {
         val cpStop = if (synchronized(cpStops) { stop.id in cpStops }) synchronized(cpStops) { cpStops[stop.id] }
         else timetable.intercityStopNear(stop.name, stop.lat, stop.lon).also { synchronized(cpStops) { cpStops[stop.id] = it } }
         cpStop ?: return@withContext emptyList()
         val now = System.currentTimeMillis()
         // The timetable doesn't change: every 2 min is plenty (the board refreshes every 15 s).
-        val rows = synchronized(cpBoards) { cpBoards[stop.id] }?.takeIf { now - it.first < CP_BOARD_MS }?.second
-            ?: timetable.intercityBoard(cpStop).also { synchronized(cpBoards) { cpBoards[stop.id] = now to it } }
-        rows.filter { row -> row.atMs > now - 60_000L && live.none { sameBus(it, row) } }.map { row ->
+        synchronized(cpBoards) { cpBoards[stop.id] }?.takeIf { now - it.first < CP_BOARD_MS }?.second
+            ?: timetable.stopBoard(cpStop).also { synchronized(cpBoards) { cpBoards[stop.id] = now to it } }
+    }
+
+    /** Other carriers' buses (SAD Lučenec, Arriva, Slovak Lines, …): S.A.D. Zvolen's are on the board live from sadzv. */
+    private fun otherCarriers(rows: List<com.ksjd.testem.TimetableService.BoardRow>, live: List<LiveDeparture>): List<LiveDeparture> {
+        val now = System.currentTimeMillis()
+        return rows.filter { row ->
+            !row.ends && !row.feed.startsWith(com.ksjd.testem.TimetableService.SADZV_FEED) &&
+                row.atMs > now - 60_000L && live.none { sameBus(it, row) }
+        }.map { row ->
             LiveDeparture(
                 line = row.line,
                 lineId = 0L,
-                destination = row.destination.split(",").map { it.trim() }.filter { it.isNotEmpty() }.joinToString(", "),
+                destination = readable(row.destination),
                 platformNumber = row.platform,
                 routeNumber = "",
                 tripNumber = 0,

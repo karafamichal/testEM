@@ -32,7 +32,11 @@ class TimetableService {
         val operator: String = "",
         val atMs: Long = 0L,
         /** [tripUrl] boarding at this stop. */
-        val tripUrl: String = ""
+        val tripUrl: String = "",
+        /** Timetable feed, e.g. "sad-zvolen-as-city". */
+        val feed: String = "",
+        /** The bus ends its trip at this stop (sadzv lists those as departures too). */
+        val ends: Boolean = false
     )
 
     suspend fun searchConnections(request: SearchRequest): Result<TimetableSearchResult> = runCatching {
@@ -72,11 +76,11 @@ class TimetableService {
             .getAsJsonArray("stops").firstOrNull()?.let { suggestion(it.asJsonObject) }
 
     /**
-     * Upcoming buses of other carriers at [stop]. S.A.D. Zvolen is left out: its buses are on
-     * the board already, live from sadzv.
+     * Every timetable bus at [stop], also those ending there: other carriers' buses for the board, and
+     * the destination of S.A.D. Zvolen / DPMBB buses that sadzv lists without one (EM-0019).
      */
-    fun intercityBoard(stop: CpStopSuggestion): List<BoardRow> =
-        board(mapOf("stop" to stop.value, "n" to "40", "exclude" to SADZV_FEED))
+    fun stopBoard(stop: CpStopSuggestion): List<BoardRow> =
+        board(mapOf("stop" to stop.value, "n" to "100", "ending" to "1"))
 
     private fun board(params: Map<String, String>): List<BoardRow> =
         HubClient.timetable("departures", params).getAsJsonArray("departures").map { el ->
@@ -90,7 +94,9 @@ class TimetableService {
                 platform = d.str("platform"),
                 operator = d.str("operator"),
                 atMs = at,
-                tripUrl = tripUrl(d.str("tripId"), d.get("seq").asInt, null)
+                tripUrl = tripUrl(d.str("tripId"), d.get("seq").asInt, null),
+                feed = d.str("feed"),
+                ends = d.get("ends")?.asBoolean == true
             )
         }
 
@@ -109,7 +115,9 @@ class TimetableService {
             else -> today
         }
         val start = day.atStartOfDay(SK_ZONE).toEpochSecond() + (plannedMinutes - 3) * 60L
-        val rows = board(mapOf("lat" to lat.toString(), "lon" to lon.toString(), "radius" to "300", "time" to start.toString(), "n" to "60"))
+        // "ending": a bus ending its trip here (sadzv lists it too) still has its stops up to here.
+        val rows = board(mapOf("lat" to lat.toString(), "lon" to lon.toString(), "radius" to "300", "time" to start.toString(), "n" to "60",
+            "ending" to "1"))
         val row = rows.filter { r -> sameLine(r.line, line) && kotlin.math.abs(r.minutes - plannedMinutes) <= 2 }
             .minByOrNull { kotlin.math.abs(it.minutes - plannedMinutes) } ?: return null
         val time = "%d:%02d".format(row.minutes / 60, row.minutes % 60)
