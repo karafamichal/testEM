@@ -144,6 +144,19 @@
   }
   .back { display: none; }
   @media (max-width: 900px) { .back { display: inline-flex; margin-bottom: 12px; } }
+  /* Image viewer for reporters' photos: zoom (pinch, wheel, double tap), pan, swipe between them. */
+  .viewer { position: fixed; inset: 0; z-index: 1000; background: rgba(8, 10, 12, .94); touch-action: none; overflow: hidden; }
+  .viewer[hidden] { display: none; }
+  .viewer img { position: absolute; left: 50%; top: 50%; max-width: 96vw; max-height: 88vh; transform-origin: center;
+    user-select: none; -webkit-user-drag: none; cursor: zoom-in; }
+  .viewer.zoomed img { cursor: grab; }
+  .viewer button { position: absolute; border: 0; border-radius: 999px; width: 44px; height: 44px; font-size: 22px;
+    background: rgba(255, 255, 255, .14); color: #fff; cursor: pointer; }
+  .viewer button:hover { background: rgba(255, 255, 255, .26); }
+  .viewer .v-close { top: 14px; right: 14px; }
+  .viewer .v-prev { left: 14px; top: 50%; margin-top: -22px; }
+  .viewer .v-next { right: 14px; top: 50%; margin-top: -22px; }
+  .viewer .v-count { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: #cfd6dd; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -164,6 +177,13 @@
 </aside>
 <main id="view"></main>
 <div class="toast" id="toast" role="status" hidden></div>
+<div class="viewer" id="viewer" hidden role="dialog" aria-label="Image">
+  <img alt="Image from the reporter">
+  <button class="v-close" type="button" aria-label="Close">&times;</button>
+  <button class="v-prev" type="button" aria-label="Previous">&#8249;</button>
+  <button class="v-next" type="button" aria-label="Next">&#8250;</button>
+  <div class="v-count"></div>
+</div>
 
 <script>
 "use strict";
@@ -309,7 +329,7 @@ async function renderBug(id) {
     </div>
     <div data-panel="report"><p class="desc">${esc(bug.description)}</p>
       ${bug.images?.length ? `<div class="row" style="gap:10px;margin-top:14px">${bug.images.map((i) =>
-        `<a href="/admin/api/bugs/${bug.id}/images/${i.id}" target="_blank" rel="noopener" title="Open full size">
+        `<a href="/admin/api/bugs/${bug.id}/images/${i.id}" data-view title="Open">
           <img src="/admin/api/bugs/${bug.id}/images/${i.id}" alt="Image from the reporter" style="max-height:220px;max-width:100%;border:1px solid var(--line);border-radius:4px"></a>`).join("")}</div>` : ""}</div>
     <div data-panel="logs" hidden>
       ${bug.logs ? `<div class="logs-tools"><input class="input" id="log-filter" type="search" placeholder="Filter lines" style="flex:1"><button class="btn quiet" id="log-dl" type="button">Download</button></div><div class="logs" id="logs"></div>` : `<p class="muted">No logs were attached.</p>`}
@@ -899,6 +919,93 @@ function liveUpdates() {
   events.addEventListener("bugs", () => changed("bugs"));
   events.addEventListener("community", () => changed("community"));
 }
+
+// ---- image viewer: reporters' photos open over the page (not a new tab), with zoom and pan
+(() => {
+  const box = document.getElementById("viewer"), img = box.querySelector("img");
+  let list = [], at = 0, scale = 1, x = 0, y = 0;
+  const pointers = new Map();
+  let pinch = null, drag = null, swipeX = null, lastTap = 0;
+  const draw = () => {
+    img.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${scale})`;
+    box.classList.toggle("zoomed", scale > 1);
+  };
+  const reset = () => { scale = 1; x = 0; y = 0; draw(); };
+  const show = (i) => {
+    at = (i + list.length) % list.length;
+    img.src = list[at];
+    box.querySelector(".v-count").textContent = list.length > 1 ? `${at + 1} / ${list.length}` : "";
+    box.querySelector(".v-prev").hidden = box.querySelector(".v-next").hidden = list.length < 2;
+    reset();
+  };
+  const close = () => { box.hidden = true; img.removeAttribute("src"); };
+  const zoomAt = (factor, cx, cy) => {
+    const next = Math.min(8, Math.max(1, scale * factor));
+    // keep the point under the finger/cursor where it is
+    const ox = cx - window.innerWidth / 2 - x, oy = cy - window.innerHeight / 2 - y;
+    x -= ox * (next / scale - 1); y -= oy * (next / scale - 1);
+    scale = next;
+    if (scale === 1) { x = 0; y = 0; }
+    draw();
+  };
+  document.addEventListener("click", (e) => {
+    const link = e.target.closest("a[data-view]");
+    if (!link || e.ctrlKey || e.metaKey || e.button !== 0) return; // ctrl/middle click: a new tab, as before
+    e.preventDefault();
+    list = [...link.parentElement.querySelectorAll("a[data-view]")].map((a) => a.href);
+    box.hidden = false;
+    show(list.indexOf(link.href));
+  });
+  box.querySelector(".v-close").onclick = close;
+  box.querySelector(".v-prev").onclick = () => show(at - 1);
+  box.querySelector(".v-next").onclick = () => show(at + 1);
+  box.addEventListener("click", (e) => { if (e.target === box) close(); });
+  document.addEventListener("keydown", (e) => {
+    if (box.hidden) return;
+    if (e.key === "Escape") close();
+    if (e.key === "ArrowLeft") show(at - 1);
+    if (e.key === "ArrowRight") show(at + 1);
+  });
+  box.addEventListener("wheel", (e) => { e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY); }, { passive: false });
+  img.addEventListener("dblclick", (e) => { scale > 1 ? reset() : zoomAt(2.5, e.clientX, e.clientY); });
+  img.addEventListener("pointerdown", (e) => {
+    img.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), scale };
+      drag = swipeX = null;
+    } else {
+      drag = { x: e.clientX - x, y: e.clientY - y };
+      swipeX = scale === 1 ? e.clientX : null;
+      // double tap on touch screens (dblclick isn't sent for touch everywhere)
+      if (e.pointerType === "touch") {
+        if (Date.now() - lastTap < 300) { scale > 1 ? reset() : zoomAt(2.5, e.clientX, e.clientY); drag = swipeX = null; }
+        lastTap = Date.now();
+      }
+    }
+    e.preventDefault();
+  });
+  img.addEventListener("pointermove", (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      zoomAt((pinch.scale * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d) / scale, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    } else if (drag && scale > 1) {
+      x = e.clientX - drag.x; y = e.clientY - drag.y; draw();
+    }
+  });
+  const up = (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (swipeX !== null && list.length > 1 && Math.abs(e.clientX - swipeX) > 60) show(at + (e.clientX < swipeX ? 1 : -1));
+    swipeX = null;
+    if (!pointers.size) drag = null;
+  };
+  img.addEventListener("pointerup", up);
+  img.addEventListener("pointercancel", up);
+})();
 </script>
 </body>
 </html>

@@ -42,7 +42,7 @@ DEFAULT_FEEDS = ",".join([
     "ids-bk_regional", "dpmp", "slovak-lines-express-as", "regiojet-as", "a-express-sro",
     "cestovna-kancelaria-daka"])
 
-CHANGE_S = 120            # changing vehicles at one station
+CHANGE_S = 60             # changing vehicles at one station (cp.sk allows 1 min at the same stop, EM-0022)
 WALK_M = 400              # stations this close are joined by a footpath
 WALK_SPEED = 1.2 / 1.3    # m/s along a straight line (streets are ~30 % longer)
 SAME_NAME_M = 1500        # same-named stops further apart are different stations
@@ -391,7 +391,7 @@ class Timetable:
         conns.sort()
         day = Day(d, base, conns)
         with self._lock:
-            if len(self._days) >= 3:
+            if len(self._days) >= 4:
                 self._days.pop(next(iter(self._days)))
             self._days[d] = day
         return day
@@ -497,11 +497,11 @@ class Timetable:
 
     # ---- connection search (CSA)
 
-    def plan(self, origin, target, when, count=5, direct=False):
+    def plan(self, origin, target, when, count=5, direct=False, change=CHANGE_S):
         """
         Up to `count` connections leaving `origin` from `when` (epoch s). Each is the one with the
         fewest vehicles that arrives at most a little later than the fastest, and among equal
-        arrivals the one that leaves last.
+        arrivals the one that leaves last. change: the least time between two buses (s), the rider's setting.
         """
         day = self.day(datetime.fromtimestamp(when, ZONE).date())
         t = when - day.base
@@ -509,11 +509,11 @@ class Timetable:
         for _ in range(count * 4):
             if len(out) >= count or t >= 2 * 86400:
                 break
-            found = self._search(day, origin, target, t, 1 if direct else MAX_VEHICLES)
+            found = self._search(day, origin, target, t, 1 if direct else MAX_VEHICLES, change)
             if not found:
                 break
             arrival, vehicles = found
-            legs = self._latest(day, origin, target, t, arrival, vehicles)
+            legs = self._latest(day, origin, target, t, arrival, vehicles, change)
             if not legs:
                 break
             journey = self._journey(day, legs)
@@ -532,7 +532,32 @@ class Timetable:
         """Stations from which the target is reached, with the walk it takes."""
         return {target: 0, **{s: w for s, w in self.foot[target]}}
 
-    def _search(self, day, origin, target, t0, rounds):
+    def _earliest(self, day, origin, target, t0, change):
+        """The earliest arrival at the target with any number of vehicles, in one pass (None: unreachable today)."""
+        conns, ends, foot = day.conns, self._targets(target), self.foot
+        ready = [math.inf] * len(self.names)
+        ready[origin] = t0
+        for s, w in foot[origin]:
+            ready[s] = min(ready[s], t0 + w)
+        on, best, horizon = set(), math.inf, t0 + MAX_TRAVEL_S
+        for i in range(bisect.bisect_left(day.deps, t0), len(conns)):
+            dep, arr, a, b, run, _ = conns[i]
+            if dep >= best or dep > horizon:
+                break
+            if run not in on:
+                if ready[a] > dep:
+                    continue
+                on.add(run)
+            if b in ends and arr + ends[b] < best:
+                best = arr + ends[b]
+            if arr + change < ready[b]:
+                ready[b] = arr + change
+                for s2, w in foot[b]:
+                    if arr + max(w, change) < ready[s2]:
+                        ready[s2] = arr + max(w, change)
+        return None if best == math.inf else best
+
+    def _search(self, day, origin, target, t0, rounds, change=CHANGE_S):
         """
         Connection scan in rounds: round r finds the earliest arrivals using at most r vehicles.
         Returns (arrival, vehicles) of the pick: the fewest vehicles arriving within the slack of the fastest.
@@ -540,7 +565,17 @@ class Timetable:
         conns, ends = day.conns, self._targets(target)
         start = bisect.bisect_left(day.deps, t0)
         horizon = t0 + MAX_TRAVEL_S
-        ready = {origin: t0, **{s: t0 + w for s, w in self.foot[origin]}}  # when a vehicle can be boarded
+        if rounds > 1:
+            # One quick pass finds the fastest arrival; the rounds then only scan up to it plus the slack
+            # (twice, for safety) instead of a whole day, which made long trips take seconds.
+            fastest = self._earliest(day, origin, target, t0, change)
+            if fastest is None:
+                return None
+            horizon = min(horizon, fastest + 2 * (SLACK_S + (fastest - t0) * SLACK_SHARE))
+        ready = [math.inf] * len(self.names)  # per station: when a vehicle can be boarded there (a list: fast)
+        ready[origin] = t0
+        for s, w in self.foot[origin]:
+            ready[s] = min(ready[s], t0 + w)
         found = []                # (arrival at target, round)
         best = math.inf
         for r in range(1, rounds + 1):
@@ -550,7 +585,7 @@ class Timetable:
                 if dep >= best or dep > horizon:
                     break
                 if run not in on:
-                    if ready.get(a, math.inf) > dep:
+                    if ready[a] > dep:
                         continue
                     on.add(run)
                 if arr < new.get(b, math.inf):
@@ -560,15 +595,18 @@ class Timetable:
             end = min((arr + ends[s] for s, arr in new.items() if s in ends), default=None)
             if end is not None:
                 found.append((end, r))
+                # Rounds only add vehicles: the first within the slack of the fastest is the pick already.
+                if rounds > 1 and end <= fastest + SLACK_S + (fastest - t0) * SLACK_SHARE:
+                    return end, r
             if not new or r == rounds:
                 break
-            ready = dict(ready)
+            ready = ready[:]
             for s, arr in new.items():
-                if arr + CHANGE_S < ready.get(s, math.inf):
-                    ready[s] = arr + CHANGE_S
-                for s2, w in self.foot[s]:
-                    if arr + w < ready.get(s2, math.inf):
-                        ready[s2] = arr + w
+                if arr + change < ready[s]:
+                    ready[s] = arr + change
+                for s2, w in self.foot[s]:  # a walk to another stop takes at least the change time too
+                    if arr + max(w, change) < ready[s2]:
+                        ready[s2] = arr + max(w, change)
         if not found:
             return None
         fastest = min(found)[0]
@@ -576,21 +614,24 @@ class Timetable:
         arrival, r = min((f for f in found if f[0] <= fastest + slack), key=lambda f: (f[1], f[0]))
         return arrival, r
 
-    def _latest(self, day, origin, target, t0, deadline, rounds):
+    def _latest(self, day, origin, target, t0, deadline, rounds, change=CHANGE_S):
         """
         The mirror of _search: with at most `rounds` vehicles and arriving by `deadline`, the
         journey that leaves `origin` last. Same legs format.
         """
         conns, ends = day.conns, self._targets(target)
         starts = {origin: 0, **{s: w for s, w in self.foot[origin]}}
-        # need[r][station] = (latest arrival there by vehicle that still works, what comes next)
-        need = [{s: (deadline - w, ("end", w)) for s, w in ends.items()}]
+        # need[r] = (per station: latest arrival there by vehicle that still works, {station: what comes next})
+        times = [-math.inf] * len(self.names)
+        for s, w in ends.items():
+            times[s] = deadline - w
+        need = [(times, {s: ("end", w) for s, w in ends.items()})]
         departures = [{}]         # per round: station -> (departure, board conn, alight conn)
         found = []                # (departure from origin, round, start station)
         best = -math.inf
         top = bisect.bisect_right(day.arrivals, deadline) - 1
         for r in range(1, rounds + 1):
-            prev, new, off = need[r - 1], {}, {}
+            (prev, prev_how), new, off = need[r - 1], {}, {}
             for j in range(top, -1, -1):
                 i = day.by_arrival[j]
                 dep, arr, a, b, run, _ = conns[i]
@@ -599,7 +640,7 @@ class Timetable:
                 if dep < t0:
                     continue
                 if run not in off:
-                    if prev.get(b, (-math.inf,))[0] < arr:
+                    if prev[b] < arr:
                         continue
                     off[run] = i
                 if dep > new.get(a, (-math.inf,))[0]:
@@ -612,14 +653,14 @@ class Timetable:
                 found.append((start[0], r, start[1]))
             if not new or r == rounds:
                 break
-            nxt = dict(prev)
+            nxt, how = prev[:], dict(prev_how)
             for s, (dep, _, _) in new.items():
-                if dep - CHANGE_S > nxt.get(s, (-math.inf,))[0]:
-                    nxt[s] = (dep - CHANGE_S, ("dep", r, s))
+                if dep - change > nxt[s]:
+                    nxt[s], how[s] = dep - change, ("dep", r, s)
                 for s2, w in self.foot[s]:
-                    if dep - w > nxt.get(s2, (-math.inf,))[0]:
-                        nxt[s2] = (dep - w, ("walk", r, s, w))
-            need.append(nxt)
+                    if dep - max(w, change) > nxt[s2]:
+                        nxt[s2], how[s2] = dep - max(w, change), ("walk", r, s, w)
+            need.append((nxt, how))
         if not found:
             return None
         leave, r, s = max(found, key=lambda f: (f[0], -f[1]))
@@ -628,7 +669,7 @@ class Timetable:
             _, board, alight = departures[r][s]
             legs.append(("trip", board, alight))
             b = conns[alight][3]
-            how = need[r - 1][b][1]
+            how = need[r - 1][1][b]
             if how[0] == "end":
                 if b != target:
                     legs.append(("walk", b, conns[alight][1], target, how[1]))
@@ -758,6 +799,9 @@ def load(folder, feeds):
     started = time.time()
     paths = {f: folder / f"{f}.zip" for f in feeds if (folder / f"{f}.zip").exists()}
     built = Timetable(paths, city=city_days(folder))
+    today = datetime.now(ZONE).date()
+    for d in (today, today + timedelta(days=1)):  # the first search of the day mustn't wait for this
+        built.day(d)
     current = built
     failed = [f for f, n in built.feeds.items() if n == "failed"]
     log(f"loaded {len(built.trips)} trips, {len(built.names)} stations from {len(paths)} feeds "

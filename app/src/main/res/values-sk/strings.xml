@@ -347,8 +347,8 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="bug_email">E-mail pre odpoveď</string>
     <string name="bug_email_hint">Nepovinné. Nechajte prázdne, ak odpoveď nechcete.</string>
     <string name="bug_images">Pridať snímky obrazovky alebo fotky</string>
-    <string name="bug_images_hint">Najviac 3, napr. snímka obrazovky s vyznačeným miestom. Poloha a ďalšie údaje fotky sa odstránia.</string>
-    <string name="bug_images_count">Priložené: %1$d z 3, ťuknutím pridáte ďalšie</string>
+    <string name="bug_images_hint">Najviac 5, napr. snímka obrazovky s vyznačeným miestom. Poloha a ďalšie údaje fotky sa odstránia.</string>
+    <string name="bug_images_count">Priložené: %1$d z 5, ťuknutím pridáte ďalšie</string>
     <string name="bug_image">Obrázok %1$d</string>
     <string name="bug_image_remove">Odstrániť obrázok</string>
     <string name="bug_logs">Priložiť záznamy aplikácie</string>
@@ -426,6 +426,10 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="widget_empty">Označte zastávku alebo spojenie v aplikácii hviezdičkou a zobrazí sa tu.</string>
     <string name="widget_follow">Sledovať</string>
     <string name="widget_updated">Aktualizované %1$s</string>
+    <string name="change_time">Čas na prestup</string>
+    <string name="change_time_hint">Vyhľadávač ukáže prestup, len keď je medzi autobusmi aspoň toľko času. Kratší čas nájde viac spojení, dlhší je istejší, keď autobus mešká.</string>
+    <string name="change_time_any">Akýkoľvek (aj 0 min)</string>
+    <string name="change_time_minutes">Aspoň %1$d min</string>
     <string name="haptics_switch">Haptická odozva</string>
     <string name="haptics_switch_hint">Krátke zavibrovanie pri ťuknutí a keď sa niečo podarí, napr. sledovanie autobusu</string>
     <string name="picker_time_title">Čas</string>
@@ -529,6 +533,5 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="feature_send">Odoslať návrh</string>
     <string name="feature_sent_title">Návrh %1$s odoslaný</string>
     <string name="feature_sent_body">Ďakujeme za nápad. Ak ste nechali e-mail, ozveme sa, keď bude novinka.</string>
-    <string name="whats_new_body">• Nový widget na plochu: sledovaný autobus naživo, alebo vaše cesty s hviezdičkou (ťuknutím ich začnete sledovať) a najbližšie spoje z obľúbených zastávok.
-• MHD Banskej Bystrice na tabuliach odchodov ukazuje, kam ide, aj zastávky; spoje, ktoré na zastávke končia, majú „Končí tu“.</string>
+    <string name="whats_new_body">• Nové v Nastaveniach: čas na prestup, od akéhokoľvek po 10 min. Kratší nájde viac spojení.\n• Rýchlejšie vyhľadávanie spojení.\n• Až 5 fotiek v hlásení chyby.</string>
 </resources>

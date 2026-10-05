@@ -337,8 +337,8 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="bug_email">Email for our reply</string>
     <string name="bug_email_hint">Optional. Leave it empty if you don\'t want a reply.</string>
     <string name="bug_images">Add screenshots or photos</string>
-    <string name="bug_images_hint">Up to 3, e.g. a screenshot with what you mean marked on it. Location and other photo details are removed.</string>
-    <string name="bug_images_count">%1$d of 3 attached, tap to add more</string>
+    <string name="bug_images_hint">Up to 5, e.g. a screenshot with what you mean marked on it. Location and other photo details are removed.</string>
+    <string name="bug_images_count">%1$d of 5 attached, tap to add more</string>
     <string name="bug_image">Image %1$d</string>
     <string name="bug_image_remove">Remove image</string>
     <string name="bug_logs">Attach app logs</string>
@@ -412,6 +412,10 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="widget_empty">Star a stop or a journey in the app, and it shows here.</string>
     <string name="widget_follow">Follow</string>
     <string name="widget_updated">Updated %1$s</string>
+    <string name="change_time">Time to change buses</string>
+    <string name="change_time_hint">The planner shows changes only with at least this much time between the two buses. A shorter time finds more connections; a longer one is safer when a bus runs late.</string>
+    <string name="change_time_any">Any (even 0 min)</string>
+    <string name="change_time_minutes">At least %1$d min</string>
     <string name="haptics_switch">Haptic feedback</string>
     <string name="haptics_switch_hint">A short vibration on taps and when something is done, like following a bus</string>
     <string name="picker_time_title">Time</string>
@@ -516,6 +520,5 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• New home-screen widget: the bus you follow live, or your starred journeys (tap one to follow it) and the next buses at your favourite stops.
-• Banská Bystrica city buses on the departure boards show where they go and their stops; buses ending at the stop say “Ends here”.</string>
+    <string name="whats_new_body">• New in Settings: time to change buses, from any to 10 min. Shorter finds more connections.\n• Faster connection search.\n• Up to 5 photos in a bug report.</string>
 </resources>

@@ -201,6 +201,8 @@ class TripTrackerService : Service() {
     private var routeCoords: List<Pair<Double, Double>?>? = null
     private var routeCoordsLoading = false
     private var lastRiderIndex = -1f
+    /** The phone moves along the route past the boarding stop: the rider is on the bus. */
+    private var ridingBus = false
     private var lastRiderReportAt = 0L
     private var localFromGps = false
     /** Android granted the location service type; without it no GPS arrives while the app is closed. */
@@ -299,6 +301,7 @@ class TripTrackerService : Service() {
         stopRiderTracking()
         routeCoords = null
         lastRiderIndex = -1f
+        ridingBus = false
         lastRiderReportAt = 0L
         localFromGps = false
         nextFixAt = 0L
@@ -427,6 +430,10 @@ class TripTrackerService : Service() {
         // A standing bus still sends fixes (no minimum distance), so a low speed means it stopped.
         val moving = if (fix.hasSpeed()) fix.speed >= MOVING_MPS else lastRiderIndex >= 0f && index > lastRiderIndex + 0.05f
         lastRiderIndex = maxOf(lastRiderIndex, index)
+        if (moving && index > boarding + 0.05f && !ridingBus) {
+            ridingBus = true
+            Log.i(GPS_TAG, "riding the bus: no more catch estimates")
+        }
         Log.i(GPS_TAG, "fix: at %.2f (%.0f m off), boarding %.0f, speed %.1f".format(index, meters, boarding, fix.speed))
         val now = System.currentTimeMillis()
         val scheduled = detail.stops.map { it.scheduledMs }
@@ -557,10 +564,13 @@ class TripTrackerService : Service() {
     }
 
     private fun catchFor(detail: TripDetail, p: TripProgress): CatchEstimate? {
+        val seconds = ((earliestBoardingMs(detail, p) - System.currentTimeMillis()) / 1000L).toInt()
+        // "Bus is here" / "Bus is leaving" tapped, or the phone already rides along the route: the rider is with
+        // the bus, so never "you won't make it" (EM-0020), whatever the distance to the stop says.
+        if (herePressed || leavingPressed || ridingBus) return CatchEstimate.from(0, seconds)
         val fix = lastFix?.takeIf { it.accuracy <= MAX_FIX_ACCURACY_M } ?: return null
         val (lat, lon) = stopLatLon ?: return null
         val meters = LiveRepository.distanceMeters(fix.latitude, fix.longitude, lat, lon)
-        val seconds = ((earliestBoardingMs(detail, p) - System.currentTimeMillis()) / 1000L).toInt()
         return CatchEstimate.from(meters, seconds)
     }
 

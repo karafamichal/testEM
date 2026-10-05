@@ -418,8 +418,8 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
     var sentCode by rememberSaveable { mutableStateOf("") }
     var logs by remember { mutableStateOf("") }
     var images by remember { mutableStateOf(listOf<Uri>()) }
-    val pickImages = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(3)) { picked ->
-        images = (images + picked).distinct().take(3)
+    val pickImages = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(5)) { picked ->
+        images = (images + picked).distinct().take(5)
     }
     LaunchedEffect(Unit) { logs = withContext(Dispatchers.IO) { AppLogs.collect(context) } }
 
@@ -470,7 +470,7 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
         ListRow(
             stringResource(R.string.bug_images),
             subtitle = if (images.isEmpty()) stringResource(R.string.bug_images_hint) else stringResource(R.string.bug_images_count, images.size),
-            onClick = if (images.size < 3) ({ pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) else null
+            onClick = if (images.size < 5) ({ pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) else null
         )
     }
     if (images.isNotEmpty()) FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

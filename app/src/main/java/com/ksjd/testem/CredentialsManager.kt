@@ -228,6 +228,10 @@ class CredentialsManager(context: Context) {
     fun getCommunityEnabled(): Boolean = getCommunityMode() != COMMUNITY_OFF
 
     /** Use the phone's location (on the phone only) to say whether the user will catch the bus. */
+    /** Least time to change buses in the planner, minutes (0 = any connection, however tight). */
+    fun getChangeMinutes(): Int = prefs.getInt("change_minutes", 1)
+    fun saveChangeMinutes(minutes: Int) = prefs.edit().putInt("change_minutes", minutes).apply()
+
     /** Short vibrations on taps and actions (Haptics); on unless turned off. */
     fun getHapticsEnabled(): Boolean = prefs.getBoolean("haptics_enabled", true)
     fun saveHapticsEnabled(enabled: Boolean) = prefs.edit().putBoolean("haptics_enabled", enabled).apply()

@@ -241,6 +241,31 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
                 trailing = { Switch(whatsNew, setWhatsNew) }
             )
             GroupDivider()
+            var change by remember { mutableStateOf(prefs.getChangeMinutes()) }
+            var pickChange by remember { mutableStateOf(false) }
+            val changeLabel: (Int) -> String = { m ->
+                if (m == 0) context.getString(R.string.change_time_any) else context.getString(R.string.change_time_minutes, m)
+            }
+            ListRow(stringResource(R.string.change_time), subtitle = changeLabel(change), onClick = { pickChange = true })
+            if (pickChange) {
+                AlertDialog(
+                    onDismissRequest = { pickChange = false },
+                    title = { Text(stringResource(R.string.change_time)) },
+                    text = {
+                        Column {
+                            Text(stringResource(R.string.change_time_hint), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            listOf(0, 1, 2, 3, 5, 10).forEach { m ->
+                                ListRow(changeLabel(m), onClick = {
+                                    change = m; prefs.saveChangeMinutes(m); com.ksjd.testem.TimetableService.changeMinutes = m; pickChange = false
+                                }, trailing = { RadioButton(selected = change == m, onClick = null) })
+                            }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { pickChange = false }) { Text(stringResource(R.string.cancel)) } }
+                )
+            }
+            GroupDivider()
             var haptics by remember { mutableStateOf(prefs.getHapticsEnabled()) }
             val setHaptics: (Boolean) -> Unit = { on ->
                 haptics = on

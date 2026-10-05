@@ -847,7 +847,7 @@ function bugReport(body, feature = false) {
     send.disabled = true;
     send.textContent = t('bug_sending');
     try {
-      const images = await Promise.all([...form.images.files].slice(0, 3).map(shrinkImage));
+      const images = await Promise.all([...form.images.files].slice(0, 5).map(shrinkImage));
       const r = await apiJson('/api/hub/bugs', {
         kind: feature ? 'feature' : 'bug', category: feature ? 'feature' : f.category, title: f.title.trim(), description: f.description.trim(), name: f.name.trim(), email: f.email.trim(),
         appVersion: VERSION, device: navigator.userAgent, logs: withLogs() ? logs : '', consent: true, images,

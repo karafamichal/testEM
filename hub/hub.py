@@ -12,6 +12,7 @@ One stdlib-only process:
 
 Configuration comes from environment variables (see hub.env.example).
 """
+from concurrent.futures import ThreadPoolExecutor
 import base64
 import hashlib
 import hmac
@@ -44,7 +45,7 @@ from pathlib import Path
 import sadzv
 import timetable
 
-VERSION = "1.13.0"
+VERSION = "1.14.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -311,6 +312,9 @@ def session_cookie(token, max_age):
     return "; ".join(parts)
 
 
+# sadzv lookups for the planner run beside the timetable search.
+LIVE_POOL = ThreadPoolExecutor(max_workers=4)
+
 class RateLimiter:
     """Fixed-window counter per key. ponytail: in-memory, resets on restart; fine for one process."""
 
@@ -436,7 +440,7 @@ def bug_code(bug_id):
     return f"EM-{bug_id:04d}"
 
 
-MAX_IMAGES, MAX_IMAGE_BYTES, MAX_IMAGE_SIDE = 3, 4_000_000, 8000
+MAX_IMAGES, MAX_IMAGE_BYTES, MAX_IMAGE_SIDE = 5, 4_000_000, 8000
 # Start-of-frame markers (baseline, progressive, ...): they carry the picture size.
 JPEG_SOF = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
 
@@ -473,7 +477,7 @@ def clean_jpeg(blob):
 
 def bug_images(values):
     """Screenshots or photos sent with a bug report: base64 JPEG (the apps re-encode whatever the user picks),
-    at most 3 of 4 MB each. Only JPEG: one format to check, and nothing a browser could run as a script."""
+    at most 5 of 4 MB each. Only JPEG: one format to check, and nothing a browser could run as a script."""
     if not values:
         return []
     if not isinstance(values, list) or len(values) > MAX_IMAGES:
@@ -882,14 +886,18 @@ def timetable_query(route, query):
         if origin is None or target is None:
             return 404, {"error": "Stop not found", "from": origin is not None, "to": target is not None}
         when, count = when_param(query.get("time")), limit(5, 10)
-        journeys = t.plan(origin, target, when, count, query.get("direct") in ("1", "true"))
-        # Some city stops have no position in the feeds: take sadzv's stop of the same name.
+        # SAD Zvolen's live data is asked at the same time as the timetable is searched (about 1 s each).
         a = (t.lat[origin], t.lon[origin]) if t.lat[origin] is not None else sadzv.locate(t.names[origin], t.town_center(origin))
         b = (t.lat[target], t.lon[target]) if t.lat[target] is not None else sadzv.locate(t.names[target], t.town_center(target))
-        if a and b:
+        name_of = lambda lat, lon: next((s["name"] for s in t.near(lat, lon, 120, 1)), None)  # noqa: E731
+        live_job = LIVE_POOL.submit(sadzv.journeys, a, b, when, count, name_of) if a and b else None
+        # change: the rider's least time between two buses in minutes (app setting; 0 = any), 1 by default.
+        raw = str(query.get("change") or "")
+        change = min(30, int(raw)) * 60 if raw.isdigit() else timetable.CHANGE_S
+        journeys = t.plan(origin, target, when, count, query.get("direct") in ("1", "true"), change)
+        if live_job:
             # City buses aren't in the open timetables: SAD Zvolen's live data adds its direct buses.
-            name_of = lambda lat, lon: next((s["name"] for s in t.near(lat, lon, 120, 1)), None)  # noqa: E731
-            live = sadzv.journeys(a, b, when, count, name_of)
+            live = live_job.result()
             for j in live:  # the bus runs between the two searched stops: show their names
                 j["legs"][0]["from"]["name"], j["legs"][0]["to"]["name"] = t.names[origin], t.names[target]
             journeys = merge_live(journeys, live)[:count]

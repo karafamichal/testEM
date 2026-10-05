@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity() {
             AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(languageCode))
         }
         com.ksjd.testem.ui.components.Haptics.enabled = CredentialsManager(this).getHapticsEnabled()
+        TimetableService.changeMinutes = CredentialsManager(this).getChangeMinutes()
         com.ksjd.testem.hub.AppLogs.installCrashRecorder(applicationContext)
         // Cheap, and catches a changed alarm permission or a missed reboot.
         com.ksjd.testem.rides.RideScheduler.reschedule(applicationContext)

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.11.0
+
+### New
+- **Time to change buses** (Settings): how much time the planner leaves between two buses, from *any* (even 0 min) to 10 min. Short changes find more connections, like line 1 → 60101 at Štadlerovo nábrežie with 1 minute (report EM-0022); a longer one is safer when buses run late. The default is 1 minute (it was a fixed 2 minutes).
+- Up to **5 photos** in a bug report or suggestion (was 3).
+
+### Changed
+- **Faster planner**: searches take about half the time (Banská Bystrica – Zvolen in about 0.3 s), and the first search of a day no longer waits for the day's timetable to be prepared (emhub 1.14.0).
+
+## 2.10.1
+
+### Fixed
+- **"You won't make it" while you're already on the bus** (reports EM-0020, EM-0021): *Will I catch it?* measured the walk to the stop even after the bus had left with you on it, or after you tapped *Bus is here*. Once you tap *Bus is here* / *Bus is leaving*, or your phone moves along the route past your stop, you count as being with the bus: no more warnings that it leaves before you get there.
+
 ## 2.10.0
 
 ### New

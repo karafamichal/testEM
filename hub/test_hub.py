@@ -319,7 +319,7 @@ assert status in (302, 303) and headers["Location"].endswith("/dashboard"), "sig
 assert call("/login")[0] == 200
 for bad in [b"\x89PNG\r\n\x1a\n" + b"\0" * 32, b"GIF89a....", jpeg(w=60000, h=60000), jpeg()[:30], b"\xff\xd8<svg onload=alert(1)>"]:
     assert app_post({"consent": True, "description": "x", "images": [b64(bad)]})[0] == 400, bad[:12]
-assert app_post({"consent": True, "description": "x", "images": [b64(jpeg())] * 4})[0] == 400
+assert app_post({"consent": True, "description": "x", "images": [b64(jpeg())] * 6})[0] == 400, "at most 5"
 assert app_post({"consent": True, "description": "x", "images": ["not base64!"]})[0] == 400
 ideas = json.loads(call("/admin/api/bugs?kind=feature&status=all", cookie=cookie)[2])
 bugs = json.loads(call("/admin/api/bugs?status=all", cookie=cookie)[2])
@@ -397,6 +397,15 @@ assert [(d["line"], hm(d["at"])) for d in board[:3]] == [("101", "30 06:20"), ("
 trip = tt.trip(board[1]["tripId"])
 assert [s["name"] for s in trip["stops"]] == ["Town, AS", "City, Station"] and hm(trip["stops"][1]["arrival"]) == "30 07:10"
 assert tt.trip("b:nope:20260930") is None
+# EM-0022: a 1-minute change at the same stop counts (city bus 1 at Štadlerovo 15:29, IDS 60101 leaves 15:30)
+gtfs(os.path.join(folder, "m.zip"), [("1", "Home", 48.70, 19.10), ("2", "Hub, Stop", 48.71, 19.12)], {"m1": ("1", [("1", "06:00"), ("2", "06:09")])})
+gtfs(os.path.join(folder, "n.zip"), [("1", "Hub, Stop", 48.71, 19.12), ("2", "Far, Town", 48.60, 19.20)],
+     {"n1": ("60101", [("1", "06:10"), ("2", "06:26")]), "n2": ("60101", [("1", "07:10"), ("2", "07:26")])})
+tm = timetable.Timetable({"m": os.path.join(folder, "m.zip"), "n": os.path.join(folder, "n.zip")}, today=datetime.date(2026, 9, 29))
+quick = tm.plan(tm.resolve("home"), tm.resolve("far town"), at("05:55"), 1)[0]
+assert [(l.get("line"), hm(l["departure"])) for l in quick["legs"]] == [("1", "30 06:00"), ("60101", "30 06:10")], quick["legs"]
+careful = tm.plan(tm.resolve("home"), tm.resolve("far town"), at("05:55"), 1, change=5 * 60)[0]
+assert [(l.get("line"), hm(l["departure"])) for l in careful["legs"]] == [("1", "30 06:00"), ("60101", "30 07:10")], "5 min to change: the later bus"
 city = tt.resolve("city station")
 assert tt.departures([city], at("06:00"), 5) == [], "nothing leaves the end of the line"
 ends = tt.departures([city], at("06:00"), 5, ending=True)

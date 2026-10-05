@@ -53,7 +53,7 @@ class TimetableService {
 
     private fun plan(from: String, to: String, epochS: Long, direct: Boolean, listed: List<String>): TimetableSearchResult {
         val root = HubClient.timetable("plan", mapOf("from" to from, "to" to to, "time" to epochS.toString(), "n" to "5",
-            "direct" to if (direct) "1" else "0"))
+            "direct" to if (direct) "1" else "0", "change" to changeMinutes.toString()))
         val connections = root.getAsJsonArray("connections").map { parseConnection(it.asJsonObject) }
             .filter { it.id !in listed }.distinctBy { it.id }
         val last = root.getAsJsonArray("connections").lastOrNull()?.asJsonObject?.get("departure")?.asLong
@@ -173,6 +173,9 @@ class TimetableService {
         /** value2 of suggestions from emhub; older saved ones came from cp.sk and are looked up by name. */
         const val HUB_STOP = "hub"
         const val SADZV_FEED = "sad-zvolen-as"
+
+        /** Least time between two buses (minutes, 0 = any) the planner leaves for a change: the rider's setting. */
+        @Volatile var changeMinutes = 1
 
         fun tripUrl(tripId: String, from: Int?, to: Int?): String =
             "hub:trip?id=" + java.net.URLEncoder.encode(tripId, "UTF-8") + (from?.let { "&from=$it" } ?: "") + (to?.let { "&to=$it" } ?: "")
