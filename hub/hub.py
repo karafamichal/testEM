@@ -45,7 +45,7 @@ from pathlib import Path
 import sadzv
 import timetable
 
-VERSION = "1.14.0"
+VERSION = "1.14.2"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -842,6 +842,20 @@ def when_param(value):
     return int((moment if moment.tzinfo else moment.replace(tzinfo=LOCAL_ZONE)).timestamp())
 
 
+def walk_leg(a, b, at_ms, arriving):
+    """A walk between two stops 30 m or more apart (planner leg format), ending at at_ms (arriving) or
+    starting then; None when they are the same place."""
+    if a.get("lat") is None or b.get("lat") is None or a.get("name") == b.get("name"):
+        return None  # the same stop (its platforms can be some way apart)
+    d = timetable.meters(a["lat"], a["lon"], b["lat"], b["lon"])
+    if d < 30:
+        return None
+    ms = (int(d / timetable.WALK_SPEED) + 60) * 1000
+    start = at_ms - ms if arriving else at_ms
+    return {"type": "walk", "from": {k: a[k] for k in ("id", "name", "lat", "lon") if k in a},
+            "to": {k: b[k] for k in ("id", "name", "lat", "lon") if k in b}, "departure": start, "arrival": start + ms}
+
+
 def merge_live(journeys, live):
     """Timetable and live (sadzv) connections by departure; the live copy of the same bus wins, it can be followed live."""
     def same_bus(j, leg):
@@ -849,7 +863,8 @@ def merge_live(journeys, live):
         a, b = (legs[0]["line"], leg["line"]) if legs else ("", "")
         return len(legs) == 1 and abs(legs[0]["departure"] - leg["departure"]) <= 60_000 and \
             (a == b or a.endswith(b) or b.endswith(a))
-    kept = [j for j in journeys if not any(same_bus(j, l["legs"][0]) for l in live)]
+    bus = lambda j: next(x for x in j["legs"] if x["type"] == "trip")  # noqa: E731 - a live one may start with a walk
+    kept = [j for j in journeys if not any(same_bus(j, bus(l)) for l in live)]
     return sorted(kept + live, key=lambda j: (j["departure"], j["arrival"]))
 
 
@@ -898,8 +913,14 @@ def timetable_query(route, query):
         if live_job:
             # City buses aren't in the open timetables: SAD Zvolen's live data adds its direct buses.
             live = live_job.result()
-            for j in live:  # the bus runs between the two searched stops: show their names
-                j["legs"][0]["from"]["name"], j["legs"][0]["to"]["name"] = t.names[origin], t.names[target]
+            for j in live:
+                # sadzv counts stops up to 250 m away as the searched ones: when the bus really leaves from (or
+                # gets to) another stop nearby, say so with a short walk instead of renaming it (EM-0024).
+                bus = j["legs"][0]
+                before = walk_leg(t.station_json(origin), bus["from"], bus["departure"], arriving=True)
+                after = walk_leg(bus["to"], t.station_json(target), bus["arrival"], arriving=False)
+                j["legs"] = [leg for leg in (before, bus, after) if leg]
+                j["departure"], j["arrival"] = j["legs"][0]["departure"], j["legs"][-1]["arrival"]
             journeys = merge_live(journeys, live)[:count]
         return 200, {"from": t.station_json(origin), "to": t.station_json(target), "connections": journeys}
     return 404, {"error": "Not found"}

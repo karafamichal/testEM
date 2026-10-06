@@ -479,6 +479,15 @@ assert sadzv.locate("Zvolen, Nám.SNP", (48.69, 19.09)) == (48.70, 19.10), "a st
 assert sadzv.locate("Zvolen, Nám.SNP", (47.0, 17.0)) is None, "not in another town"
 timetable_leg = {"legs": [{"type": "trip", "line": "60109", "departure": base * 1000}], "departure": base * 1000, "arrival": 0}
 assert hub.merge_live([timetable_leg], found) == found, "the live copy of the same bus replaces the timetable one"
+# EM-0024: a live bus from another stop nearby keeps its own name, with a walk to it
+here = {"id": "zvolen zapad", "name": "Zvolen, Západ", "lat": 48.5770, "lon": 19.1330}
+gym = {"id": "sadzv-1", "name": "Zvolen, Gymnázium", "lat": 48.5786, "lon": 19.1352}
+walk = hub.walk_leg(here, gym, base * 1000, arriving=True)
+assert walk["to"]["name"] == "Zvolen, Gymnázium" and walk["arrival"] == base * 1000 and 120_000 < base * 1000 - walk["departure"] < 400_000, walk
+assert hub.walk_leg(gym, dict(gym, id="x"), base * 1000, arriving=False) is None, "the same place: no walk"
+assert hub.walk_leg(gym, dict(gym, lat=48.5790), base * 1000, arriving=False) is None, "another platform of the same stop: no walk"
+walked = {"legs": [walk, dict(leg)], "departure": walk["departure"], "arrival": leg["arrival"]}
+assert hub.merge_live([timetable_leg], [walked]) == [walked], "a live journey starting with a walk still replaces the timetable bus"
 
 server.shutdown()
 print("ok")

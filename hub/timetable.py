@@ -248,7 +248,8 @@ class Timetable:
             near.append((d, s))
         near.sort()
         for d, s in near:
-            if d <= 300 and named(s) or d <= 25:
+            # A similar name only counts close by: "Ďumbierska" 280 m from "Ďumbierska ŠZŠ" is another stop.
+            if d <= 120 and named(s) or d <= 25:
                 return s
         town = next((self.names[s].split(",")[0].strip() for d, s in near if "," in self.names[s] and d < 5000), None)
         if town:

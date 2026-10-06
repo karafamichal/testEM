@@ -126,15 +126,31 @@
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 4px; font-size: 14px; z-index: 10; max-width: calc(100vw - 32px); }
 
   @media (max-width: 900px) {
-    body { grid-template-columns: 1fr; }
-    .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 16px; gap: 6px; }
-    .rail-brand { padding: 0 12px 0 0; }
+    /* Phones: one column that never gets wider than the screen (EM: the rail made pages 564 px wide). */
+    body { grid-template-columns: minmax(0, 1fr); }
+    .rail { position: sticky; top: 0; z-index: 5; height: auto; display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 10px 14px 0; }
+    .rail-brand { padding: 0; }
+    .rail-brand strong { font-size: 22px; }
     .rail-brand span { display: none; }
-    .rail nav { flex-direction: row; }
-    .rail nav a { padding: 6px 10px; border-left: 0; border-bottom: 3px solid transparent; gap: 6px; }
+    .rail nav { grid-column: 1 / -1; flex-direction: row; overflow-x: auto; scrollbar-width: none; margin: 6px -14px 0; padding: 0 6px; }
+    .rail nav::-webkit-scrollbar { display: none; }
+    .rail nav a { padding: 10px 10px 9px; border-left: 0; border-bottom: 3px solid transparent; gap: 6px; white-space: nowrap; flex: none; }
     .rail nav a[aria-current="page"] { border-bottom-color: var(--amber); }
-    .rail-foot { margin: 0 0 0 auto; padding: 0; }
+    .rail-foot { margin: 0; padding: 0; grid-column: 2; grid-row: 1; }
     .rail-foot .who { display: none; }
+    /* 16 px text fields: iPhones zoom into anything smaller and stay zoomed. */
+    input, select, textarea { font-size: 16px !important; }
+    .page-head { padding-top: 16px; }
+    .page-head h1 { font-size: 24px; }
+    .detail-head h2 { font-size: 21px; }
+    .filters button { padding: 7px 12px; }
+    .btn { min-height: 40px; }
+    .meta { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+    .logs { max-height: 60vh; }
+    .preview, .editor .preview { height: 420px; }
+    .editor textarea { min-height: 360px; }
+    .stats { gap: 18px; }
+    main img { max-width: 100%; }
     .split { grid-template-columns: 1fr; }
     .list { max-height: none; border-right: 0; }
     .split.has-detail .list { display: none; }
@@ -144,6 +160,20 @@
   }
   .back { display: none; }
   @media (max-width: 900px) { .back { display: inline-flex; margin-bottom: 12px; } }
+  /* Narrow screens: every table row becomes a small card of "label  value" lines (labels from the header). */
+  @media (max-width: 700px) {
+    table.grid thead { display: none; }
+    table.grid, table.grid tbody, table.grid tr, table.grid td { display: block; width: 100%; }
+    table.grid { border-width: 1px 1px 0; }
+    table.grid tr { border-bottom: 1px solid var(--line); padding: 6px 0; }
+    table.grid td { border: 0; padding: 5px 12px; text-align: right; overflow-wrap: anywhere; position: relative; }
+    table.grid td[data-label] { padding-left: 42%; min-height: 30px; }
+    table.grid td[data-label]::before { content: attr(data-label); position: absolute; left: 12px; top: 6px; max-width: 38%;
+      color: var(--muted); font-size: 13px; text-align: left; }
+    table.grid td.row { justify-content: flex-end; }
+    table.grid td:empty { display: none; }
+  }
+  .more { margin-top: 10px; }
   /* Image viewer for reporters' photos: zoom (pinch, wheel, double tap), pan, swipe between them. */
   .viewer { position: fixed; inset: 0; z-index: 1000; background: rgba(8, 10, 12, .94); touch-action: none; overflow: hidden; }
   .viewer[hidden] { display: none; }
@@ -400,6 +430,11 @@ const dayTypeLabel = { workday: "workdays", saturday: "Saturdays", sunday: "Sund
 // Which buses the table shows: the last 6 hours (no day) or any day, optionally one line.
 let communityFilter = { day: "", line: "" };
 
+// Long lists show the newest LIST_LIMIT rows (phones: tens of thousands of pixels otherwise), then a button.
+const LIST_LIMIT = 50, showAll = { reports: false, trips: false };
+const more = (key, n) => n > LIST_LIMIT && !showAll[key]
+  ? `<button class="btn quiet more" type="button" data-more="${key}">Show all ${n}</button>` : "";
+
 async function renderCommunity(selected) {
   const params = new URLSearchParams(Object.entries(communityFilter).filter(([, v]) => v));
   const [trips, stats] = await Promise.all([api("community/trips" + (params.size ? "?" + params : "")), refreshCounts()]);
@@ -423,7 +458,7 @@ async function renderCommunity(selected) {
       </form>
       ${trips.length ? `<div class="table-wrap"><table class="grid">
         <thead><tr><th>Line</th><th>Trip</th><th>Delay now</th><th>Last reported</th><th>Worst</th><th>Usually</th><th>Riders</th><th>Source</th><th>Last report</th></tr></thead>
-        <tbody>${trips.map((t) => {
+        <tbody>${trips.slice(0, showAll.trips ? trips.length : LIST_LIMIT).map((t) => {
           const p = tripParts(t.trip_key), d = delayText(t.delay?.delaySeconds), l = delayText(t.last_delay), w = delayText(t.max_delay);
           const h = t.history, u = h ? delayText(h.delaySeconds) : null;
           return `<tr class="click" data-trip="${esc(t.trip_key)}" aria-selected="${t.trip_key === selectedKey}" tabindex="0">
@@ -436,7 +471,7 @@ async function renderCommunity(selected) {
             <td>${t.riders} <span class="muted small">(${t.n} reports)</span></td>
             <td>${t.delay ? (t.delay.source === "gps" ? "riders' phones" : "taps") : '<span class="muted">–</span>'}</td>
             <td>${ago(t.last)}</td></tr>`;
-        }).join("")}</tbody></table></div>`
+        }).join("")}</tbody></table></div>${more("trips", trips.length)}`
         : `<div class="empty" style="padding:20px 0"><h2>No reports${communityFilter.day ? " that day" : " yet"}</h2><p>When riders share where their bus is (buttons or their phone), the bus shows up here with its delay.</p></div>`}
     </div>
     <div class="section">
@@ -444,7 +479,7 @@ async function renderCommunity(selected) {
       ${selectedKey ? `<p><a href="#community">Show all reports</a></p>` : ""}
       ${reports.length ? `<div class="table-wrap"><table class="grid">
         <thead><tr><th>When</th><th>Line</th><th>Stop</th><th>Delay</th><th>Type</th><th>Rider</th><th>From</th><th></th></tr></thead>
-        <tbody>${reports.map((r) => {
+        <tbody>${reports.slice(0, showAll.reports ? reports.length : LIST_LIMIT).map((r) => {
           const d = delayText(r.delay_s);
           return `<tr><td>${ago(r.created_at)}</td><td><span class="plate line">${esc(r.line)}</span></td>
             <td>${esc(r.stop_name)} <span class="muted small">#${r.stop_index + 1}</span></td>
@@ -454,7 +489,7 @@ async function renderCommunity(selected) {
             <td>${esc(r.platform)}</td>
             <td class="row"><button class="btn quiet" data-del="${r.id}" type="button">Delete</button>
               <button class="btn danger" data-block="${esc(r.reporter)}" data-unblock="${r.blocked ? 1 : ""}" type="button">${r.blocked ? "Unblock" : "Block rider"}</button></td></tr>`;
-        }).join("")}</tbody></table></div>` : `<p class="muted">No reports.</p>`}
+        }).join("")}</tbody></table></div>${more("reports", reports.length)}` : `<p class="muted">No reports.</p>`}
     </div>`;
   $("#c-filter").onsubmit = (e) => {
     e.preventDefault();
@@ -463,6 +498,7 @@ async function renderCommunity(selected) {
     renderCommunity(selected);
   };
   $("#c-reset") && ($("#c-reset").onclick = () => { communityFilter = { day: "", line: "" }; renderCommunity(selected); });
+  view.querySelectorAll("[data-more]").forEach((b) => b.onclick = () => { showAll[b.dataset.more] = true; renderCommunity(selected); });
   view.querySelectorAll("[data-trip]").forEach((tr) => {
     const go = () => location.hash = "community/" + encodeURIComponent(tr.dataset.trip);
     tr.onclick = go; tr.onkeydown = (e) => e.key === "Enter" && go();
@@ -919,6 +955,17 @@ function liveUpdates() {
   events.addEventListener("bugs", () => changed("bugs"));
   events.addEventListener("community", () => changed("community"));
 }
+
+// ---- phone tables: give each cell its column name, shown before the value when rows become cards
+new MutationObserver(() => {
+  view.querySelectorAll("table.grid").forEach((table) => {
+    const heads = [...table.querySelectorAll("thead th")].map((th) => th.textContent.trim());
+    if (!heads.length) return;
+    table.querySelectorAll("tbody tr").forEach((tr) => [...tr.children].forEach((td, i) => {
+      if (heads[i] && td.dataset.label !== heads[i]) td.dataset.label = heads[i];
+    }));
+  });
+}).observe(view, { childList: true, subtree: true });
 
 // ---- image viewer: reporters' photos open over the page (not a new tab), with zoom and pan
 (() => {
