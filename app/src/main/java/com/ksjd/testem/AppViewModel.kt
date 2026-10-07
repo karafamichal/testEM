@@ -295,6 +295,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    suspend fun topUpLimits(): TicketSession.TopUpLimits = (session ?: throw java.io.IOException("Signed out")).topUpLimits()
+
+    /** Creates the top-up order for the selected card; the rider pays it on the returned page. */
+    suspend fun startTopUp(limits: TicketSession.TopUpLimits, cents: Int): TicketSession.PaymentGate {
+        val current = session ?: throw java.io.IOException("Signed out")
+        return current.startTopUp(current.activeSnr, limits.tariffId, cents)
+    }
+
+    fun topUpCookies(): List<Pair<String, String>> = session?.webCookies().orEmpty()
+
+    /** After the payment page: the new balance and the top-up in History. */
+    fun afterTopUp() {
+        refreshAccount()
+        loadCardHistory()
+    }
+
     fun loadCardHistory(limit: Int = 100) {
         val current = session ?: return
         if (_ticketState.value.historyState.isLoading) return

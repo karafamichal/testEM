@@ -205,6 +205,69 @@ class TicketSession(
     }
 
     // ---------------------------------------------------------------------
+    // Credit top-up (the website's "Vklad na kartu"): sadzv creates the order,
+    // the rider pays on GP webpay's page, which returns to sadzv to finish it.
+    // ---------------------------------------------------------------------
+
+    data class TopUpLimits(val tariffId: Int, val minCents: Int, val maxCents: Int, val defaultCents: Int)
+
+    /** GP webpay's page and the signed form sadzv made for it; [returnUrl] is where it sends the rider back. */
+    data class PaymentGate(val url: String, val fields: List<Pair<String, String>>, val returnUrl: String)
+
+    suspend fun topUpLimits(): TopUpLimits = signedIn {
+        val tariffId = JsonParser.parseString(getJson("$sessionBaseUrl/accountapi/getCardDepositTariff", "$sessionBaseUrl/account"))
+            .asJsonObject.get("tariffId").asInt
+        val props = JsonParser.parseString(getJson("$sessionBaseUrl/ticketapi/getTariffInformation/$tariffId", "$sessionBaseUrl/account"))
+            .asJsonObject.arr("properties")?.map { it.asJsonObject }.orEmpty()
+        fun cents(name: String, default: Int) = props.firstOrNull { it.str("name") == name }?.str("valueText")?.toIntOrNull() ?: default
+        TopUpLimits(tariffId, cents("MinVklad", 200), cents("MaxVklad", 5000), cents("DefaultVklad", 500))
+    }
+
+    suspend fun startTopUp(snr: String, tariffId: Int, cents: Int): PaymentGate = signedIn {
+        val order = JsonArray().apply {
+            add(JsonObject().apply {
+                addProperty("snr", snr); addProperty("tariffId", tariffId); addProperty("zoneId", 0)
+                addProperty("validFrom", 0); addProperty("amountInCents", cents); addProperty("paymentTypeId", PAYMENT_CARD)
+            })
+        }
+        val url = "$sessionBaseUrl/ticketapi/buyTicket"
+        val request = browserRequest(url, "$sessionBaseUrl/account")
+            .post(FormBody.Builder().add("post", order.toString()).build())
+            .header("Origin", sessionBaseUrl)
+            .withCsrf(url)
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (response.code == 401 || response.request.url.encodedPath.contains("/account/login")) throw SessionExpiredException()
+            val body = response.body?.string().orEmpty()
+            if (body.trimStart().startsWith("<")) throw SessionExpiredException()
+            if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
+            val json = JsonParser.parseString(body).asJsonObject
+            val fields = json.arr("requestFields")?.map { it.asJsonObject.let { f -> f.str("name") to f.str("value") } }.orEmpty()
+            val gateway = json.str("gatewayUrl")
+            // Only ever hand the rider's browser to the bank's gateway.
+            if (gateway.toHttpUrlOrNull()?.let { it.isHttps && it.host.endsWith("gpwebpay.com") } != true || fields.isEmpty()) {
+                throw IOException("No payment gateway")
+            }
+            PaymentGate(gateway, fields, fields.firstOrNull { it.first == "URL" }?.second.orEmpty())
+        }
+    }
+
+    /** The website session, for the payment page's return to sadzv. */
+    fun webCookies(): List<Pair<String, String>> =
+        cookieJar.loadForRequest("https://$HOST/".toHttpUrlOrNull()!!).map { it.name to it.value }
+
+    private suspend fun <T> signedIn(block: () -> T): T = withContext(Dispatchers.IO) {
+        if (!isAuthenticated) login()
+        try {
+            block()
+        } catch (e: SessionExpiredException) {
+            isAuthenticated = false
+            login()
+            block()
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Login flow
     // ---------------------------------------------------------------------
 
@@ -527,6 +590,7 @@ class TicketSession(
     companion object {
         private const val TAG = "TicketSession"
         private const val HOST = "sadzv.qrbus.me"
+        private const val PAYMENT_CARD = 3  // the tariff's "PlatbaBakovaKarta"
     }
 }
 

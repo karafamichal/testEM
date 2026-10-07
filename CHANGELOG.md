@@ -1,6 +1,9 @@
 # Changelog
 
-## 2.12.1
+## 2.13.0
+
+### New
+- **Add credit to your card** (*Account → Add credit*): pick an amount (2–50 €, 5 € suggested, the limits come from sadzv) and pay on the operator's own payment gateway (GP webpay), the same as on sadzv.qrbus.me. The payment goes straight to SAD Zvolen: Plan&Ride only opens the gateway, takes no fee and never sees your card details. Afterwards the app shows whether it was paid and refreshes your credit and History.
 
 ### Fixed
 - **Times on phones set to another time zone**: *Now* in the planner searched from the phone's clock time instead of Slovak time, and the stop list in *Change stop* was off by the difference. All bus times are now Slovak time.

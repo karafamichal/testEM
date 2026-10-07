@@ -1,5 +1,6 @@
 package com.ksjd.testem.ui.screens
 
+import androidx.compose.material3.FilledTonalButton
 import android.content.Intent
 import android.net.Uri
 import com.ksjd.testem.CredentialsManager
@@ -109,6 +110,8 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
     val unlocked = app.hasAccount && app.isAppUnlocked
     val card = ticket.selectedCard.takeIf { unlocked }
     if (showSupport) SupportDialog { showSupport = false }
+    var topUp by remember { mutableStateOf(false) }
+    if (topUp && card != null) TopUpSheet(viewModel, card) { topUp = false }
 
     if (confirmRemove) {
         AlertDialog(
@@ -162,7 +165,7 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
             )
             card != null -> {
                 CardImage(card)
-                BalanceBlock(card)
+                BalanceBlock(card, onTopUp = { topUp = true })
                 SectionLabel(stringResource(R.string.account_validity))
                 ListGroup {
                     ValidityRow(stringResource(R.string.account_ticket), card.ticketValidFrom, card.ticketValidTo)
@@ -393,11 +396,14 @@ private fun CardImage(card: AccountDetails) {
 }
 
 @Composable
-private fun BalanceBlock(card: AccountDetails) {
+private fun BalanceBlock(card: AccountDetails, onTopUp: () -> Unit) {
     val balance = card.creditLastBalance ?: return
     Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
         Text(stringResource(R.string.account_balance), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(Format.money(balance, card.currencySymbol), style = MaterialTheme.typography.displayLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(Format.money(balance, card.currencySymbol), style = MaterialTheme.typography.displayLarge, modifier = Modifier.weight(1f))
+            FilledTonalButton(onClick = onTopUp) { Text(stringResource(R.string.topup_button)) }
+        }
         if (card.cardTypeName.isNotBlank()) {
             Text(card.cardTypeName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
