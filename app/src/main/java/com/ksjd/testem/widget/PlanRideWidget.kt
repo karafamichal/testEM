@@ -30,7 +30,7 @@ import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
-import androidx.glance.appwidget.LinearProgressIndicator
+import androidx.glance.layout.fillMaxHeight
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
@@ -188,7 +188,7 @@ private fun LiveCard(context: Context, view: FollowView?, now: Long, colors: Car
     val trip = TripTracking.active.value
     Box(GlanceModifier.fillMaxSize().cornerRadius(28.dp).clickable(open)) {
         Image(ImageProvider(background), contentDescription = null, contentScale = ContentScale.FillBounds, modifier = GlanceModifier.fillMaxSize())
-        Column(GlanceModifier.fillMaxSize().padding(start = 18.dp, end = 10.dp, top = 10.dp, bottom = 12.dp)) {
+        Column(GlanceModifier.fillMaxSize().padding(start = 18.dp, end = 10.dp, top = 10.dp, bottom = 8.dp)) {
             Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("● " + context.getString(if (view?.live == true) R.string.follow_live else R.string.follow_timetable).uppercase(),
                     style = TextStyle(color = on, fontSize = 12.sp, fontWeight = FontWeight.Bold), modifier = GlanceModifier.defaultWeight())
@@ -207,7 +207,7 @@ private fun LiveCard(context: Context, view: FollowView?, now: Long, colors: Car
                 return@Column
             }
             val summary = followSummary(context, view, now)
-            Row(verticalAlignment = Alignment.Bottom, modifier = GlanceModifier.padding(top = 6.dp)) {
+            Row(verticalAlignment = Alignment.Bottom, modifier = GlanceModifier.padding(top = 4.dp)) {
                 Text(summary.countdown, style = TextStyle(color = on, fontSize = 30.sp, fontWeight = FontWeight.Bold))
                 Text("  " + summary.caption, maxLines = 2, style = TextStyle(color = onDim, fontSize = 13.sp),
                     modifier = GlanceModifier.defaultWeight().padding(bottom = 5.dp))
@@ -220,45 +220,46 @@ private fun LiveCard(context: Context, view: FollowView?, now: Long, colors: Car
             }
             if (summary.stopsAway > 0) {
                 Text(context.resources.getQuantityString(R.plurals.follow_stops_away, summary.stopsAway, summary.stopsAway),
-                    style = TextStyle(color = onDim, fontSize = 12.sp), modifier = GlanceModifier.padding(top = 6.dp))
+                    style = TextStyle(color = onDim, fontSize = 12.sp), modifier = GlanceModifier.padding(top = 4.dp))
             }
-            Spacer(GlanceModifier.height(8.dp))
+            Spacer(GlanceModifier.height(6.dp))
             Track(summary, colors)
             Row(GlanceModifier.fillMaxWidth().padding(top = 2.dp)) {
                 Text(summary.from, maxLines = 1, style = TextStyle(color = onDim, fontSize = 12.sp), modifier = GlanceModifier.defaultWeight())
                 Text(summary.to, maxLines = 1, style = TextStyle(color = onDim, fontSize = 12.sp))
             }
             view.catchLine?.let {
-                Text(it, maxLines = 2, style = TextStyle(color = on, fontSize = 12.sp), modifier = GlanceModifier.padding(top = 4.dp))
+                Text(it, maxLines = 1, style = TextStyle(color = on, fontSize = 12.sp), modifier = GlanceModifier.padding(top = 2.dp))
             }
         }
     }
 }
 
-/** Your part of the line: a dot per stop (at most 12), the ridden part bright, and the bus at its place. */
+/** Your part of the line: a dot per stop (at most 12) joined by the line, the ridden part bright, and the bus at its place. */
 @Composable
 private fun Track(summary: FollowSummary, colors: CardColors) {
     val cells = (summary.hops + 1).coerceAtMost(12)
     val bus = Math.round(summary.position / summary.hops * (cells - 1)).toInt().coerceIn(0, cells - 1)
-    Box(GlanceModifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.CenterStart) {
-        LinearProgressIndicator(
-            progress = summary.position / summary.hops,
-            modifier = GlanceModifier.fillMaxWidth().height(4.dp).padding(horizontal = 10.dp),
-            color = FixedColor(colors.on.copy(alpha = 0.85f)),
-            backgroundColor = FixedColor(colors.on.copy(alpha = 0.3f))
-        )
-        Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            for (i in 0 until cells) {
-                Box(GlanceModifier.defaultWeight(), contentAlignment = Alignment.Center) {
-                    if (i == bus) {
-                        Box(GlanceModifier.size(22.dp).cornerRadius(11.dp).background(FixedColor(colors.on)), contentAlignment = Alignment.Center) {
-                            Image(ImageProvider(R.drawable.ic_stat_bus), contentDescription = null, modifier = GlanceModifier.size(14.dp),
-                                colorFilter = ColorFilter.tint(FixedColor(colors.primary)))
-                        }
-                    } else {
-                        Text(if (i == 0 || i == cells - 1) "●" else "•",
-                            style = TextStyle(color = FixedColor(colors.on.copy(alpha = if (i < bus) 1f else 0.7f)), fontSize = 12.sp))
+    val bright = FixedColor(colors.on.copy(alpha = 0.85f))
+    val dim = FixedColor(colors.on.copy(alpha = 0.3f))
+    val none = FixedColor(Color.Transparent)
+    // Stops at both edges like the app's track; between them the line, bright up to the bus.
+    Row(GlanceModifier.fillMaxWidth().height(22.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (i in 0 until cells) {
+            if (i > 0) Spacer(GlanceModifier.defaultWeight().height(4.dp).background(if (i <= bus) bright else dim))
+            Box(GlanceModifier.size(22.dp), contentAlignment = Alignment.Center) {
+                Row(GlanceModifier.fillMaxWidth().height(4.dp)) {
+                    Spacer(GlanceModifier.defaultWeight().fillMaxHeight().background(if (i == 0) none else if (i <= bus) bright else dim))
+                    Spacer(GlanceModifier.defaultWeight().fillMaxHeight().background(if (i == cells - 1) none else if (i < bus) bright else dim))
+                }
+                if (i == bus) {
+                    Box(GlanceModifier.size(22.dp).cornerRadius(11.dp).background(FixedColor(colors.on)), contentAlignment = Alignment.Center) {
+                        Image(ImageProvider(R.drawable.ic_stat_bus), contentDescription = null, modifier = GlanceModifier.size(14.dp),
+                            colorFilter = ColorFilter.tint(FixedColor(colors.primary)))
                     }
+                } else {
+                    Text(if (i == 0 || i == cells - 1) "●" else "•",
+                        style = TextStyle(color = FixedColor(colors.on.copy(alpha = if (i < bus) 1f else 0.7f)), fontSize = 12.sp))
                 }
             }
         }

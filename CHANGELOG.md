@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.12.1
+
+### Fixed
+- **Times on phones set to another time zone**: *Now* in the planner searched from the phone's clock time instead of Slovak time, and the stop list in *Change stop* was off by the difference. All bus times are now Slovak time.
+- **Widget layout**: the route line starts and ends at your stops like on the home card (it ran past them), and the last line (*Will I catch it?*) is no longer cut off.
+
 ## 2.12.0
 
 ### New
@@ -11,7 +17,6 @@
 - **The widget looks like the live card on the home tab** (EM-0025): the same colours (your theme), line, destination, countdown, delay, stops to go and the bus moving along your part of the route.
 - **Waiting at your stop for a late bus** (EM-0033): when your phone stands at your stop after the bus was due, the bus is kept there as late instead of moving on with the timetable, and the notification asks *Bus is here* (reported for other riders too) or *It already left*, also in automatic mode.
 - *Alert on timetable times too* (Will I catch it?) is on by default (EM-0029).
-- Bus times are always shown in Slovak time, also on a phone set to another time zone.
 
 ### Fixed
 - **"You won't make it" from an old position** (EM-0032): the location was checked only every few minutes and the estimate kept using the old one while you walked. Before *Leave now* or *You won't make it*, the app now gets a fresh position (and never alerts from one older than 45 s).

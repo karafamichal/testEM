@@ -775,7 +775,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
 
     private fun currentTimeText(): String {
-        val now = java.util.Calendar.getInstance()
-        return "%02d:%02d".format(now.get(java.util.Calendar.HOUR_OF_DAY), now.get(java.util.Calendar.MINUTE))
+        val now = java.time.LocalTime.now(SK_ZONE)
+        return "%02d:%02d".format(now.hour, now.minute)
     }
 }
