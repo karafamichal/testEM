@@ -1,5 +1,15 @@
 package com.ksjd.testem.ui.screens
 
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.Color
+import com.ksjd.testem.Wallet
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
@@ -176,13 +186,13 @@ fun PinSetupScreen(viewModel: AppViewModel) {
         }
         if (error.isEmpty()) viewModel.setPin(pin)
     }
-    BackHandler(onBack = viewModel::removeAccount)
+    BackHandler(onBack = viewModel::removeAllAccounts)
 
     AuthFrame(
         title = stringResource(R.string.pin_setup_title),
         body = stringResource(R.string.pin_setup_subtitle),
         footer = {
-            TextButton(onClick = viewModel::removeAccount, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = viewModel::removeAllAccounts, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.pin_setup_cancel))
             }
         }
@@ -283,14 +293,126 @@ fun LockedScreen(onUnlock: () -> Unit) {
     }
 }
 
+/** The carrier's mark on account rows and ticket passes: SAD Zvolen in the app's colour, IDS BBSK in its own red. */
+@Composable
+internal fun walletColor(wallet: Wallet): Color =
+    if (wallet == Wallet.IDS) IdsRed else MaterialTheme.colorScheme.primary
+
+internal val IdsRed = Color(0xFFED1C24)
+internal val IdsCharcoal = Color(0xFF31323C)
+
+@Composable
+internal fun walletName(wallet: Wallet): String =
+    stringResource(if (wallet == Wallet.IDS) R.string.wallet_ids else R.string.wallet_sadzv)
+
 /**
- * Adding the SADZV account. [welcome]: the first-run screen, where the account is optional
- * and [onSkip] continues without it; otherwise [onSkip] cancels.
+ * First run: the two accounts whose tickets the app can show, each optional (EM-0023). Adding one opens its
+ * sign-in form and comes back here; Continue goes on with whatever was added (or none).
  */
+@Composable
+fun WelcomeScreen(viewModel: AppViewModel, appState: AppState) {
+    var adding by rememberSaveable { mutableStateOf<Wallet?>(null) }
+    LaunchedEffect(appState.hasAccount, appState.hasIdsAccount) { adding = null }
+    adding?.let { wallet ->
+        val close = { adding = null; viewModel.clearLoginError() }
+        BackHandler(onBack = close)
+        LoginScreen(viewModel, appState, wallet, welcome = true, onSkip = close)
+        return
+    }
+    AuthFrame(
+        title = stringResource(R.string.welcome_title),
+        body = stringResource(R.string.welcome_body),
+        footer = {
+            if (appState.anyAccount) {
+                PrimaryButton(stringResource(R.string.welcome_continue), viewModel::skipOnboarding)
+            } else {
+                OutlinedButton(
+                    onClick = viewModel::skipOnboarding,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text(stringResource(R.string.welcome_skip)) }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(stringResource(R.string.welcome_skip_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    ) {
+        Text(stringResource(R.string.welcome_account_title), style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(12.dp))
+        WalletRow(Wallet.SADZV, appState.email.takeIf { appState.hasAccount }) { adding = Wallet.SADZV }
+        Spacer(Modifier.height(10.dp))
+        WalletRow(Wallet.IDS, appState.idsEmail.takeIf { appState.hasIdsAccount }) { adding = Wallet.IDS }
+    }
+}
+
+/** One account: what it covers, and Add, or the email it was added with. */
+@Composable
+internal fun WalletRow(wallet: Wallet, addedEmail: String?, onAdd: () -> Unit) {
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.height(IntrinsicSize.Min)) {
+            Box(Modifier.width(6.dp).fillMaxHeight().background(walletColor(wallet)))
+            Column(Modifier.weight(1f).padding(start = 16.dp, top = 14.dp, bottom = 14.dp, end = 8.dp)) {
+                Text(walletName(wallet), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(if (wallet == Wallet.IDS) R.string.wallet_ids_covers else R.string.wallet_sadzv_covers),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (addedEmail != null) {
+                    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.CheckCircle, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text(addedEmail, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 6.dp))
+                    }
+                }
+            }
+            if (addedEmail == null) {
+                FilledTonalButton(onClick = onAdd, modifier = Modifier.align(Alignment.CenterVertically).padding(end = 12.dp)) {
+                    Text(stringResource(R.string.welcome_add))
+                }
+            }
+        }
+    }
+}
+
+/** Both accounts use different emails: the one picked fills in reports and suggestions. */
+@Composable
+fun PrimaryEmailDialog(appState: AppState, onDismiss: (() -> Unit)? = null, onPick: (String) -> Unit) {
+    var picked by remember { mutableStateOf(appState.primaryAccount.ifEmpty { "sadzv" }) }
+    AlertDialog(
+        onDismissRequest = { onDismiss?.invoke() },
+        title = { Text(stringResource(R.string.primary_title)) },
+        text = {
+            Column {
+                Text(stringResource(R.string.primary_body), style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                listOf("sadzv" to appState.email, "ids" to appState.idsEmail).forEach { (key, email) ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { picked = key }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = picked == key, onClick = { picked = key })
+                        Column {
+                            Text(email, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                walletName(if (key == "ids") Wallet.IDS else Wallet.SADZV),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { onPick(picked) }) { Text(stringResource(R.string.primary_use)) } },
+        dismissButton = onDismiss?.let { { TextButton(onClick = it) { Text(stringResource(R.string.cancel)) } } }
+    )
+}
+
+/** Adding the [wallet] account. [welcome]: from the first-run screen; [onSkip] goes back (or cancels). */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun LoginScreen(viewModel: AppViewModel, appState: AppState, welcome: Boolean, onSkip: () -> Unit) {
-    var email by rememberSaveable(appState.email) { mutableStateOf(appState.email) }
+fun LoginScreen(viewModel: AppViewModel, appState: AppState, wallet: Wallet, welcome: Boolean, onSkip: () -> Unit) {
+    val known = if (wallet == Wallet.IDS) appState.idsEmail else appState.email
+    var email by rememberSaveable(known) { mutableStateOf(known) }
     var password by rememberSaveable { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
@@ -298,42 +420,19 @@ fun LoginScreen(viewModel: AppViewModel, appState: AppState, welcome: Boolean, o
     val submit = {
         if (canSubmit) {
             focus.clearFocus()
-            viewModel.login(email, password)
+            viewModel.login(email, password, wallet)
         }
     }
 
     AuthFrame(
-        title = stringResource(if (welcome) R.string.welcome_title else R.string.login_title),
-        body = stringResource(if (welcome) R.string.welcome_body else R.string.login_subtitle),
+        title = walletName(wallet),
+        body = stringResource(if (wallet == Wallet.IDS) R.string.login_subtitle_ids else R.string.login_subtitle),
         footer = {
-            if (welcome) {
-                OutlinedButton(
-                    onClick = onSkip,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) { Text(stringResource(R.string.welcome_skip)) }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    stringResource(R.string.welcome_skip_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.cancel)) }
+            TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(if (welcome) R.string.back else R.string.cancel))
             }
         }
     ) {
-        if (welcome) {
-            Text(stringResource(R.string.welcome_account_title), style = MaterialTheme.typography.titleMedium)
-            Text(
-                stringResource(R.string.login_subtitle),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-        }
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },

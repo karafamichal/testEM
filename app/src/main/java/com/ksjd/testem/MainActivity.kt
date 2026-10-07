@@ -47,6 +47,8 @@ import com.ksjd.testem.ui.screens.AccountScreen
 import com.ksjd.testem.ui.screens.DeparturesScreen
 import com.ksjd.testem.ui.screens.HistoryScreen
 import com.ksjd.testem.ui.screens.LockedScreen
+import com.ksjd.testem.ui.screens.WelcomeScreen
+import com.ksjd.testem.ui.screens.PrimaryEmailDialog
 import com.ksjd.testem.ui.screens.LoginScreen
 import com.ksjd.testem.ui.screens.PinSetupScreen
 import com.ksjd.testem.ui.screens.PlannerScreen
@@ -122,8 +124,8 @@ enum class AppTab(val labelRes: Int) {
 fun AppRoot(viewModel: AppViewModel, liveViewModel: LiveViewModel, activity: FragmentActivity) {
     val appState by viewModel.appState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
-    // Sign-in form opened from Settings ("Add account") or the home tab ("Sign in again").
-    var signingIn by rememberSaveable { mutableStateOf(false) }
+    // Sign-in form opened from Settings ("Add account") or the home tab ("Sign in again"): for which account.
+    var signingIn by rememberSaveable { mutableStateOf<Wallet?>(null) }
 
     LaunchedEffect(appState.isAppUnlocked, appState.hasAccount, appState.isLoggedIn, appState.isLoading, appState.email) {
         if (appState.isAppUnlocked && appState.hasAccount && !appState.isLoggedIn && !appState.isLoading &&
@@ -132,7 +134,9 @@ fun AppRoot(viewModel: AppViewModel, liveViewModel: LiveViewModel, activity: Fra
             viewModel.loginWithSavedCredentials()
         }
     }
-    LaunchedEffect(appState.hasAccount) { if (appState.hasAccount) signingIn = false }
+    LaunchedEffect(appState.hasAccount, appState.hasIdsAccount) {
+        if (signingIn == Wallet.SADZV && appState.hasAccount || signingIn == Wallet.IDS && appState.hasIdsAccount) signingIn = null
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -153,15 +157,20 @@ fun AppRoot(viewModel: AppViewModel, liveViewModel: LiveViewModel, activity: Fra
     }
 
     when {
-        // First run: add the SADZV account now, or skip and use the app without it.
-        !appState.onboarded -> LoginScreen(viewModel, appState, welcome = true, onSkip = viewModel::skipOnboarding)
+        // First run: add the SAD Zvolen and/or IDS BBSK account now, or use the app without them.
+        !appState.onboarded -> WelcomeScreen(viewModel, appState)
         // An account was just added: its ticket needs a PIN.
-        appState.hasAccount && !appState.isPinSet -> PinSetupScreen(viewModel)
-        signingIn -> {
-            BackHandler { signingIn = false; viewModel.clearLoginError() }
-            LoginScreen(viewModel, appState, welcome = false, onSkip = { signingIn = false; viewModel.clearLoginError() })
+        appState.anyAccount && !appState.isPinSet -> PinSetupScreen(viewModel)
+        signingIn != null -> {
+            val close = { signingIn = null; viewModel.clearLoginError() }
+            BackHandler(onBack = close)
+            LoginScreen(viewModel, appState, signingIn!!, welcome = false, onSkip = close)
         }
-        else -> MainScaffold(viewModel, liveViewModel, activity, onSignIn = { signingIn = true })
+        else -> {
+            MainScaffold(viewModel, liveViewModel, activity, onSignIn = { signingIn = it })
+            // Two accounts under different emails: which one should reports use?
+            if (appState.needsPrimary && appState.isAppUnlocked) PrimaryEmailDialog(appState) { viewModel.setPrimaryAccount(it) }
+        }
     }
 }
 
@@ -170,11 +179,11 @@ private fun MainScaffold(
     viewModel: AppViewModel,
     liveViewModel: LiveViewModel,
     activity: FragmentActivity,
-    onSignIn: () -> Unit
+    onSignIn: (Wallet) -> Unit
 ) {
     val appState by viewModel.appState.collectAsState()
     // History exists only with an account; the last tab is Account or just Settings.
-    val tabs = AppTab.entries.filter { it != AppTab.History || appState.hasAccount }
+    val tabs = AppTab.entries.filter { it != AppTab.History || appState.anyAccount }
     var selected by rememberSaveable { mutableStateOf(AppTab.Home) }
     if (selected !in tabs) selected = AppTab.Home
     var unlocking by remember { mutableStateOf(false) }
@@ -199,13 +208,13 @@ private fun MainScaffold(
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
                 tabs.forEach { tab ->
                     val icon = when (tab) {
-                        AppTab.Home -> if (appState.hasAccount) Icons.Outlined.QrCode2 else Icons.Outlined.Home
+                        AppTab.Home -> if (appState.anyAccount) Icons.Outlined.QrCode2 else Icons.Outlined.Home
                         AppTab.Departures -> Icons.Outlined.DirectionsBus
                         AppTab.Planner -> Icons.AutoMirrored.Outlined.AltRoute
                         AppTab.History -> Icons.AutoMirrored.Outlined.ReceiptLong
-                        AppTab.Account -> if (appState.hasAccount) Icons.Outlined.AccountCircle else Icons.Outlined.Settings
+                        AppTab.Account -> if (appState.anyAccount) Icons.Outlined.AccountCircle else Icons.Outlined.Settings
                     }
-                    val label = if (tab == AppTab.Account && !appState.hasAccount) R.string.settings_title else tab.labelRes
+                    val label = if (tab == AppTab.Account && !appState.anyAccount) R.string.settings_title else tab.labelRes
                     NavigationBarItem(
                         selected = selected == tab,
                         onClick = { if (selected != tab) com.ksjd.testem.ui.components.Haptics.perform(view); selected = tab },

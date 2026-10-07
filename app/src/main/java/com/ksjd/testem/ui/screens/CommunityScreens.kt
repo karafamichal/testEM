@@ -417,9 +417,9 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
     var description by rememberSaveable { mutableStateOf(draft?.description.orEmpty()) }
     // Signed-in users get their name and email filled in; they can change or clear both.
     // Only while unlocked: the name and email belong to the protected account.
-    val known = app.hasAccount && app.isAppUnlocked
+    val known = app.anyAccount && app.isAppUnlocked
     var name by rememberSaveable { mutableStateOf(draft?.name ?: if (known) ticket.userName else "") }
-    var email by rememberSaveable { mutableStateOf(draft?.email ?: if (known) app.email else "") }
+    var email by rememberSaveable { mutableStateOf(draft?.email ?: if (known) app.contactEmail else "") }  // the primary account's (EM-0037)
     // A suggestion needs no logs.
     var attachLogs by rememberSaveable { mutableStateOf(draft?.attachLogs ?: !feature) }
     var showLogs by rememberSaveable { mutableStateOf(false) }

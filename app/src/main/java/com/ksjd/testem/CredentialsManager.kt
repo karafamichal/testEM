@@ -77,6 +77,42 @@ class CredentialsManager(context: Context) {
         gson.fromJson(prefs.getString("last_account", null), AccountSnapshot::class.java)
     }.getOrNull()
 
+    // ------------------------------------------------- IDS BBSK account (EM-0023)
+
+    fun saveIdsCredentials(email: String, password: String) = prefs.edit()
+        .putString("ids_email", email)
+        .putString("ids_password_enc", if (password.isEmpty()) "" else SecretBox.encrypt(password))
+        .apply()
+
+    fun getIdsEmail(): String = prefs.getString("ids_email", "").orEmpty()
+    fun getIdsPassword(): String = prefs.getString("ids_password_enc", "").orEmpty().let { if (it.isEmpty()) "" else SecretBox.decrypt(it).orEmpty() }
+    fun hasIdsAccount(): Boolean = getIdsEmail().isNotBlank() && getIdsPassword().isNotEmpty()
+
+    fun clearIdsCredentials() = prefs.edit().remove("ids_email").remove("ids_password_enc").remove("ids_last_account").remove("ids_qr").apply()
+
+    fun saveLastIdsAccount(account: IdsAccount) = prefs.edit().putString("ids_last_account", gson.toJson(account)).apply()
+    fun getLastIdsAccount(): IdsAccount? = runCatching { gson.fromJson(prefs.getString("ids_last_account", null), IdsAccount::class.java) }.getOrNull()
+
+    /** The virtual card's QR code content: it never changes, so it is kept for offline use. */
+    fun saveIdsQr(content: String) = prefs.edit().putString("ids_qr", content).apply()
+    fun getIdsQr(): String = prefs.getString("ids_qr", "").orEmpty()
+
+    /** Which account's email fills in reports when both are saved with different emails ("sadzv"/"ids", "" = not asked yet). */
+    fun getPrimaryAccount(): String = prefs.getString("primary_account", "").orEmpty()
+    fun savePrimaryAccount(account: String) = prefs.edit().putString("primary_account", account).apply()
+
+    /** With both accounts, switch the shown ticket by the followed bus (on unless turned off). */
+    fun getTicketAuto(): Boolean = prefs.getBoolean("ticket_auto", true)
+    fun saveTicketAuto(enabled: Boolean) = prefs.edit().putBoolean("ticket_auto", enabled).apply()
+
+    /** The ticket shown when no bus decides it. */
+    fun getTicketDefault(): Wallet = runCatching { Wallet.valueOf(prefs.getString("ticket_default", "SADZV")!!) }.getOrDefault(Wallet.SADZV)
+    fun saveTicketDefault(wallet: Wallet) = prefs.edit().putString("ticket_default", wallet.name).apply()
+
+    /** History shown: one account, or both merged (null). */
+    fun getHistoryWallet(): Wallet? = prefs.getString("history_wallet", null)?.let { runCatching { Wallet.valueOf(it) }.getOrNull() }
+    fun saveHistoryWallet(wallet: Wallet?) = prefs.edit().putString("history_wallet", wallet?.name).apply()
+
     // ------------------------------------------------------------- appearance
 
     fun saveThemePresets(presets: List<ThemePreset>) {

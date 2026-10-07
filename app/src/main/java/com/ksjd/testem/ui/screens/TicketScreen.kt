@@ -1,5 +1,13 @@
 package com.ksjd.testem.ui.screens
 
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.HorizontalPager
+import com.ksjd.testem.ui.components.WalletSwitch
+import com.ksjd.testem.IdsState
+import com.ksjd.testem.WalletRule
+import com.ksjd.testem.Wallet
 import com.ksjd.testem.ui.components.Haptics
 import com.ksjd.testem.ui.components.rememberHaptic
 import android.view.WindowManager
@@ -110,7 +118,7 @@ fun TicketScreen(
     liveViewModel: LiveViewModel,
     activity: FragmentActivity,
     onUnlock: () -> Unit,
-    onSignIn: () -> Unit,
+    onSignIn: (com.ksjd.testem.Wallet) -> Unit,
     onOpenDepartures: () -> Unit,
     onOpenPlanner: () -> Unit,
     onOpenAccount: () -> Unit
@@ -119,6 +127,7 @@ fun TicketScreen(
     val app by viewModel.appState.collectAsState()
     val timetable by viewModel.timetableState.collectAsState()
     val live by liveViewModel.state.collectAsState()
+    val ids by viewModel.idsState.collectAsState()
     var fullscreen by remember { mutableStateOf(false) }
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
@@ -134,12 +143,28 @@ fun TicketScreen(
         }
     }
 
-    val unlocked = app.hasAccount && app.isAppUnlocked
+    val unlocked = app.anyAccount && app.isAppUnlocked
+    // The tickets on the slider: SAD Zvolen and/or IDS BBSK, whichever accounts are saved (EM-0023).
+    val wallets = listOfNotNull(Wallet.SADZV.takeIf { app.hasAccount }, Wallet.IDS.takeIf { app.hasIdsAccount })
+    val followed by com.ksjd.testem.live.TripTracking.active.collectAsState()
+    // The followed bus decides (city bus: SAD Zvolen, IDS line: IDS BBSK); otherwise the rider's default.
+    val ruled = followed?.let { WalletRule.forLine(it.ref.line) }?.takeIf { app.ticketAuto && it in wallets }
+    val target = ruled ?: app.ticketDefault.takeIf { it in wallets } ?: wallets.firstOrNull() ?: Wallet.SADZV
+    val pager = rememberPagerState(initialPage = wallets.indexOf(target).coerceAtLeast(0)) { wallets.size }
+    // Each change of the deciding bus turns to its ticket; swiping by hand still works until the next change.
+    LaunchedEffect(target, wallets.size) { if (wallets.size > 1) pager.animateScrollToPage(wallets.indexOf(target).coerceAtLeast(0)) }
+    val shown = wallets.getOrNull(pager.currentPage) ?: target
+    val scope = rememberCoroutineScope()
     if (fullscreen && unlocked) {
-        FullscreenTicket(ticket, now, activity) { fullscreen = false }
+        if (shown == Wallet.IDS) {
+            FullscreenQr(ids.qr, ids.account?.qrIdentifier?.alias.orEmpty(), "", activity) { fullscreen = false }
+        } else {
+            val (title, detail) = statusCopy(ticket, now)
+            FullscreenQr(ticket.qrBitmap, ticket.userName, "$title. $detail", activity) { fullscreen = false }
+        }
     }
 
-    val card = ticket.selectedCard.takeIf { unlocked }
+    val card = ticket.selectedCard.takeIf { unlocked && shown == Wallet.SADZV }
     Column(
         Modifier
             .fillMaxSize()
@@ -148,9 +173,12 @@ fun TicketScreen(
     ) {
         ScreenHeader(
             title = ticket.userName.substringBefore(' ').takeIf { unlocked }?.ifBlank { null }
-                ?: stringResource(if (app.hasAccount) R.string.ticket_title else R.string.app_name),
+                ?: stringResource(if (app.anyAccount) R.string.ticket_title else R.string.app_name),
             subtitle = card?.cardTypeName,
-            actions = { if (card?.creditLastBalance != null) BalancePill(card, onOpenAccount) }
+            actions = {
+                if (card?.creditLastBalance != null) BalancePill(Format.money(card.creditLastBalance, card.currencySymbol), onOpenAccount)
+                else if (unlocked && shown == Wallet.IDS) ids.account?.credit?.let { BalancePill(Format.money(it, "€"), onOpenAccount) }
+            }
         )
 
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -169,7 +197,7 @@ fun TicketScreen(
                     stringResource(R.string.ticket_signed_out),
                     tone = NoticeTone.Error,
                     actionLabel = stringResource(R.string.ticket_sign_in_again),
-                    onAction = { viewModel.returnToLogin(); onSignIn() }
+                    onAction = { viewModel.returnToLogin(); onSignIn(Wallet.SADZV) }
                 )
             }
             // The saved password stopped working: the email is kept for signing in again.
@@ -178,7 +206,7 @@ fun TicketScreen(
                     stringResource(R.string.ticket_signed_out),
                     tone = NoticeTone.Warning,
                     actionLabel = stringResource(R.string.ticket_sign_in_again),
-                    onAction = onSignIn
+                    onAction = { onSignIn(Wallet.SADZV) }
                 )
             }
             val credit = card?.creditLastBalance
@@ -190,19 +218,39 @@ fun TicketScreen(
             }
         }
 
-        if (app.hasAccount) {
+        if (app.anyAccount) {
             Spacer(Modifier.height(12.dp))
-            if (unlocked) {
-                TicketStub(
-                    ticket = ticket,
-                    now = now,
-                    onFullscreen = { fullscreen = true },
-                    onResume = viewModel::startPolling
+            if (unlocked && wallets.size > 1) {
+                WalletSwitch(shown, { w -> scope.launch { pager.animateScrollToPage(wallets.indexOf(w)) } })
+                val line = followed?.ref?.line
+                Text(
+                    if (ruled != null && line != null && ruled == shown) stringResource(R.string.ticket_auto_for_line, line)
+                    else stringResource(R.string.ticket_swipe_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
                 )
+            }
+            if (unlocked) {
+                HorizontalPager(pager, verticalAlignment = Alignment.Top) { page ->
+                    Column {
+                        if (wallets.size > 1) WalletLip(wallets[page])
+                        if (wallets[page] == Wallet.IDS) {
+                            IdsStub(ids, onFullscreen = { fullscreen = true })
+                        } else {
+                            TicketStub(
+                                ticket = ticket,
+                                now = now,
+                                onFullscreen = { fullscreen = true },
+                                onResume = viewModel::startPolling
+                            )
+                        }
+                    }
+                }
             } else {
                 LockedStub(onUnlock)
             }
-            if (unlocked && ticket.cards.size > 1) {
+            if (unlocked && shown == Wallet.SADZV && ticket.cards.size > 1) {
                 SectionLabel(stringResource(R.string.ticket_card_switch))
                 Row(
                     Modifier
@@ -246,12 +294,12 @@ fun TicketScreen(
             }
         }
 
-        if (!app.hasAccount && app.email.isBlank()) {
+        if (!app.anyAccount && app.email.isBlank()) {
             Spacer(Modifier.height(16.dp))
             Notice(
                 stringResource(R.string.home_add_account_hint),
                 actionLabel = stringResource(R.string.account_add),
-                onAction = onSignIn,
+                onAction = onOpenAccount,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
         }
@@ -420,7 +468,7 @@ fun cardLabel(card: AccountDetails): String =
     card.cardTypeName.ifBlank { card.snr.takeLast(6) }
 
 @Composable
-private fun BalancePill(card: AccountDetails, onClick: () -> Unit) {
+private fun BalancePill(amount: String, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
@@ -428,7 +476,7 @@ private fun BalancePill(card: AccountDetails, onClick: () -> Unit) {
         modifier = Modifier.padding(end = 8.dp)
     ) {
         Text(
-            Format.money(card.creditLastBalance ?: 0.0, card.currencySymbol),
+            amount,
             style = TimeStyle,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
         )
@@ -611,8 +659,85 @@ private fun FreshnessBar(ticket: TicketState, now: Long) {
     }
 }
 
+/** The coloured tab on top of a pass when there are two: SAD Zvolen in the app's colour, IDS BBSK in its red. */
 @Composable
-private fun FullscreenTicket(ticket: TicketState, now: Long, activity: FragmentActivity, onDismiss: () -> Unit) {
+private fun WalletLip(wallet: Wallet) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 32.dp), verticalAlignment = Alignment.Bottom) {
+        Box(
+            Modifier
+                .background(if (wallet == Wallet.IDS) IdsCharcoal else walletColor(wallet), RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp))
+                .padding(start = 12.dp, end = 14.dp, top = 5.dp, bottom = 4.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (wallet == Wallet.IDS) Box(Modifier.size(8.dp).background(IdsRed, RoundedCornerShape(2.dp)))
+                Text(
+                    walletName(wallet),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White,
+                    modifier = Modifier.padding(start = if (wallet == Wallet.IDS) 6.dp else 0.dp)
+                )
+            }
+        }
+    }
+}
+
+/** The IDS BBSK virtual card: its static QR code on the same paper stub as the SAD Zvolen ticket (EM-0023). */
+@Composable
+private fun IdsStub(ids: IdsState, onFullscreen: () -> Unit) {
+    val perforationY = QrPadding * 2 + QrSize
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = TicketStubShape(cornerRadius = 20.dp, notchRadius = 11.dp, notchY = perforationY),
+        color = Color.White,
+        shadowElevation = 1.dp
+    ) {
+        Column {
+            Box(Modifier.fillMaxWidth().height(perforationY), contentAlignment = Alignment.Center) {
+                val bitmap = ids.qr
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = stringResource(R.string.qr_code_content_desc),
+                        filterQuality = FilterQuality.None,
+                        modifier = Modifier.size(QrSize).clip(RoundedCornerShape(4.dp)).clickable(onClick = onFullscreen)
+                    )
+                } else {
+                    Box(Modifier.size(QrSize).background(Color(0xFFF1F3F5), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                        if (ids.isLoading || ids.account == null) {
+                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp, color = Ink)
+                        } else {
+                            Text(
+                                stringResource(if (ids.account.qrIdentifier == null) R.string.ids_no_virtual_card else R.string.ids_qr_missing),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = InkMuted,
+                                modifier = Modifier.padding(24.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            Perforation()
+            Row(Modifier.padding(start = 20.dp, end = 8.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        ids.account?.qrIdentifier?.alias?.ifBlank { null } ?: stringResource(R.string.wallet_ids),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Ink
+                    )
+                }
+                if (ids.qr != null) {
+                    IconButton(onClick = onFullscreen) { Icon(Icons.Outlined.Fullscreen, stringResource(R.string.ticket_fullscreen), tint = Ink) }
+                }
+            }
+        }
+    }
+}
+
+/** A ticket's QR code over the whole screen, at full brightness for the scanner. */
+@Composable
+private fun FullscreenQr(bitmap: android.graphics.Bitmap?, title: String, detail: String, activity: FragmentActivity, onDismiss: () -> Unit) {
     val window = activity.window
     val previous = remember { window.attributes.screenBrightness }
     DisposableEffect(Unit) {
@@ -633,7 +758,6 @@ private fun FullscreenTicket(ticket: TicketState, now: Long, activity: FragmentA
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            val bitmap = ticket.qrBitmap
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap.asImageBitmap(),
@@ -645,11 +769,8 @@ private fun FullscreenTicket(ticket: TicketState, now: Long, activity: FragmentA
                 )
             }
             Spacer(Modifier.height(24.dp))
-            if (ticket.userName.isNotBlank()) {
-                Text(ticket.userName, style = MaterialTheme.typography.headlineSmall, color = Ink)
-            }
-            val (title, detail) = statusCopy(ticket, now)
-            Text("$title. $detail", style = MaterialTheme.typography.bodyMedium, color = InkMuted)
+            if (title.isNotBlank()) Text(title, style = MaterialTheme.typography.headlineSmall, color = Ink)
+            Text(detail, style = MaterialTheme.typography.bodyMedium, color = InkMuted)
             Spacer(Modifier.height(32.dp))
             Text(stringResource(R.string.ticket_fullscreen_close), style = MaterialTheme.typography.bodySmall, color = InkMuted)
         }

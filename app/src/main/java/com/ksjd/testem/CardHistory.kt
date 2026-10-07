@@ -16,7 +16,9 @@ data class CardHistoryItem(
     val amountCents: Long? = null,
     /** Stop where a ticket was bought, if known. */
     val stopName: String = "",
-    val isTopUp: Boolean = false
+    val isTopUp: Boolean = false,
+    /** Whose history it is (both can be shown merged, EM-0023). */
+    val wallet: Wallet = Wallet.SADZV
 )
 
 data class CardHistoryState(

@@ -1,5 +1,8 @@
 package com.ksjd.testem.ui.screens
 
+import com.ksjd.testem.ui.components.WalletSwitch
+import com.ksjd.testem.historyItems
+import com.ksjd.testem.Wallet
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -70,34 +73,55 @@ import java.util.Locale
 @Composable
 fun HistoryScreen(viewModel: AppViewModel) {
     val ticket by viewModel.ticketState.collectAsState()
+    val ids by viewModel.idsState.collectAsState()
+    val app by viewModel.appState.collectAsState()
     val history = ticket.historyState
+    // SAD Zvolen, IDS BBSK, or both merged (the selector on top when both accounts are saved, EM-0023).
+    val shownWallet = when {
+        app.bothAccounts -> app.historyWallet
+        app.hasIdsAccount -> Wallet.IDS
+        else -> Wallet.SADZV
+    }
+    val idsItems = remember(ids.account) { ids.account?.historyItems().orEmpty() }
+    val items = remember(history.items, idsItems, shownWallet, app.hasAccount) {
+        val sadzv = if (app.hasAccount) history.items else emptyList()
+        when (shownWallet) {
+            Wallet.SADZV -> sadzv
+            Wallet.IDS -> idsItems
+            null -> (sadzv + idsItems).sortedByDescending { it.timestampMs }
+        }
+    }
+    val refresh = { if (app.hasAccount) viewModel.loadCardHistory(); viewModel.refreshIds() }
     val context = LocalContext.current
     val exportedMessage = stringResource(R.string.history_exported)
     val exportFailedMessage = stringResource(R.string.history_export_failed)
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         val ok = runCatching {
-            context.contentResolver.openOutputStream(uri)?.use { it.write(historyToCsv(history.items).toByteArray()) }
+            context.contentResolver.openOutputStream(uri)?.use { it.write(historyToCsv(items).toByteArray()) }
         }.isSuccess
         Toast.makeText(context, if (ok) exportedMessage else exportFailedMessage, Toast.LENGTH_SHORT).show()
     }
 
     // Right after unlocking, the app is still signing in: load as soon as that's done, not only on the next visit.
-    val app by viewModel.appState.collectAsState()
     LaunchedEffect(ticket.selectedSnr, app.isLoggedIn) {
         if (app.isLoggedIn && history.lastUpdatedMs == 0L) viewModel.loadCardHistory()
     }
     // Nothing fetched yet (signing in or loading): a spinner, not "no history".
-    val waiting = history.items.isEmpty() && history.errorMessage.isBlank() && (history.isLoading || history.lastUpdatedMs == 0L)
+    val waiting = items.isEmpty() && if (shownWallet == Wallet.IDS) ids.isLoading || ids.account == null
+        else app.hasAccount && history.errorMessage.isBlank() && (history.isLoading || history.lastUpdatedMs == 0L)
 
     val card = ticket.selectedCard
-    val insights = remember(history.items, card?.creditLastBalance) {
-        HistoryInsights.from(history.items, card?.creditLastBalance)
+    val balance = when (shownWallet) {
+        Wallet.SADZV -> card?.creditLastBalance
+        Wallet.IDS -> ids.account?.credit
+        null -> listOfNotNull(card?.creditLastBalance, ids.account?.credit).takeIf { it.isNotEmpty() }?.sum()
     }
+    val insights = remember(items, balance) { HistoryInsights.from(items, balance) }
     var focus by remember { mutableStateOf<HistoryFocus?>(null) }
-    focus?.let { HistoryDetailSheet(it, history.items, card?.currencySymbol ?: "€") { focus = null } }
-    val grouped = remember(history.items) {
-        history.items.groupBy { YearMonth.from(Instant.ofEpochMilli(it.timestampMs).atZone(ZoneId.systemDefault())) }
+    focus?.let { HistoryDetailSheet(it, items, card?.currencySymbol ?: "€") { focus = null } }
+    val grouped = remember(items) {
+        items.groupBy { YearMonth.from(Instant.ofEpochMilli(it.timestampMs).atZone(ZoneId.systemDefault())) }
     }
 
     LazyColumn(Modifier.fillMaxSize()) {
@@ -105,17 +129,20 @@ fun HistoryScreen(viewModel: AppViewModel) {
             ScreenHeader(
                 title = stringResource(R.string.history_title),
                 actions = {
-                    IconButton(onClick = { viewModel.loadCardHistory() }, enabled = !history.isLoading) {
+                    IconButton(onClick = refresh, enabled = !history.isLoading && !ids.isLoading) {
                         Icon(Icons.Outlined.Refresh, stringResource(R.string.refresh_button))
                     }
                     IconButton(
                         onClick = { exporter.launch("testem-history-${java.time.LocalDate.now()}.csv") },
-                        enabled = history.items.isNotEmpty()
+                        enabled = items.isNotEmpty()
                     ) {
                         Icon(Icons.Outlined.FileDownload, stringResource(R.string.history_export))
                     }
                 }
             )
+        }
+        if (app.bothAccounts) item {
+            WalletSwitch(shownWallet, viewModel::setHistoryWallet, withBoth = true, modifier = Modifier.padding(bottom = 8.dp))
         }
         when {
             waiting -> item {
@@ -126,27 +153,27 @@ fun HistoryScreen(viewModel: AppViewModel) {
                     contentAlignment = Alignment.Center
                 ) { CircularProgressIndicator() }
             }
-            history.errorMessage.isNotBlank() && history.items.isEmpty() -> item {
+            shownWallet != Wallet.IDS && history.errorMessage.isNotBlank() && items.isEmpty() -> item {
                 Notice(
                     history.errorMessage,
                     tone = NoticeTone.Error,
                     actionLabel = stringResource(R.string.retry),
-                    onAction = { viewModel.loadCardHistory() },
+                    onAction = refresh,
                     modifier = Modifier.padding(16.dp)
                 )
             }
-            history.items.isEmpty() -> item {
+            items.isEmpty() -> item {
                 EmptyState(stringResource(R.string.history_empty_title), stringResource(R.string.history_empty))
             }
             else -> {
                 item { InsightsPanel(insights, card?.currencySymbol ?: "€") { focus = it } }
-                grouped.forEach { (month, items) ->
+                grouped.forEach { (month, monthItems) ->
                     item(key = "m-$month") { SectionLabel(monthTitle(month)) }
                     item(key = "g-$month") {
                         ListGroup {
-                            items.forEachIndexed { index, entry ->
+                            monthItems.forEachIndexed { index, entry ->
                                 if (index > 0) GroupDivider()
-                                HistoryRow(entry)
+                                HistoryRow(entry, tagged = shownWallet == null)
                             }
                         }
                     }
@@ -164,9 +191,13 @@ private fun monthTitle(month: YearMonth): String {
 }
 
 @Composable
-private fun HistoryRow(item: CardHistoryItem) {
+private fun HistoryRow(item: CardHistoryItem, tagged: Boolean = false) {
     val positive = (item.amountCents ?: 0L) > 0
-    val subtitle = listOf(Format.dateTime(item.timestampMs), item.stopName).filter { it.isNotBlank() }.joinToString(", ")
+    // Merged history: which account each line is from.
+    val subtitle = listOf(
+        Format.dateTime(item.timestampMs), item.stopName,
+        if (tagged) walletName(item.wallet) else ""
+    ).filter { it.isNotBlank() }.joinToString(", ")
     ListRow(
         title = item.title,
         subtitle = subtitle,

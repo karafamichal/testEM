@@ -1,5 +1,11 @@
 package com.ksjd.testem.ui.screens
 
+import androidx.compose.material.icons.outlined.QrCode2
+import com.ksjd.testem.ui.components.NoticeTone
+import androidx.compose.material3.CircularProgressIndicator
+import com.ksjd.testem.ui.components.WalletSwitch
+import com.ksjd.testem.IdsState
+import com.ksjd.testem.Wallet
 import androidx.compose.material3.FilledTonalButton
 import android.content.Intent
 import android.net.Uri
@@ -84,12 +90,12 @@ import com.ksjd.testem.ui.theme.TransitTheme
 private enum class SettingsPage { Appearance, Security, Reminders, Language, Community, BugReport, Feature, Developer }
 
 @Composable
-fun AccountScreen(viewModel: AppViewModel, onUnlock: () -> Unit, onSignIn: () -> Unit) {
+fun AccountScreen(viewModel: AppViewModel, onUnlock: () -> Unit, onSignIn: (Wallet) -> Unit) {
     val app by viewModel.appState.collectAsState()
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     val current = page
     // Pages behind the PIN close when the app locks.
-    if (current != null && current in LOCKED_PAGES && !(app.hasAccount && app.isAppUnlocked)) page = null
+    if (current != null && current in LOCKED_PAGES && !(app.anyAccount && app.isAppUnlocked)) page = null
     if (current != null && page != null) {
         BackHandler { page = null }
         SettingsPageScreen(current, viewModel, onBack = { page = null })
@@ -102,13 +108,23 @@ fun AccountScreen(viewModel: AppViewModel, onUnlock: () -> Unit, onSignIn: () ->
 private val LOCKED_PAGES = setOf(SettingsPage.Security, SettingsPage.Developer)
 
 @Composable
-private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSignIn: () -> Unit, onOpen: (SettingsPage) -> Unit) {
+private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSignIn: (Wallet) -> Unit, onOpen: (SettingsPage) -> Unit) {
     val ticket by viewModel.ticketState.collectAsState()
     val app by viewModel.appState.collectAsState()
     var confirmRemove by remember { mutableStateOf(false) }
     var showSupport by remember { mutableStateOf(false) }
-    val unlocked = app.hasAccount && app.isAppUnlocked
-    val card = ticket.selectedCard.takeIf { unlocked }
+    val ids by viewModel.idsState.collectAsState()
+    val unlocked = app.anyAccount && app.isAppUnlocked
+    // Which account the page shows (the selector on top when both are saved, EM-0023).
+    var picked by rememberSaveable { mutableStateOf(Wallet.SADZV) }
+    val shown = when {
+        app.bothAccounts -> picked
+        app.hasIdsAccount -> Wallet.IDS
+        else -> Wallet.SADZV
+    }
+    val card = ticket.selectedCard.takeIf { unlocked && app.hasAccount && shown == Wallet.SADZV }
+    var askPrimary by remember { mutableStateOf(false) }
+    if (askPrimary) PrimaryEmailDialog(app, onDismiss = { askPrimary = false }) { viewModel.setPrimaryAccount(it); askPrimary = false }
     if (showSupport) SupportDialog { showSupport = false }
     var topUp by remember { mutableStateOf(false) }
     if (topUp && card != null) TopUpSheet(viewModel, card) { topUp = false }
@@ -116,12 +132,12 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
     if (confirmRemove) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
-            title = { Text(stringResource(R.string.account_remove_title)) },
+            title = { Text(stringResource(R.string.account_remove_which, walletName(shown))) },
             text = { Text(stringResource(R.string.account_remove_message)) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmRemove = false
-                    viewModel.removeAccount()
+                    if (shown == Wallet.IDS) viewModel.removeIdsAccount() else viewModel.removeAccount()
                 }) { Text(stringResource(R.string.account_remove_confirm), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.cancel)) } }
@@ -136,25 +152,31 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
     ) {
         ScreenHeader(
             title = when {
-                unlocked -> ticket.userName.ifBlank { stringResource(R.string.tab_account) }
-                app.hasAccount -> stringResource(R.string.tab_account)
+                unlocked && shown == Wallet.SADZV -> ticket.userName.ifBlank { stringResource(R.string.tab_account) }
+                unlocked -> ids.account?.name?.ifBlank { null } ?: walletName(Wallet.IDS)
+                app.anyAccount -> stringResource(R.string.tab_account)
                 else -> stringResource(R.string.settings_title)
             },
-            subtitle = app.email.takeIf { unlocked },
+            subtitle = (if (shown == Wallet.IDS) app.idsEmail else app.email).takeIf { unlocked },
             actions = {
                 if (unlocked) {
-                    IconButton(onClick = viewModel::refreshAccount, enabled = !ticket.isRefreshingAccount) {
+                    IconButton(
+                        onClick = { if (shown == Wallet.IDS) viewModel.refreshIds() else viewModel.refreshAccount() },
+                        enabled = !ticket.isRefreshingAccount && !ids.isLoading
+                    ) {
                         Icon(Icons.Outlined.Refresh, stringResource(R.string.refresh_button))
                     }
                 }
             }
         )
+        if (unlocked && app.bothAccounts) WalletSwitch(shown, { picked = it ?: Wallet.SADZV }, modifier = Modifier.padding(bottom = 4.dp))
 
         when {
-            !app.hasAccount -> {
+            !app.anyAccount -> {
                 SectionLabel(stringResource(R.string.account_section))
-                ListGroup {
-                    SettingsLink(stringResource(R.string.account_add), stringResource(R.string.account_add_hint), onSignIn)
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    WalletRow(Wallet.SADZV, null) { onSignIn(Wallet.SADZV) }
+                    WalletRow(Wallet.IDS, null) { onSignIn(Wallet.IDS) }
                 }
             }
             !unlocked -> Notice(
@@ -163,6 +185,7 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
                 onAction = onUnlock,
                 modifier = Modifier.padding(16.dp)
             )
+            shown == Wallet.IDS -> IdsAccountDetails(ids)
             card != null -> {
                 CardImage(card)
                 BalanceBlock(card, onTopUp = { topUp = true })
@@ -180,7 +203,7 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
             else -> Notice(stringResource(R.string.account_no_details), modifier = Modifier.padding(16.dp))
         }
 
-        if (unlocked && ticket.cards.size > 1) {
+        if (card != null && ticket.cards.size > 1) {
             SectionLabel(stringResource(R.string.account_cards))
             ListGroup {
                 ticket.cards.forEachIndexed { index, c ->
@@ -209,10 +232,39 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
             }
         }
 
+        // The account not added yet, so it can be added from here (EM-0023).
+        if (unlocked && !app.bothAccounts) {
+            SectionLabel(stringResource(R.string.account_add_other))
+            val missing = if (app.hasAccount) Wallet.IDS else Wallet.SADZV
+            Box(Modifier.padding(horizontal = 16.dp)) { WalletRow(missing, null) { onSignIn(missing) } }
+        }
+        if (unlocked && app.bothAccounts) {
+            SectionLabel(stringResource(R.string.tickets_settings))
+            ListGroup {
+                ListRow(
+                    stringResource(R.string.ticket_auto_switch),
+                    subtitle = stringResource(R.string.ticket_auto_switch_hint),
+                    onClick = { viewModel.setTicketAuto(!app.ticketAuto) },
+                    trailing = { Switch(app.ticketAuto, viewModel::setTicketAuto) }
+                )
+                GroupDivider()
+                ListRow(
+                    stringResource(R.string.ticket_default),
+                    subtitle = walletName(app.ticketDefault),
+                    onClick = { viewModel.setTicketDefault(if (app.ticketDefault == Wallet.IDS) Wallet.SADZV else Wallet.IDS) },
+                    trailing = { Text(stringResource(R.string.ticket_default_change), color = MaterialTheme.colorScheme.primary) }
+                )
+                if (!app.email.trim().equals(app.idsEmail.trim(), ignoreCase = true)) {
+                    GroupDivider()
+                    ListRow(stringResource(R.string.primary_setting), subtitle = app.contactEmail, onClick = { askPrimary = true })
+                }
+            }
+        }
+
         SectionLabel(stringResource(R.string.settings_title))
         ListGroup {
             SettingsLink(stringResource(R.string.settings_reminders), stringResource(if (app.hasAccount) R.string.settings_reminders_hint else R.string.settings_reminders_hint_guest)) { onOpen(SettingsPage.Reminders) }
-            if (app.hasAccount) {
+            if (app.anyAccount) {
                 GroupDivider()
                 SettingsLink(stringResource(R.string.security_title), stringResource(R.string.security_subtitle)) {
                     if (unlocked) onOpen(SettingsPage.Security) else onUnlock()
@@ -306,7 +358,7 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(siteUrl(context, "privacy")))) }
             }
         }
-        if (app.hasAccount) {
+        if (app.anyAccount) {
             Spacer(Modifier.height(16.dp))
             ListGroup {
                 if (unlocked && app.isPinSet) {
@@ -314,7 +366,7 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
                     GroupDivider()
                 }
                 ListRow(
-                    title = stringResource(R.string.account_remove),
+                    title = stringResource(R.string.account_remove_which, walletName(shown)),
                     subtitle = stringResource(R.string.account_remove_hint),
                     titleColor = MaterialTheme.colorScheme.error,
                     // Removing needs the PIN too, so someone holding the phone can't wipe it.
@@ -393,6 +445,57 @@ private fun CardImage(card: AccountDetails) {
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(14.dp))
     )
+}
+
+/** The IDS BBSK account: credit, tickets and identifiers as the e-shop has them (EM-0023; top-up stays in the e-shop). */
+@Composable
+private fun IdsAccountDetails(ids: IdsState) {
+    val account = ids.account
+    if (account == null) {
+        if (ids.isLoading) Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator() }
+        else Notice(stringResource(if (ids.signedOut) R.string.ids_signed_out else R.string.account_no_details), modifier = Modifier.padding(16.dp))
+        return
+    }
+    val context = LocalContext.current
+    if (ids.signedOut) Notice(stringResource(R.string.ids_signed_out), tone = NoticeTone.Error, modifier = Modifier.padding(16.dp))
+    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+        Text(stringResource(R.string.account_balance), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(account.credit?.let { Format.money(it, "€") } ?: "–", style = MaterialTheme.typography.displayLarge, modifier = Modifier.weight(1f))
+            FilledTonalButton(onClick = {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://eshop.idsbbsk.sk/praca-s-kreditom"))) }
+            }) { Text(stringResource(R.string.ids_open_shop)) }
+        }
+        if (account.creditNote.isNotBlank()) {
+            Text(account.creditNote, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    val now = System.currentTimeMillis()
+    val valid = account.tickets.filter { it.valid && (it.validToMs == 0L || it.validToMs > now) }
+    SectionLabel(stringResource(R.string.account_validity))
+    ListGroup {
+        if (valid.isEmpty()) ListRow(stringResource(R.string.ids_no_ticket))
+        valid.forEachIndexed { index, t ->
+            if (index > 0) GroupDivider()
+            val days = Format.daysUntil(t.validToMs)
+            ListRow(
+                title = t.name,
+                subtitle = stringResource(R.string.account_valid_range, Format.date(t.validFromMs), Format.date(t.validToMs)) + "\n" + t.identifier,
+                trailing = { Text(daysLeftText(days), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            )
+        }
+    }
+    SectionLabel(stringResource(R.string.ids_identifiers))
+    ListGroup {
+        account.identifiers.forEachIndexed { index, id ->
+            if (index > 0) GroupDivider()
+            ListRow(
+                title = id.alias.ifBlank { stringResource(R.string.ids_identifier_number, id.number) },
+                subtitle = listOf(id.cardNumber, id.products.joinToString(", ")).filter { it.isNotBlank() }.joinToString("\n"),
+                trailing = { if (id.qrId != null) Icon(Icons.Outlined.QrCode2, stringResource(R.string.qr_code_content_desc)) }
+            )
+        }
+    }
 }
 
 @Composable

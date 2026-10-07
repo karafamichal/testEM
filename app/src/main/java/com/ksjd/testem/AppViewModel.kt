@@ -56,7 +56,43 @@ data class AppState(
     val lowCreditWarningThreshold: Double = 1.0,
     val lowCreditAlerts: Boolean = false,
     val expiryAlerts: Boolean = false,
-    val languageCode: String = "sk"
+    val languageCode: String = "sk",
+    /** An eshop.idsbbsk.sk account is saved too (EM-0023). */
+    val hasIdsAccount: Boolean = false,
+    val idsEmail: String = "",
+    /** "sadzv"/"ids": whose email fills in reports when the two differ ("" = not asked yet). */
+    val primaryAccount: String = "",
+    /** Switch the shown ticket by the followed bus. */
+    val ticketAuto: Boolean = true,
+    val ticketDefault: Wallet = Wallet.SADZV,
+    /** History of one account, or both merged (null). */
+    val historyWallet: Wallet? = null
+) {
+    /** Some account is saved: the ticket, account and history (behind the PIN) exist. */
+    val anyAccount: Boolean get() = hasAccount || hasIdsAccount
+    val bothAccounts: Boolean get() = hasAccount && hasIdsAccount
+
+    /** Both saved under different emails and the rider hasn't said which is theirs. */
+    val needsPrimary: Boolean
+        get() = bothAccounts && primaryAccount.isEmpty() && !email.trim().equals(idsEmail.trim(), ignoreCase = true)
+
+    /** The email filled in reports and suggestions. */
+    val contactEmail: String
+        get() = when {
+            bothAccounts -> if (primaryAccount == "ids") idsEmail else email
+            hasIdsAccount -> idsEmail
+            else -> email
+        }
+}
+
+data class IdsState(
+    val account: IdsAccount? = null,
+    /** The virtual card's QR code (static), kept for offline use. */
+    val qr: Bitmap? = null,
+    val isLoading: Boolean = false,
+    /** Couldn't reach the e-shop at the last refresh (cached data shown). */
+    val offline: Boolean = false,
+    val signedOut: Boolean = false
 )
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
@@ -73,7 +109,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _timetableState = MutableStateFlow(TimetableState())
     val timetableState: StateFlow<TimetableState> = _timetableState
 
+    private val _idsState = MutableStateFlow(IdsState())
+    val idsState: StateFlow<IdsState> = _idsState
+
     private var session: TicketSession? = null
+    private var idsSession: IdsSession? = null
     private var pollingJob: Job? = null
     private var isInForeground = true
     private var lastBackgroundTimeMs = 0L
@@ -85,8 +125,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     init {
         val presets = prefs.getThemePresets(DefaultThemePresets.all)
         val hasAccount = prefs.hasAccount()
-        // The PIN guards the account only: without an account there is nothing to lock.
-        if (!hasAccount && prefs.isPinSet()) prefs.clearPin()
+        val hasIds = prefs.hasIdsAccount()
+        // The PIN guards the accounts only: without one there is nothing to lock.
+        if (!hasAccount && !hasIds && prefs.isPinSet()) prefs.clearPin()
         val pinSet = prefs.isPinSet()
         _appState.value = AppState(
             hasAccount = hasAccount,
@@ -103,8 +144,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             lowCreditWarningThreshold = prefs.getLowCreditWarningThreshold(),
             lowCreditAlerts = prefs.getLowCreditAlertsEnabled(),
             expiryAlerts = prefs.getExpiryAlertsEnabled(),
-            languageCode = prefs.getLanguageCode()
+            languageCode = prefs.getLanguageCode(),
+            hasIdsAccount = hasIds,
+            idsEmail = prefs.getIdsEmail(),
+            primaryAccount = prefs.getPrimaryAccount(),
+            ticketAuto = prefs.getTicketAuto(),
+            ticketDefault = prefs.getTicketDefault(),
+            historyWallet = prefs.getHistoryWallet()
         )
+        if (hasIds) _idsState.value = IdsState(account = prefs.getLastIdsAccount(), qr = idsQrBitmap(prefs.getIdsQr()))
         prefs.getLastAccount()?.let { cached ->
             _ticketState.update {
                 it.copy(userName = cached.userName, cards = cached.cards, selectedSnr = prefs.getSelectedCardSnr())
@@ -138,12 +186,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         login(state.email, state.password)
     }
 
-    fun login(email: String, password: String) {
+    fun login(email: String, password: String, wallet: Wallet = Wallet.SADZV) {
         val emailTrimmed = email.trim()
         if (emailTrimmed.isEmpty() || password.isEmpty()) {
             _appState.update { it.copy(loginError = app.getString(R.string.login_error_fill_fields)) }
             return
         }
+        if (wallet == Wallet.IDS) return loginIds(emailTrimmed, password)
         _appState.update { it.copy(isLoading = true, loginError = "") }
         val newSession = TicketSession(QRDaemonConfig.BASE_URL, emailTrimmed, password).apply {
             activeSnr = prefs.getSelectedCardSnr()
@@ -153,12 +202,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             result.onSuccess { snapshot ->
                 session = newSession
                 prefs.saveCredentials(emailTrimmed, password)
-                prefs.markOnboarded()
                 _appState.update {
-                    it.copy(
-                        isLoggedIn = true, isLoading = false, email = emailTrimmed, password = password,
-                        hasAccount = true, onboarded = true
-                    )
+                    it.copy(isLoggedIn = true, isLoading = false, email = emailTrimmed, password = password, hasAccount = true)
                 }
                 applyAccount(snapshot)
                 startPolling()
@@ -192,15 +237,110 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         stopPolling()
         session = null
         prefs.clearCredentials()
-        prefs.clearPin()
         Reminders.cancel(app)
         _appState.update {
-            it.copy(
-                isLoggedIn = false, isLoading = false, loginError = "", email = "", password = "",
-                hasAccount = false, isPinSet = false, isAppUnlocked = true
-            )
+            it.copy(isLoggedIn = false, isLoading = false, loginError = "", email = "", password = "", hasAccount = false)
         }
         _ticketState.value = TicketState()
+        afterAccountRemoved()
+    }
+
+    /** Cancelling the PIN on first setup: nothing that was added stays without a PIN. */
+    fun removeAllAccounts() {
+        removeIdsAccount()
+        removeAccount()
+    }
+
+    /** The PIN only protected the accounts: with none left it goes too. */
+    private fun afterAccountRemoved() {
+        prefs.savePrimaryAccount("")
+        _appState.update { it.copy(primaryAccount = "") }
+        if (_appState.value.anyAccount) return
+        prefs.clearPin()
+        _appState.update { it.copy(isPinSet = false, isAppUnlocked = true) }
+    }
+
+    // ======================================================== IDS BBSK (EM-0023)
+
+    private fun loginIds(email: String, password: String) {
+        _appState.update { it.copy(isLoading = true, loginError = "") }
+        val newSession = IdsSession(email, password)
+        viewModelScope.launch {
+            runCatching { newSession.fetchAccount() }.onSuccess { account ->
+                idsSession = newSession
+                prefs.saveIdsCredentials(email, password)
+                _appState.update { it.copy(isLoading = false, hasIdsAccount = true, idsEmail = email) }
+                _idsState.value = IdsState(account = account)
+                prefs.saveLastIdsAccount(account)
+                loadIdsQr(newSession, account)
+            }.onFailure { error ->
+                val message = app.getString(if (error is LoginRejectedException) R.string.ids_login_rejected else R.string.login_error_network)
+                _appState.update { it.copy(isLoading = false, loginError = message) }
+            }
+        }
+    }
+
+    /** New credit, tickets and identifiers from the e-shop (the QR code is fetched once: it never changes). */
+    fun refreshIds() {
+        val state = _appState.value
+        if (!state.hasIdsAccount || _idsState.value.isLoading) return
+        val current = idsSession ?: IdsSession(prefs.getIdsEmail(), prefs.getIdsPassword()).also { idsSession = it }
+        _idsState.update { it.copy(isLoading = true) }
+        viewModelScope.launch {
+            runCatching { current.fetchAccount(_idsState.value.account?.name.orEmpty()) }.onSuccess { account ->
+                prefs.saveLastIdsAccount(account)
+                _idsState.update { it.copy(account = account, isLoading = false, offline = false, signedOut = false) }
+                if (_idsState.value.qr == null) loadIdsQr(current, account)
+            }.onFailure { error ->
+                _idsState.update { it.copy(isLoading = false, offline = error !is LoginRejectedException, signedOut = error is LoginRejectedException) }
+            }
+        }
+    }
+
+    private suspend fun loadIdsQr(current: IdsSession, account: IdsAccount) {
+        val id = account.qrIdentifier?.qrId ?: return
+        val content = runCatching { current.fetchQr(id) }.getOrNull() ?: return
+        prefs.saveIdsQr(content)
+        _idsState.update { it.copy(qr = idsQrBitmap(content)) }
+    }
+
+    /** The stored QR: the e-shop's own picture ("img:<base64>") or the code's text ("text:…") drawn here. */
+    private fun idsQrBitmap(content: String): Bitmap? = when {
+        content.startsWith("img:") -> runCatching {
+            val bytes = android.util.Base64.decode(content.removePrefix("img:"), android.util.Base64.DEFAULT)
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }.getOrNull()
+        content.startsWith("text:") ->
+            QRCodeGenerator.generateQRCode(content.removePrefix("text:"), QRDaemonConfig.QR_BITMAP_SIZE, QRDaemonConfig.QR_BITMAP_SIZE)
+        else -> null
+    }
+
+    fun removeIdsAccount() {
+        idsSession = null
+        prefs.clearIdsCredentials()
+        _idsState.value = IdsState()
+        _appState.update { it.copy(hasIdsAccount = false, idsEmail = "") }
+        afterAccountRemoved()
+    }
+
+    fun setPrimaryAccount(account: String) {
+        prefs.savePrimaryAccount(account)
+        _appState.update { it.copy(primaryAccount = account) }
+    }
+
+    fun setTicketAuto(enabled: Boolean) {
+        prefs.saveTicketAuto(enabled)
+        _appState.update { it.copy(ticketAuto = enabled) }
+    }
+
+    fun setTicketDefault(wallet: Wallet) {
+        prefs.saveTicketDefault(wallet)
+        _appState.update { it.copy(ticketDefault = wallet) }
+    }
+
+    fun setHistoryWallet(wallet: Wallet?) {
+        prefs.saveHistoryWallet(wallet)
+        _appState.update { it.copy(historyWallet = wallet) }
     }
 
     fun clearLoginError() = _appState.update { it.copy(loginError = "") }
@@ -353,6 +493,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun onUnlocked() {
         _appState.update { it.copy(isAppUnlocked = true) }
+        refreshIds()
         if (_appState.value.isLoggedIn && pollingJob?.isActive != true) startPolling()
     }
 
