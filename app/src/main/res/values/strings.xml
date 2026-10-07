@@ -542,7 +542,7 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• Add credit to your card (Account): you pay SAD Zvolen directly on its own payment gateway.
+    <string name="whats_new_body">• IDS BBSK: add your eshop.idsbbsk.sk account; its QR code, credit, tickets and history sit next to SAD Zvolen, and the home tab switches to the right ticket for each bus.\n• Add credit to your card (Account): you pay SAD Zvolen directly on its own payment gateway.
 • Choose your own change: where to get off the first bus and where to get on the next, also a stop you search for (Change stop).\n• Unsent bug reports and suggestions are kept, photos too.\n• Tap the History chart or a stop for a closer look.\n• The widget now looks like the live card on the home tab.\n• Waiting at your stop for a late bus asks whether it came.\n• “You won\'t make it” no longer comes from an old position; History loads right after unlocking.</string>
     <string name="topup_button">Add credit</string>
     <string name="topup_title">Add credit to your card</string>

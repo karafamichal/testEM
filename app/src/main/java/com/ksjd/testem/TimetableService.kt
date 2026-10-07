@@ -81,12 +81,12 @@ class TimetableService {
      * [c] with its change before segment [index] edited by the rider: get off that bus at [off], walk to [board],
      * then the first way from there to the destination after the walk and the change time. Null when there is none.
      */
-    fun editTransfer(c: TimetableConnection, index: Int, off: LegStop, board: BoardStop): TimetableConnection? {
+    fun editTransfer(c: TimetableConnection, index: Int, off: LegStop, board: BoardStop, walkStart: Boolean = false): TimetableConnection? {
         val bus = c.segments[index - 1]
         val link = parseTripUrl(bus.routeUrl.timetableLink()) ?: return null
         val ready = off.arrivalMs / 1000 + board.walkSeconds + changeMinutes * 60L
         val onward = HubClient.timetable("plan", mapOf("from" to stopParam(board.stop, board.stop.selectedText), "to" to c.segments.last().arrivalStop,
-            "time" to ready.toString(), "n" to "1", "change" to changeMinutes.toString(), "walkstart" to "0"))
+            "time" to ready.toString(), "n" to "1", "change" to changeMinutes.toString(), "walkstart" to if (walkStart) "1" else "0"))
             .getAsJsonArray("connections")?.firstOrNull()?.asJsonObject ?: return null
         val next = parseConnection(onward).takeIf { it.segments.isNotEmpty() } ?: return null
         val cut = bus.copy(arrivalStop = off.name, arrivalTime = clock(off.arrivalMs), arrivalPlatform = off.json.str("platform"),
@@ -102,6 +102,17 @@ class TimetableService {
             totalDuration = if (minutes < 60) "$minutes min" else "${minutes / 60} h ${minutes % 60} min",
             segments = c.segments.take(index - 1) + cut + next.segments
         )
+    }
+
+    /**
+     * [c] with the rider getting off bus [busIndex] at its stop [order], tapped in that bus's stop list (EM-0039):
+     * the rest planned from there, a short walk to another stop allowed. Null when nothing goes on from there.
+     */
+    fun getOffAt(c: TimetableConnection, busIndex: Int, order: Int): TimetableConnection? {
+        if (busIndex !in 0 until c.segments.lastIndex) return null
+        // The stop list numbers stops from 1 (order), the trip's stops are indexed from 0.
+        val off = stopsAfterBoarding(c.segments[busIndex]).firstOrNull { it.index == order - 1 } ?: return null
+        return editTransfer(c, busIndex + 1, off, BoardStop(suggestion(off.json), 0), walkStart = true)
     }
 
     /** The timetable trip link of a segment: its own, or the one a live (sadzv) link carries. */

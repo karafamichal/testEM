@@ -593,6 +593,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         s.copy(connections = s.connections.map { if (it.id == old.id) new else it })
     }
 
+    /** The planner bus whose stops are open (connection, bus index), so a stop tapped there edits the connection. */
+    private var openLeg: Pair<TimetableConnection, Int>? = null
+
+    fun openedPlannerLeg(connection: TimetableConnection, busIndex: Int) { openLeg = connection to busIndex }
+    fun closedPlannerLeg() { openLeg = null }
+
+    /**
+     * A stop tapped in an open planner bus (EM-0039): get off there and plan the rest from it, like the transfer
+     * editor. The last bus has nothing to re-plan; there the tap only marks where following ends.
+     */
+    fun getOffAt(order: Int) {
+        val (connection, busIndex) = openLeg ?: return
+        if (busIndex >= connection.segments.lastIndex) return
+        viewModelScope.launch {
+            val edited = withContext(Dispatchers.IO) { runCatching { timetableService.getOffAt(connection, busIndex, order) }.getOrNull() }
+            if (edited == null) {
+                android.widget.Toast.makeText(app, R.string.transfer_none_from, android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            replaceConnection(connection, edited)
+            if (openLeg?.first?.id == connection.id) openLeg = edited to busIndex
+        }
+    }
+
     /** ISO date, "" = today. */
     fun setTimetableDate(date: String) = _timetableState.update { it.copy(dateInput = date) }
 

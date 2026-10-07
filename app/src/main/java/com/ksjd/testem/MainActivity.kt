@@ -268,7 +268,14 @@ private fun MainScaffold(
             if (!privacyAsked) com.ksjd.testem.ui.screens.PrivacyDialog(onDone = { privacyAsked = true })
             else com.ksjd.testem.ui.screens.WhatsNewDialog()
             val liveState by liveViewModel.state.collectAsState()
-            liveState.trip?.let { trip -> com.ksjd.testem.ui.screens.TripSheet(trip, onDismiss = liveViewModel::closeTrip, onPickAlight = liveViewModel::setTripAlight) }
+            liveState.trip?.let { trip ->
+                com.ksjd.testem.ui.screens.TripSheet(
+                    trip,
+                    onDismiss = { liveViewModel.closeTrip(); viewModel.closedPlannerLeg() },
+                    // From a planner result: getting off elsewhere edits the connection too (EM-0039).
+                    onPickAlight = { order -> liveViewModel.setTripAlight(order); order?.let(viewModel::getOffAt) }
+                )
+            }
         }
     }
 }

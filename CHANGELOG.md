@@ -3,9 +3,13 @@
 ## 2.13.0
 
 ### New
+- **IDS BBSK account and QR code** (EM-0023): add your eshop.idsbbsk.sk account next to (or instead of) sadzv.qrbus.me, on the welcome screen or in Account. The home tab shows both tickets on a slider (swipe, or the SAD Zvolen / IDS BBSK switch above it); the IDS BBSK one is the virtual card's QR code, kept for offline use. Account shows the IDS credit, valid tickets and identifiers, History the IDS top-ups and passes, one account at a time or both together.
+- **The right ticket for each bus**: while following a journey the home tab switches by itself: SAD Zvolen for city buses in Banská Bystrica and Zvolen, IDS BBSK for regional lines (060xxx, also the city buses of Žiar nad Hronom, Brezno and Nová Baňa). It can be turned off, and the ticket shown first chosen, in Account → Tickets.
+- **Email for reports** (EM-0037): with two accounts under different emails, the app asks once which is yours and fills it in bug reports and suggestions; change it in Account.
 - **Add credit to your card** (*Account → Add credit*): pick an amount (2–50 €, 5 € suggested, the limits come from sadzv) and pay on the operator's own payment gateway (GP webpay), the same as on sadzv.qrbus.me. The payment goes straight to SAD Zvolen: Plan&Ride only opens the gateway, takes no fee and never sees your card details. Afterwards the app shows whether it was paid and refreshes your credit and History.
 
 ### Fixed
+- **Getting off elsewhere in a planner result** (EM-0039): tapping another stop in a bus's stop list (*Show all stops*) only marked where following ends; now the connection changes too: the rest of the journey is planned from that stop, a short walk allowed.
 - **Times on phones set to another time zone**: *Now* in the planner searched from the phone's clock time instead of Slovak time, and the stop list in *Change stop* was off by the difference. All bus times are now Slovak time.
 - **Widget layout**: the route line starts and ends at your stops like on the home card (it ran past them), and the last line (*Will I catch it?*) is no longer cut off.
 

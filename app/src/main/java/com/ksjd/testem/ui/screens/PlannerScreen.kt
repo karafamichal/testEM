@@ -166,7 +166,10 @@ fun PlannerScreen(
                     onRepeat = { viewModel.rideFrom(connection)?.let { editing = it to true } },
                     onReplace = { viewModel.replaceConnection(connection, it) },
                     onOpenStop = onOpenStop,
-                    onOpenTrip = onOpenTrip
+                    onOpenTrip = { segment, line ->
+                        viewModel.openedPlannerLeg(connection, connection.segments.indexOf(segment))
+                        onOpenTrip(segment, line)
+                    }
                 )
             }
             item {
