@@ -45,7 +45,7 @@ from pathlib import Path
 import sadzv
 import timetable
 
-VERSION = "1.14.2"
+VERSION = "1.15.1"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -909,7 +909,8 @@ def timetable_query(route, query):
         # change: the rider's least time between two buses in minutes (app setting; 0 = any), 1 by default.
         raw = str(query.get("change") or "")
         change = min(30, int(raw)) * 60 if raw.isdigit() else timetable.CHANGE_S
-        journeys = t.plan(origin, target, when, count, query.get("direct") in ("1", "true"), change)
+        journeys = t.plan(origin, target, when, count, query.get("direct") in ("1", "true"), change,
+                          walk_start=query.get("walkstart") not in ("0", "false"))
         if live_job:
             # City buses aren't in the open timetables: SAD Zvolen's live data adds its direct buses.
             live = live_job.result()

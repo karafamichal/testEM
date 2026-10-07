@@ -1,5 +1,14 @@
 package com.ksjd.testem.widget
 
+import com.ksjd.testem.ui.components.followSummary
+import com.ksjd.testem.ui.components.FollowSummary
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.luminance
+import androidx.glance.layout.size
+import androidx.glance.layout.ContentScale
+import androidx.glance.ColorFilter
+import androidx.glance.ImageProvider
+import androidx.glance.Image
 import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
@@ -79,8 +88,10 @@ class PlanRideWidget : GlanceAppWidget() {
                     .filter { it.arrivalMs == 0L || it.arrivalMs > now }.sortedBy { it.departureMs }.take(MAX_JOURNEYS)
                 boards = runCatching { favouriteBoards(context) }.getOrDefault(emptyList())
             }
+            val colors = remember(version) { CardColors.of(context) }
+            val background = remember(colors) { colors.gradient() }
             GlanceTheme {
-                if (active != null) LiveCard(context, view?.takeIf { it.trip.ref == active?.ref }, System.currentTimeMillis())
+                if (active != null) LiveCard(context, view?.takeIf { it.trip.ref == active?.ref }, System.currentTimeMillis(), colors, background)
                 else Lists(context, journeys, boards, now)
             }
         }
@@ -135,69 +146,121 @@ class StopFollowingAction : ActionCallback {
 private val white = FixedColor(Color.White)
 private val whiteDim = FixedColor(Color.White.copy(alpha = 0.8f))
 
+/** The app's own colours (its theme preset, lighter in dark mode), so the widget matches the home card. */
+data class CardColors(val primary: Color, val accent: Color, val on: Color) {
+    companion object {
+        fun of(context: Context): CardColors {
+            val prefs = CredentialsManager(context)
+            val presets = prefs.getThemePresets(com.ksjd.testem.DefaultThemePresets.all)
+            val preset = presets.firstOrNull { it.id == prefs.getSelectedThemeId(presets.first().id) } ?: presets.first()
+            val night = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+            val primary = if (night) androidx.compose.ui.graphics.lerp(Color(preset.primary), Color.White, 0.35f) else Color(preset.primary)
+            val tertiary = if (night) androidx.compose.ui.graphics.lerp(Color(preset.tertiary), Color.White, 0.2f) else Color(preset.tertiary)
+            val on = if (primary.luminance() > 0.45f) Color(0xFF14181D) else Color.White
+            return CardColors(primary, androidx.compose.ui.graphics.lerp(primary, tertiary, 0.55f), on)
+        }
+    }
+
+    /** The home card's diagonal gradient, as a picture a widget can show. */
+    fun gradient(): android.graphics.Bitmap {
+        val bitmap = android.graphics.Bitmap.createBitmap(480, 240, android.graphics.Bitmap.Config.ARGB_8888)
+        val paint = android.graphics.Paint().apply {
+            shader = android.graphics.LinearGradient(0f, 0f, 480f, 240f, primary.toArgb(), accent.toArgb(), android.graphics.Shader.TileMode.CLAMP)
+        }
+        android.graphics.Canvas(bitmap).drawRect(0f, 0f, 480f, 240f, paint)
+        return bitmap
+    }
+}
+
+/**
+ * The followed bus as on the app's home card (EM-0025): the same texts (followSummary), colours and layout,
+ * with the stops of your part of the line as dots and the bus where it is.
+ */
 @Composable
-private fun LiveCard(context: Context, view: FollowView?, now: Long) {
-    val p = view?.progress
+private fun LiveCard(context: Context, view: FollowView?, now: Long, colors: CardColors, background: android.graphics.Bitmap) {
+    val on = FixedColor(colors.on)
+    val onDim = FixedColor(colors.on.copy(alpha = 0.85f))
     val open = actionStartActivity(
         Intent(context, MainActivity::class.java).putExtra(TripTracking.EXTRA_SHOW_FOLLOWED, true)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
     )
-    Column(
-        GlanceModifier.fillMaxSize().cornerRadius(24.dp).background(GlanceTheme.colors.primary).padding(14.dp).clickable(open)
-    ) {
-        Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "● " + context.getString(if (view?.live == true) R.string.follow_live else R.string.follow_timetable).uppercase(),
-                style = TextStyle(color = white, fontSize = 12.sp, fontWeight = FontWeight.Bold),
-                modifier = GlanceModifier.defaultWeight()
-            )
-            Text("✕", style = TextStyle(color = white, fontSize = 18.sp), modifier = GlanceModifier.padding(horizontal = 6.dp)
-                .clickable(actionRunCallback<StopFollowingAction>()))
-        }
-        val trip = TripTracking.active.value
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = GlanceModifier.padding(top = 6.dp)) {
-            Box(GlanceModifier.cornerRadius(6.dp).background(white).padding(horizontal = 8.dp, vertical = 2.dp)) {
-                Text(trip?.ref?.line.orEmpty(), style = TextStyle(color = GlanceTheme.colors.primary, fontWeight = FontWeight.Bold, fontSize = 15.sp))
+    val trip = TripTracking.active.value
+    Box(GlanceModifier.fillMaxSize().cornerRadius(28.dp).clickable(open)) {
+        Image(ImageProvider(background), contentDescription = null, contentScale = ContentScale.FillBounds, modifier = GlanceModifier.fillMaxSize())
+        Column(GlanceModifier.fillMaxSize().padding(start = 18.dp, end = 10.dp, top = 10.dp, bottom = 12.dp)) {
+            Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("● " + context.getString(if (view?.live == true) R.string.follow_live else R.string.follow_timetable).uppercase(),
+                    style = TextStyle(color = on, fontSize = 12.sp, fontWeight = FontWeight.Bold), modifier = GlanceModifier.defaultWeight())
+                Text("✕", style = TextStyle(color = on, fontSize = 18.sp),
+                    modifier = GlanceModifier.padding(horizontal = 8.dp).clickable(actionRunCallback<StopFollowingAction>()))
             }
-            Text("  → " + (view?.detail?.destination ?: trip?.ref?.destination.orEmpty()), maxLines = 1,
-                style = TextStyle(color = white, fontSize = 15.sp, fontWeight = FontWeight.Medium))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = GlanceModifier.padding(top = 4.dp)) {
+                Box(GlanceModifier.cornerRadius(8.dp).background(on).padding(horizontal = 9.dp, vertical = 2.dp)) {
+                    Text(trip?.ref?.line.orEmpty(), style = TextStyle(color = FixedColor(colors.primary), fontWeight = FontWeight.Bold, fontSize = 15.sp))
+                }
+                Text("  → " + (view?.detail?.destination ?: trip?.ref?.destination.orEmpty()), maxLines = 1,
+                    style = TextStyle(color = on, fontSize = 15.sp, fontWeight = FontWeight.Medium))
+            }
+            if (view == null) {
+                Text(context.getString(R.string.track_loading), style = TextStyle(color = onDim, fontSize = 14.sp), modifier = GlanceModifier.padding(top = 10.dp))
+                return@Column
+            }
+            val summary = followSummary(context, view, now)
+            Row(verticalAlignment = Alignment.Bottom, modifier = GlanceModifier.padding(top = 6.dp)) {
+                Text(summary.countdown, style = TextStyle(color = on, fontSize = 30.sp, fontWeight = FontWeight.Bold))
+                Text("  " + summary.caption, maxLines = 2, style = TextStyle(color = onDim, fontSize = 13.sp),
+                    modifier = GlanceModifier.defaultWeight().padding(bottom = 5.dp))
+            }
+            summary.delay?.let { delay ->
+                Box(GlanceModifier.cornerRadius(50.dp).background(FixedColor(colors.on.copy(alpha = if (summary.veryLate) 0.32f else 0.18f)))
+                    .padding(horizontal = 10.dp, vertical = 3.dp)) {
+                    Text(delay, style = TextStyle(color = on, fontSize = 12.sp, fontWeight = FontWeight.Medium))
+                }
+            }
+            if (summary.stopsAway > 0) {
+                Text(context.resources.getQuantityString(R.plurals.follow_stops_away, summary.stopsAway, summary.stopsAway),
+                    style = TextStyle(color = onDim, fontSize = 12.sp), modifier = GlanceModifier.padding(top = 6.dp))
+            }
+            Spacer(GlanceModifier.height(8.dp))
+            Track(summary, colors)
+            Row(GlanceModifier.fillMaxWidth().padding(top = 2.dp)) {
+                Text(summary.from, maxLines = 1, style = TextStyle(color = onDim, fontSize = 12.sp), modifier = GlanceModifier.defaultWeight())
+                Text(summary.to, maxLines = 1, style = TextStyle(color = onDim, fontSize = 12.sp))
+            }
+            view.catchLine?.let {
+                Text(it, maxLines = 2, style = TextStyle(color = on, fontSize = 12.sp), modifier = GlanceModifier.padding(top = 4.dp))
+            }
         }
-        if (p == null) {
-            Text(context.getString(R.string.track_loading), style = TextStyle(color = whiteDim, fontSize = 14.sp),
-                modifier = GlanceModifier.padding(top = 10.dp))
-            return@Column
-        }
-        val target = if (p.onBoard) p.nextExpectedMs else p.boardingExpectedMs
-        val minutes = ceil((target - now) / 60_000.0).toInt()
-        Column(GlanceModifier.padding(top = 6.dp)) {
-            Text(
-                when {
-                    minutes <= 0 -> context.getString(R.string.countdown_now)
-                    minutes > 90 -> Format.clock(target)
-                    else -> context.getString(R.string.countdown_minutes, minutes)
-                },
-                style = TextStyle(color = white, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            )
-            Text(
-                if (p.onBoard) context.getString(R.string.follow_until_next, p.nextStopName ?: p.lastStopName)
-                else context.getString(R.string.follow_until_departure, p.boardingStopName),
-                maxLines = 1, style = TextStyle(color = whiteDim, fontSize = 13.sp)
-            )
-        }
-        // Your part of the line, as on the home card: from your stop to where you get off.
-        val last = (view.detail.stops.size - 1).coerceAtLeast(1)
-        val start = (p.boardingIndex ?: 0).coerceIn(0, last - 1)
-        val end = (p.alightIndex ?: last).coerceIn(start + 1, last)
-        Spacer(GlanceModifier.height(10.dp))
+    }
+}
+
+/** Your part of the line: a dot per stop (at most 12), the ridden part bright, and the bus at its place. */
+@Composable
+private fun Track(summary: FollowSummary, colors: CardColors) {
+    val cells = (summary.hops + 1).coerceAtMost(12)
+    val bus = Math.round(summary.position / summary.hops * (cells - 1)).toInt().coerceIn(0, cells - 1)
+    Box(GlanceModifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.CenterStart) {
         LinearProgressIndicator(
-            progress = ((p.position - start) / (end - start)).coerceIn(0f, 1f),
-            modifier = GlanceModifier.fillMaxWidth().height(6.dp),
-            color = white,
-            backgroundColor = FixedColor(Color.White.copy(alpha = 0.3f))
+            progress = summary.position / summary.hops,
+            modifier = GlanceModifier.fillMaxWidth().height(4.dp).padding(horizontal = 10.dp),
+            color = FixedColor(colors.on.copy(alpha = 0.85f)),
+            backgroundColor = FixedColor(colors.on.copy(alpha = 0.3f))
         )
-        Row(GlanceModifier.fillMaxWidth().padding(top = 4.dp)) {
-            Text(p.boardingStopName, maxLines = 1, style = TextStyle(color = whiteDim, fontSize = 12.sp), modifier = GlanceModifier.defaultWeight())
-            Text(p.alightStopName ?: p.lastStopName, maxLines = 1, style = TextStyle(color = whiteDim, fontSize = 12.sp))
+        Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            for (i in 0 until cells) {
+                Box(GlanceModifier.defaultWeight(), contentAlignment = Alignment.Center) {
+                    if (i == bus) {
+                        Box(GlanceModifier.size(22.dp).cornerRadius(11.dp).background(FixedColor(colors.on)), contentAlignment = Alignment.Center) {
+                            Image(ImageProvider(R.drawable.ic_stat_bus), contentDescription = null, modifier = GlanceModifier.size(14.dp),
+                                colorFilter = ColorFilter.tint(FixedColor(colors.primary)))
+                        }
+                    } else {
+                        Text(if (i == 0 || i == cells - 1) "●" else "•",
+                            style = TextStyle(color = FixedColor(colors.on.copy(alpha = if (i < bus) 1f else 0.7f)), fontSize = 12.sp))
+                    }
+                }
+            }
         }
     }
 }

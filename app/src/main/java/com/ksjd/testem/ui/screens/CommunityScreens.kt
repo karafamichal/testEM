@@ -368,6 +368,14 @@ private val CATEGORIES = listOf(
     "other" to R.string.bug_cat_other
 )
 
+/** A picked photo copied into the app (report_images/), so an unsent draft keeps it; returns the copy's file URI. */
+private fun keepReportImage(context: Context, uri: Uri): Uri {
+    val dir = java.io.File(context.filesDir, "report_images").apply { mkdirs() }
+    val file = java.io.File(dir, java.util.UUID.randomUUID().toString() + ".jpg")
+    file.writeBytes(Base64.decode(encodeReportImage(context, uri), Base64.NO_WRAP))
+    return Uri.fromFile(file)
+}
+
 /** A picked photo for a report: at most 1600 px on the longer side, re-encoded as JPEG (which drops EXIF, e.g. GPS), base64. */
 private fun encodeReportImage(context: Context, uri: Uri): String {
     val resolver = context.contentResolver
@@ -401,25 +409,37 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
     val ticket by viewModel.ticketState.collectAsState()
     val app by viewModel.appState.collectAsState()
     val scope = rememberCoroutineScope()
-    var category by rememberSaveable { mutableStateOf(if (feature) "feature" else "other") }
-    var title by rememberSaveable { mutableStateOf("") }
-    var description by rememberSaveable { mutableStateOf("") }
+    // An unsent report comes back as it was left: text, name, category, logs switch and photos (EM-0027, EM-0031).
+    val prefs = remember { com.ksjd.testem.CredentialsManager(context) }
+    val draft = remember { prefs.getReportDraft(feature) }
+    var category by rememberSaveable { mutableStateOf(draft?.category?.ifBlank { null } ?: if (feature) "feature" else "other") }
+    var title by rememberSaveable { mutableStateOf(draft?.title.orEmpty()) }
+    var description by rememberSaveable { mutableStateOf(draft?.description.orEmpty()) }
     // Signed-in users get their name and email filled in; they can change or clear both.
     // Only while unlocked: the name and email belong to the protected account.
     val known = app.hasAccount && app.isAppUnlocked
-    var name by rememberSaveable { mutableStateOf(if (known) ticket.userName else "") }
-    var email by rememberSaveable { mutableStateOf(if (known) app.email else "") }
+    var name by rememberSaveable { mutableStateOf(draft?.name ?: if (known) ticket.userName else "") }
+    var email by rememberSaveable { mutableStateOf(draft?.email ?: if (known) app.email else "") }
     // A suggestion needs no logs.
-    var attachLogs by rememberSaveable { mutableStateOf(!feature) }
+    var attachLogs by rememberSaveable { mutableStateOf(draft?.attachLogs ?: !feature) }
     var showLogs by rememberSaveable { mutableStateOf(false) }
     var consent by rememberSaveable { mutableStateOf(false) }
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var sentCode by rememberSaveable { mutableStateOf("") }
     var logs by remember { mutableStateOf("") }
-    var images by remember { mutableStateOf(listOf<Uri>()) }
+    var images by remember { mutableStateOf(draft?.images.orEmpty().map(Uri::parse).filter { it.path?.let { p -> java.io.File(p).exists() } == true }) }
     val pickImages = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(5)) { picked ->
-        images = (images + picked).distinct().take(5)
+        // Kept as small copies in the app, so a draft still has its photos after the app was closed.
+        scope.launch {
+            val copies = withContext(Dispatchers.IO) { picked.mapNotNull { runCatching { keepReportImage(context, it) }.getOrNull() } }
+            images = (images + copies).distinct().take(5)
+        }
+    }
+    LaunchedEffect(category, title, description, name, email, attachLogs, images) {
+        val empty = title.isBlank() && description.isBlank() && images.isEmpty()
+        prefs.saveReportDraft(feature, if (empty) null else com.ksjd.testem.CredentialsManager.ReportDraft(
+            category, title, description, name, email, attachLogs, images.map(Uri::toString)))
     }
     LaunchedEffect(Unit) { logs = withContext(Dispatchers.IO) { AppLogs.collect(context) } }
 
@@ -475,7 +495,7 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
     }
     if (images.isNotEmpty()) FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         images.forEachIndexed { i, uri ->
-            InputChip(selected = false, onClick = { images = images - uri }, label = { Text(stringResource(R.string.bug_image, i + 1)) },
+            InputChip(selected = false, onClick = { images = images - uri; uri.path?.let { java.io.File(it).delete() } }, label = { Text(stringResource(R.string.bug_image, i + 1)) },
                 trailingIcon = { Icon(Icons.Outlined.Close, stringResource(R.string.bug_image_remove), Modifier.size(18.dp)) })
         }
     }
@@ -540,7 +560,13 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
                         BugReport(category, title.trim(), description.trim(), name.trim(), email.trim(), AppLogs.device(),
                             if (attachLogs) logs else "", kind = if (feature) "feature" else "bug", images = encoded)
                     )
-                }.onSuccess { sentCode = it; Haptics.perform(view, Haptics.CONFIRM) }
+                }.onSuccess {
+                    sentCode = it
+                    Haptics.perform(view, Haptics.CONFIRM)
+                    images.forEach { u -> u.path?.let { p -> java.io.File(p).delete() } }
+                    images = emptyList(); title = ""; description = ""
+                    prefs.saveReportDraft(feature, null)
+                }
                     .onFailure { error = failed.replace("%s", it.message ?: "?"); Haptics.perform(view, Haptics.REJECT) }
                 sending = false
             }

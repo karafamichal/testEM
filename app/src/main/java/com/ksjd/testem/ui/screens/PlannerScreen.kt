@@ -1,5 +1,11 @@
 package com.ksjd.testem.ui.screens
 
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.withContext
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.AlertDialog
 import android.content.Intent
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -158,6 +164,7 @@ fun PlannerScreen(
                     saved = state.savedJourneys.any { it.sameAs(connection) },
                     onToggleSave = { viewModel.toggleSaveJourney(connection) },
                     onRepeat = { viewModel.rideFrom(connection)?.let { editing = it to true } },
+                    onReplace = { viewModel.replaceConnection(connection, it) },
                     onOpenStop = onOpenStop,
                     onOpenTrip = onOpenTrip
                 )
@@ -410,10 +417,20 @@ private fun ConnectionCard(
     onToggleSave: () -> Unit,
     onRepeat: () -> Unit,
     onOpenStop: (String, String, String) -> Unit,
-    onOpenTrip: (TimetableSegment, String) -> Unit
+    onOpenTrip: (TimetableSegment, String) -> Unit,
+    onReplace: (TimetableConnection) -> Unit = {}
 ) {
     val context = LocalContext.current
     val haptic = rememberHaptic()
+    // EM-0026, EM-0030: the change between segment moving-1 and moving, moved to another stop both buses serve.
+    var moving by remember { mutableStateOf<Int?>(null) }
+    moving?.let { index ->
+        TransferEditor(connection, index, onDismiss = { moving = null }) { edited ->
+            moving = null
+            haptic(Haptics.CONFIRM)
+            onReplace(edited)
+        }
+    }
     val shareTitle = stringResource(R.string.planner_share)
     val shareText = shareText(connection)
     Surface(
@@ -451,12 +468,18 @@ private fun ConnectionCard(
             }
             connection.segments.forEachIndexed { index, segment ->
                 if (index > 0) {
-                    Text(
-                        stringResource(R.string.timetables_transfer_label),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 2.dp)
-                    )
+                    Row(Modifier.padding(start = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.timetables_transfer_label),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { haptic(Haptics.TAP); moving = index }) {
+                            Text(stringResource(R.string.transfer_move), style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
                 }
                 val canOpenTrip = segment.routeUrl.isNotBlank()
                 Row(

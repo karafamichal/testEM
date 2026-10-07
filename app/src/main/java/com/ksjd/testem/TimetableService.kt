@@ -46,6 +46,78 @@ class TimetableService {
             date.atTime(h, m).atZone(SK_ZONE).toEpochSecond(), request.directOnly, emptyList())
     }
 
+    /** A stop of a planner leg's bus after where the rider gets on (for editing the change, EM-0026, EM-0030). */
+    data class LegStop(val index: Int, val name: String, val lat: Double?, val lon: Double?, val arrivalMs: Long, val json: JsonObject)
+
+    /** A stop to get on the next bus, with the walk to it from where the rider got off. */
+    data class BoardStop(val stop: CpStopSuggestion, val walkSeconds: Long)
+
+    /** Stops of [segment]'s bus after the boarding stop, to choose where to get off. Empty without a timetable trip. */
+    fun stopsAfterBoarding(segment: TimetableSegment): List<LegStop> {
+        val link = parseTripUrl(segment.routeUrl.timetableLink()) ?: return emptyList()
+        val stops = HubClient.timetable("trip", mapOf("id" to link.first)).getAsJsonArray("stops").map { it.asJsonObject }
+        return stops.mapIndexed { i, st -> LegStop(i, st.str("name"), st.num("lat"), st.num("lon"), st.get("arrival").asLong, st) }
+            .drop((link.second ?: 0) + 1)
+    }
+
+    /** Stops around where the rider gets off (that stop first), each with the walk to it. */
+    fun boardStopsNear(off: LegStop): List<BoardStop> {
+        val lat = off.lat ?: return emptyList()
+        val lon = off.lon ?: return emptyList()
+        return HubClient.timetable("stops", mapOf("lat" to lat.toString(), "lon" to lon.toString(), "radius" to "600", "n" to "8"))
+            .getAsJsonArray("stops").map { it.asJsonObject }
+            .map { BoardStop(suggestion(it), walkSeconds(lat, lon, it.num("lat"), it.num("lon"))) }
+            .sortedBy { it.walkSeconds }
+    }
+
+    /** Seconds on foot between two points, like emhub's planner (1.2 m/s, streets 30 % longer, +1 min); 0 for the same place. */
+    fun walkSeconds(lat1: Double?, lon1: Double?, lat2: Double?, lon2: Double?): Long {
+        if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return 0L
+        val m = com.ksjd.testem.live.LiveRepository.distanceMeters(lat1, lon1, lat2, lon2)
+        return if (m < 30) 0L else (m / (1.2 / 1.3)).toLong() + 60
+    }
+
+    /**
+     * [c] with its change before segment [index] edited by the rider: get off that bus at [off], walk to [board],
+     * then the first way from there to the destination after the walk and the change time. Null when there is none.
+     */
+    fun editTransfer(c: TimetableConnection, index: Int, off: LegStop, board: BoardStop): TimetableConnection? {
+        val bus = c.segments[index - 1]
+        val link = parseTripUrl(bus.routeUrl.timetableLink()) ?: return null
+        val ready = off.arrivalMs / 1000 + board.walkSeconds + changeMinutes * 60L
+        val onward = HubClient.timetable("plan", mapOf("from" to stopParam(board.stop, board.stop.selectedText), "to" to c.segments.last().arrivalStop,
+            "time" to ready.toString(), "n" to "1", "change" to changeMinutes.toString(), "walkstart" to "0"))
+            .getAsJsonArray("connections")?.firstOrNull()?.asJsonObject ?: return null
+        val next = parseConnection(onward).takeIf { it.segments.isNotEmpty() } ?: return null
+        val cut = bus.copy(arrivalStop = off.name, arrivalTime = clock(off.arrivalMs), arrivalPlatform = off.json.str("platform"),
+            routeUrl = moveLink(bus.routeUrl, link.first, link.second ?: 0, off.index, off.json, board = false))
+        val first = c.segments.first()
+        val start = runCatching { LocalDate.parse(first.serviceDate).atTime(parseClock(first.departureTime)!!).atZone(SK_ZONE).toInstant().toEpochMilli() }
+            .getOrNull() ?: off.arrivalMs
+        val minutes = ((onward.get("arrival").asLong - start) / 60_000L).toInt()
+        return TimetableConnection(
+            id = c.id + "~" + next.id,
+            departureTime = c.departureTime,
+            arrivalTime = next.arrivalTime,
+            totalDuration = if (minutes < 60) "$minutes min" else "${minutes / 60} h ${minutes % 60} min",
+            segments = c.segments.take(index - 1) + cut + next.segments
+        )
+    }
+
+    /** The timetable trip link of a segment: its own, or the one a live (sadzv) link carries. */
+    private fun String.timetableLink(): String = parseLiveUrl(this)?.timetable?.takeIf { it.isNotEmpty() } ?: this
+
+    /** A leg's link with a new boarding ([board]) or alighting stop; a live link keeps following live. */
+    private fun moveLink(url: String, tripId: String, from: Int, to: Int, stop: JsonObject, board: Boolean): String {
+        val timetable = tripUrl(tripId, from, to)
+        val live = parseLiveUrl(url) ?: return timetable
+        val local = { ms: Long -> Instant.ofEpochMilli(ms).atZone(SK_ZONE).toLocalTime().toSecondOfDay() }
+        return liveUrl(if (board) live.copy(
+            boardingPlatformId = stop.get("platformId")?.asInt ?: 0, stopId = stop.get("stopId")?.asInt ?: live.stopId,
+            plannedSecondOfDay = local(stop.get("departure").asLong), timetable = timetable)
+        else live.copy(alightOrder = stop.get("seq")?.asInt ?: (to + 1), timetable = timetable))
+    }
+
     /** The next connections after the last one listed. */
     suspend fun loadMoreConnections(cursor: TimetablePagingCursor): Result<TimetableSearchResult> = runCatching {
         plan(cursor.fromText, cursor.toText, cursor.searchDate.toLong(), cursor.handle == "direct", cursor.listedIds)
@@ -219,5 +291,6 @@ class TimetableService {
         private fun clock(ms: Long): String = Instant.ofEpochMilli(ms).atZone(SK_ZONE).let { "%d:%02d".format(it.hour, it.minute) }
 
         private fun JsonObject.str(key: String): String = get(key)?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+        private fun JsonObject.num(key: String): Double? = get(key)?.takeIf { it.isJsonPrimitive }?.asDouble
     }
 }

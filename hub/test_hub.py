@@ -404,6 +404,9 @@ gtfs(os.path.join(folder, "n.zip"), [("1", "Hub, Stop", 48.71, 19.12), ("2", "Fa
 tm = timetable.Timetable({"m": os.path.join(folder, "m.zip"), "n": os.path.join(folder, "n.zip")}, today=datetime.date(2026, 9, 29))
 quick = tm.plan(tm.resolve("home"), tm.resolve("far town"), at("05:55"), 1)[0]
 assert [(l.get("line"), hm(l["departure"])) for l in quick["legs"]] == [("1", "30 06:00"), ("60101", "30 06:10")], quick["legs"]
+# a change stop the rider chose: board there, no walk to another stop first
+assert all(l["type"] == "trip" for c in tt.plan(tt.resolve("town as"), tt.resolve("city station"), at("06:00"), 3, walk_start=False)
+           for l in c["legs"][:1]), "the first leg is a bus from the chosen stop"
 careful = tm.plan(tm.resolve("home"), tm.resolve("far town"), at("05:55"), 1, change=5 * 60)[0]
 assert [(l.get("line"), hm(l["departure"])) for l in careful["legs"]] == [("1", "30 06:00"), ("60101", "30 07:10")], "5 min to change: the later bus"
 city = tt.resolve("city station")

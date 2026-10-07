@@ -12,7 +12,8 @@ import java.time.format.FormatStyle
 import java.util.Locale
 
 object Format {
-    private val zone: ZoneId get() = ZoneId.systemDefault()
+    // Slovak buses run on Slovak time, also on phones set to another zone (like the planner's SK_ZONE).
+    private val zone: ZoneId = ZoneId.of("Europe/Bratislava")
     private val clock = DateTimeFormatter.ofPattern("HH:mm")
     private val clockSeconds = DateTimeFormatter.ofPattern("HH:mm:ss")
 

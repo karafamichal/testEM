@@ -431,6 +431,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setTimetableTime(time: String) = _timetableState.update { it.copy(timeInput = time) }
 
+    /** A result with its change moved to another stop by the rider (EM-0026, EM-0030). */
+    fun replaceConnection(old: TimetableConnection, new: TimetableConnection) = _timetableState.update { s ->
+        s.copy(connections = s.connections.map { if (it.id == old.id) new else it })
+    }
+
     /** ISO date, "" = today. */
     fun setTimetableDate(date: String) = _timetableState.update { it.copy(dateInput = date) }
 

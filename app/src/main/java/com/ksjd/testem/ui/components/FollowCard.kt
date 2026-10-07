@@ -97,35 +97,26 @@ fun FollowCard(trip: TrackedTrip, view: FollowView?, now: Long, modifier: Modifi
                 if (p == null) {
                     Text(stringResource(R.string.track_loading), color = on.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyLarge)
                 } else {
-                    val target = if (p.onBoard) p.nextExpectedMs else p.boardingExpectedMs
-                    val minutes = ceil((target - now) / 60_000.0).toInt()
+                    val summary = followSummary(context, view, now)
                     Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            when {
-                                minutes <= 0 -> stringResource(R.string.countdown_now)
-                                minutes > 90 -> Format.clock(target)
-                                else -> stringResource(R.string.countdown_minutes, minutes)
-                            },
-                            color = on, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold
-                        )
+                        Text(summary.countdown, color = on, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            if (p.onBoard) stringResource(R.string.follow_until_next, p.nextStopName ?: p.lastStopName)
-                            else stringResource(R.string.follow_until_departure, p.boardingStopName),
+                            summary.caption,
                             color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium,
                             maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 6.dp)
                         )
                     }
                     Spacer(Modifier.height(8.dp))
-                    DelayPill(view.detail.delaySeconds, on)
+                    DelayPill(summary, on)
                     Spacer(Modifier.height(16.dp))
                     RouteTrack(view, on)
                     Spacer(Modifier.height(6.dp))
                     Row {
-                        Text(p.boardingStopName, color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.labelMedium,
+                        Text(summary.from, color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.labelMedium,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                         Spacer(Modifier.width(12.dp))
-                        Text(p.alightStopName ?: p.lastStopName, color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.labelMedium,
+                        Text(summary.to, color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.labelMedium,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     view.catchLine?.let {
@@ -136,6 +127,54 @@ fun FollowCard(trip: TrackedTrip, view: FollowView?, now: Long, modifier: Modifi
             }
         }
     }
+}
+
+/** What the live card says; the home card and the widget both show it, so they always match (EM-0025). */
+data class FollowSummary(
+    val countdown: String,
+    /** "until it leaves <stop>" / "to <next stop>" */
+    val caption: String,
+    val delay: String?,
+    val veryLate: Boolean,
+    /** Stops the bus still has to go to reach yours (0 once it's there). */
+    val stopsAway: Int,
+    /** Your part of the line: hops between your stop and where you get off, and the bus's place on it. */
+    val hops: Int,
+    val position: Float,
+    val from: String,
+    val to: String
+)
+
+fun followSummary(context: android.content.Context, view: FollowView, now: Long): FollowSummary {
+    val p = view.progress
+    val target = if (p.onBoard) p.nextExpectedMs else p.boardingExpectedMs
+    val minutes = ceil((target - now) / 60_000.0).toInt()
+    val delay = view.detail.delaySeconds?.let { Math.round(it / 60.0).toInt() }
+    val last = (view.detail.stops.size - 1).coerceAtLeast(1)
+    val start = (p.boardingIndex ?: 0).coerceIn(0, last - 1)
+    val end = (p.alightIndex ?: last).coerceIn(start + 1, last)
+    return FollowSummary(
+        countdown = when {
+            minutes <= 0 -> context.getString(R.string.countdown_now)
+            minutes > 90 -> Format.clock(target)
+            else -> context.getString(R.string.countdown_minutes, minutes)
+        },
+        caption = if (p.onBoard) context.getString(R.string.follow_until_next, p.nextStopName ?: p.lastStopName)
+            else context.getString(R.string.follow_until_departure, p.boardingStopName),
+        delay = delay?.let { m ->
+            when {
+                m >= 1 -> context.getString(R.string.delay_late, m)
+                m <= -1 -> context.getString(R.string.delay_early, -m)
+                else -> context.getString(R.string.delay_on_time)
+            }
+        },
+        veryLate = (delay ?: 0) >= 3,
+        stopsAway = ceil(start - p.position).toInt().coerceAtLeast(0),
+        hops = end - start,
+        position = (p.position - start).coerceIn(0f, (end - start).toFloat()),
+        from = p.boardingStopName,
+        to = p.alightStopName ?: p.lastStopName
+    )
 }
 
 /** A pulsing dot and "Live", or a still dot and "Timetable". */
@@ -158,14 +197,9 @@ private fun LiveBadge(live: Boolean, on: Color) {
 }
 
 @Composable
-private fun DelayPill(delaySeconds: Int?, on: Color) {
-    val minutes = Math.round((delaySeconds ?: return) / 60.0).toInt()
-    val text = when {
-        minutes >= 1 -> stringResource(R.string.delay_late, minutes)
-        minutes <= -1 -> stringResource(R.string.delay_early, -minutes)
-        else -> stringResource(R.string.delay_on_time)
-    }
-    Box(Modifier.clip(RoundedCornerShape(50)).background(on.copy(alpha = if (minutes >= 3) 0.32f else 0.18f)).padding(horizontal = 12.dp, vertical = 4.dp)) {
+private fun DelayPill(summary: FollowSummary, on: Color) {
+    val text = summary.delay ?: return
+    Box(Modifier.clip(RoundedCornerShape(50)).background(on.copy(alpha = if (summary.veryLate) 0.32f else 0.18f)).padding(horizontal = 12.dp, vertical = 4.dp)) {
         Text(text, color = on, style = MaterialTheme.typography.labelLarge)
     }
 }

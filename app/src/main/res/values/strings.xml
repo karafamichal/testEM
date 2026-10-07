@@ -416,6 +416,28 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="change_time_hint">The planner shows changes only with at least this much time between the two buses. A shorter time finds more connections; a longer one is safer when a bus runs late.</string>
     <string name="change_time_any">Any (even 0 min)</string>
     <string name="change_time_minutes">At least %1$d min</string>
+    <string name="community_bus_gone">It already left</string>
+    <string name="history_detail_spent">Spent</string>
+    <string name="history_detail_rides">Rides</string>
+    <string name="history_detail_topped_up">Topped up %1$s</string>
+    <string name="history_detail_weekdays">Rides by weekday</string>
+    <string name="history_detail_hours">Rides by time of day</string>
+    <string name="history_detail_list">Records</string>
+    <string name="transfer_move">Change stop</string>
+    <string name="transfer_title">Where to change</string>
+    <string name="transfer_walk">walk %1$d min</string>
+    <string name="transfer_step_off">Where you get off %1$s</string>
+    <string name="transfer_step_on">Where you get on the next bus</string>
+    <string name="transfer_no_stops">This bus has no stop list to choose from.</string>
+    <string name="transfer_now">now</string>
+    <string name="transfer_here">here</string>
+    <string name="transfer_other_stop">Another stop…</string>
+    <string name="transfer_chosen">Getting on at %1$s, %2$d min on foot</string>
+    <string name="transfer_then">Then</string>
+    <string name="transfer_off_at">get off at %1$s at %2$s</string>
+    <string name="transfer_arrive">You arrive at %1$s (%2$s)</string>
+    <string name="transfer_none_from">No bus from there to your destination today. Try another stop.</string>
+    <string name="transfer_apply">Use this change</string>
     <string name="haptics_switch">Haptic feedback</string>
     <string name="haptics_switch_hint">A short vibration on taps and when something is done, like following a bus</string>
     <string name="picker_time_title">Time</string>
@@ -520,5 +542,5 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• New in Settings: time to change buses, from any to 10 min. Shorter finds more connections.\n• Faster connection search.\n• Up to 5 photos in a bug report.</string>
+    <string name="whats_new_body">• Choose your own change: where to get off the first bus and where to get on the next, also a stop you search for (Change stop).\n• Unsent bug reports and suggestions are kept, photos too.\n• Tap the History chart or a stop for a closer look.\n• The widget now looks like the live card on the home tab.\n• Waiting at your stop for a late bus asks whether it came.\n• “You won\'t make it” no longer comes from an old position; History loads right after unlocking.</string>
 </resources>

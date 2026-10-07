@@ -4,6 +4,11 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,14 +82,20 @@ fun HistoryScreen(viewModel: AppViewModel) {
         Toast.makeText(context, if (ok) exportedMessage else exportFailedMessage, Toast.LENGTH_SHORT).show()
     }
 
-    LaunchedEffect(ticket.selectedSnr) {
-        if (history.lastUpdatedMs == 0L) viewModel.loadCardHistory()
+    // Right after unlocking, the app is still signing in: load as soon as that's done, not only on the next visit.
+    val app by viewModel.appState.collectAsState()
+    LaunchedEffect(ticket.selectedSnr, app.isLoggedIn) {
+        if (app.isLoggedIn && history.lastUpdatedMs == 0L) viewModel.loadCardHistory()
     }
+    // Nothing fetched yet (signing in or loading): a spinner, not "no history".
+    val waiting = history.items.isEmpty() && history.errorMessage.isBlank() && (history.isLoading || history.lastUpdatedMs == 0L)
 
     val card = ticket.selectedCard
     val insights = remember(history.items, card?.creditLastBalance) {
         HistoryInsights.from(history.items, card?.creditLastBalance)
     }
+    var focus by remember { mutableStateOf<HistoryFocus?>(null) }
+    focus?.let { HistoryDetailSheet(it, history.items, card?.currencySymbol ?: "€") { focus = null } }
     val grouped = remember(history.items) {
         history.items.groupBy { YearMonth.from(Instant.ofEpochMilli(it.timestampMs).atZone(ZoneId.systemDefault())) }
     }
@@ -107,7 +118,7 @@ fun HistoryScreen(viewModel: AppViewModel) {
             )
         }
         when {
-            history.isLoading && history.items.isEmpty() -> item {
+            waiting -> item {
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -128,7 +139,7 @@ fun HistoryScreen(viewModel: AppViewModel) {
                 EmptyState(stringResource(R.string.history_empty_title), stringResource(R.string.history_empty))
             }
             else -> {
-                item { InsightsPanel(insights, card?.currencySymbol ?: "€") }
+                item { InsightsPanel(insights, card?.currencySymbol ?: "€") { focus = it } }
                 grouped.forEach { (month, items) ->
                     item(key = "m-$month") { SectionLabel(monthTitle(month)) }
                     item(key = "g-$month") {
@@ -172,7 +183,7 @@ private fun HistoryRow(item: CardHistoryItem) {
 }
 
 @Composable
-private fun InsightsPanel(insights: HistoryInsights, currency: String) {
+private fun InsightsPanel(insights: HistoryInsights, currency: String, onOpen: (HistoryFocus) -> Unit) {
     val thisMonth = insights.thisMonth
     val lastMonth = insights.lastMonth
     Surface(
@@ -183,6 +194,8 @@ private fun InsightsPanel(insights: HistoryInsights, currency: String) {
         color = MaterialTheme.colorScheme.surface
     ) {
         Column(Modifier.padding(16.dp)) {
+            // Tap the month, a bar or a stop for a closer look (EM-0028).
+            Column(Modifier.clickable { onOpen(HistoryFocus.Month(thisMonth.month)) }) {
             Text(stringResource(R.string.insights_this_month), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(Format.cents(thisMonth.spentCents, currency), style = MaterialTheme.typography.displayMedium)
             Text(
@@ -191,8 +204,9 @@ private fun InsightsPanel(insights: HistoryInsights, currency: String) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            }
             Spacer(Modifier.height(16.dp))
-            SpendChart(insights)
+            SpendChart(insights) { onOpen(HistoryFocus.Month(it)) }
             Spacer(Modifier.height(16.dp))
 
             if (insights.averageFareCents != null) {
@@ -216,7 +230,7 @@ private fun InsightsPanel(insights: HistoryInsights, currency: String) {
                 Spacer(Modifier.height(16.dp))
                 Text(stringResource(R.string.insights_top_stops), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 insights.topStops.forEach { (stop, count) ->
-                    Row(Modifier.padding(top = 4.dp)) {
+                    Row(Modifier.clickable { onOpen(HistoryFocus.Stop(stop)) }.padding(vertical = 6.dp)) {
                         Text(stop, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                         Text(pluralStringResource(R.plurals.insights_trips, count, count), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -235,7 +249,7 @@ private fun InsightsPanel(insights: HistoryInsights, currency: String) {
 }
 
 @Composable
-private fun SpendChart(insights: HistoryInsights) {
+private fun SpendChart(insights: HistoryInsights, onMonth: (YearMonth) -> Unit) {
     val current = MaterialTheme.colorScheme.primary
     val past = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
     val baseline = MaterialTheme.colorScheme.outline
@@ -245,6 +259,13 @@ private fun SpendChart(insights: HistoryInsights) {
             Modifier
                 .fillMaxWidth()
                 .height(88.dp)
+                .pointerInput(insights.months) {
+                    detectTapGestures { tap ->
+                        val count = insights.months.size
+                        val index = (tap.x / size.width * count).toInt().coerceIn(0, count - 1)
+                        onMonth(insights.months[index].month)
+                    }
+                }
         ) {
             val count = insights.months.size
             val gap = 10.dp.toPx()
@@ -268,10 +289,10 @@ private fun SpendChart(insights: HistoryInsights) {
                 if (index > 0) Spacer(Modifier.width(10.dp))
                 Text(
                     month.month.month.getDisplayName(TextStyle.SHORT_STANDALONE, Locale.getDefault()),
+                    modifier = Modifier.weight(1f).clickable { onMonth(month.month) },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f)
+                    textAlign = TextAlign.Center
                 )
             }
         }

@@ -254,7 +254,7 @@ class CredentialsManager(context: Context) {
     fun getPredictShift(): Boolean = prefs.getBoolean("predict_shift", false)
     fun savePredictShift(enabled: Boolean) = prefs.edit().putBoolean("predict_shift", enabled).apply()
 
-    fun getCatchTimetableAlerts(): Boolean = prefs.getBoolean("catch_timetable_alerts", false)
+    fun getCatchTimetableAlerts(): Boolean = prefs.getBoolean("catch_timetable_alerts", true) // on by default (EM-0029)
     fun saveCatchTimetableAlerts(enabled: Boolean) = prefs.edit().putBoolean("catch_timetable_alerts", enabled).apply()
 
     // ------------------------------------------------------- saved places
@@ -279,6 +279,19 @@ class CredentialsManager(context: Context) {
 
     private fun writeRoutes(key: String, routes: List<SavedRoute>) =
         prefs.edit().putString(key, gson.toJson(routes)).apply()
+
+    /** An unsent bug report or suggestion, kept until it is sent (EM-0027, EM-0031). */
+    data class ReportDraft(
+        val category: String = "", val title: String = "", val description: String = "", val name: String? = null,
+        val email: String? = null, val attachLogs: Boolean? = null, val images: List<String> = emptyList()
+    )
+    fun getReportDraft(feature: Boolean): ReportDraft? = runCatching {
+        prefs.getString(if (feature) "draft_feature" else "draft_bug", null)?.let { gson.fromJson(it, ReportDraft::class.java) }
+    }.getOrNull()
+    fun saveReportDraft(feature: Boolean, draft: ReportDraft?) = prefs.edit().apply {
+        val key = if (feature) "draft_feature" else "draft_bug"
+        if (draft == null) remove(key) else putString(key, gson.toJson(draft))
+    }.apply()
 
     fun getSavedJourneys(): List<SavedJourney> = readList("saved_journeys", SavedJourney::class.java)
         .filter { runCatching { it.connection.segments.isNotEmpty() && it.route.fromText.isNotBlank() }.getOrDefault(false) }

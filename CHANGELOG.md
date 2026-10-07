@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.12.0
+
+### New
+- **Choose your own change in a planner result** (EM-0026, EM-0030): *Change stop* next to *Change here* opens a two-step editor. First pick where you get off the first bus (any of its later stops), then where you get on the next one: the same stop, a stop nearby (with the walk in minutes) or any stop you search for. A preview shows the new onward bus and the arrival; *Use this change* updates the connection without a new search, and *Follow the whole journey* follows it. Example: Tajovského školy → Lipovec Potraviny, get off at EUROPA SC, walk to Nám. SNP, line 15 from there. Needs emhub 1.15.1.
+- **Unsent reports and suggestions are kept** (EM-0027, EM-0031): leave the form and come back later; the text, name, email, category, the logs switch and the photos are still there until you send it.
+- **History insights you can tap** (EM-0028): a bar of the chart (or *Spent this month*) opens that month, a stop opens that stop: spent, rides, average fare, top-ups, rides by weekday and time of day, the top stops and the records.
+
+### Changed
+- **The widget looks like the live card on the home tab** (EM-0025): the same colours (your theme), line, destination, countdown, delay, stops to go and the bus moving along your part of the route.
+- **Waiting at your stop for a late bus** (EM-0033): when your phone stands at your stop after the bus was due, the bus is kept there as late instead of moving on with the timetable, and the notification asks *Bus is here* (reported for other riders too) or *It already left*, also in automatic mode.
+- *Alert on timetable times too* (Will I catch it?) is on by default (EM-0029).
+- Bus times are always shown in Slovak time, also on a phone set to another time zone.
+
+### Fixed
+- **"You won't make it" from an old position** (EM-0032): the location was checked only every few minutes and the estimate kept using the old one while you walked. Before *Leave now* or *You won't make it*, the app now gets a fresh position (and never alerts from one older than 45 s).
+- **History after unlocking on the History tab**: it said *History not available* until you went to another tab and back. It now shows a loading animation and loads by itself.
+
 ## 2.11.0
 
 ### New

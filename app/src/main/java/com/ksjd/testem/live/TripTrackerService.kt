@@ -57,6 +57,9 @@ data class TrackedTrip(
     val nextLegs: List<TrackedTrip> = emptyList()
 )
 
+/** The live notification's texts: title, body and the short countdown ("5 min"). */
+data class Shown(val title: String, val text: String, val countdown: String)
+
 /** The followed bus as the notification shows it, for the home screen's live card. */
 data class FollowView(
     val trip: TrackedTrip,
@@ -65,7 +68,9 @@ data class FollowView(
     /** "You'll make it" etc., when the catch estimate is on. */
     val catchLine: String?,
     /** The bus's position is really known (vehicle, riders), not only the timetable. */
-    val live: Boolean
+    val live: Boolean,
+    /** Exactly what the live notification shows (the widget mirrors it). */
+    val shown: Shown = Shown("", "", "")
 )
 
 /** Shared between the tracking service and the UI. */
@@ -203,6 +208,12 @@ class TripTrackerService : Service() {
     private var lastRiderIndex = -1f
     /** The phone moves along the route past the boarding stop: the rider is on the bus. */
     private var ridingBus = false
+    /** What the live notification shows right now; the widget shows the same. */
+    private var shown = Shown("", "", "")
+    /** The rider's phone stands at their stop after the bus was due: it hasn't come yet (EM-0033). */
+    private var waitingAtStop = false
+    /** The rider said the bus already left ("It already left"): stop holding it at the stop. */
+    private var busGone = false
     private var lastRiderReportAt = 0L
     private var localFromGps = false
     /** Android granted the location service type; without it no GPS arrives while the app is closed. */
@@ -224,6 +235,14 @@ class TripTrackerService : Service() {
         }
         if (intent?.action == ACTION_RIDE) {
             startRide(intent.getStringExtra(EXTRA_RIDE).orEmpty(), intent.getLongExtra(EXTRA_DEPARTURE, 0L))
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_GONE) {
+            // "It already left": the rider missed it or it went early; follow the timetable/live data again.
+            busGone = true
+            waitingAtStop = false
+            localDelay = null
+            trip?.let { t -> lastDetail?.let { redraw(t, it) } }
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_REPORT) {
@@ -302,6 +321,8 @@ class TripTrackerService : Service() {
         routeCoords = null
         lastRiderIndex = -1f
         ridingBus = false
+        waitingAtStop = false
+        busGone = false
         lastRiderReportAt = 0L
         localFromGps = false
         nextFixAt = 0L
@@ -450,6 +471,19 @@ class TripTrackerService : Service() {
         val atStop = coords.getOrNull(nearest)?.let { (lat, lon) ->
             LiveRepository.distanceMeters(fix.latitude, fix.longitude, lat, lon) <= STOP_RADIUS_M
         } == true
+        // EM-0033: the rider stands at their stop after the bus was due, so it hasn't passed yet, whatever the
+        // timetable says: keep it at the stop (late) and ask in the notification whether it's here or gone.
+        val boardIdx = p.boardingIndex
+        if (boardIdx != null && !ridingBus && !busGone && atStop && nearest == boardIdx && !moving &&
+            now > scheduled[boardIdx] && (waitingAtStop || p.position > boardIdx + 0.05f)) {
+            if (!waitingAtStop) Log.i(GPS_TAG, "rider waits at the stop: the bus hasn't come yet")
+            waitingAtStop = true
+            localDelay = ((now - scheduled[boardIdx]) / 1000L).toInt() to now
+            localFromGps = true
+            redraw(current, detail)
+            return
+        }
+        if (waitingAtStop && (moving || !atStop)) waitingAtStop = false
         // Left (after standing there) or drove past a stop: the exact delay there (timetable times are departures).
         val left = stopPass.onFix(index, moving, now, atStop)?.takeIf { it.stop >= boarding.toInt() && it.stop <= detail.stops.lastIndex }
         if (left != null) {
@@ -484,7 +518,8 @@ class TripTrackerService : Service() {
         val detail = lastDetail ?: return
         val stop = detail.stops.getOrNull(index) ?: return
         val key = detail.communityKey ?: return
-        if (prefs.getCommunityMode() != COMMUNITY_BUTTONS || !HubClient.isConfigured) return
+        // Buttons mode, or the question asked while the rider waits at the stop (any mode, EM-0033).
+        if ((prefs.getCommunityMode() != COMMUNITY_BUTTONS && !waitingAtStop) || !HubClient.isConfigured) return
         val now = System.currentTimeMillis()
         localFromGps = false
         if (leaving) leavingPressed = true else herePressed = true
@@ -509,9 +544,14 @@ class TripTrackerService : Service() {
     private fun redraw(current: TrackedTrip, raw: TripDetail) {
         val detail = withLocalDelay(raw)
         val progress = TripProgress.from(detail, current)
-        val catch = catchLine(detail, progress)
-        TripTracking.publish(this, FollowView(current, detail, progress, catch, positionKnown(detail)))
-        NotificationManagerCompat.from(this).notifySafely(NOTIFICATION_ID, liveNotification(current, detail, progress, catch))
+        show(current, detail, progress, catchLine(detail, progress))
+    }
+
+    /** The live notification, and the same texts for the home card and the widget (EM-0025: they must match). */
+    private fun show(current: TrackedTrip, detail: TripDetail, progress: TripProgress, catch: String?) {
+        val notification = liveNotification(current, detail, progress, catch)
+        TripTracking.publish(this, FollowView(current, detail, progress, catch, positionKnown(detail), shown))
+        NotificationManagerCompat.from(this).notifySafely(NOTIFICATION_ID, notification)
     }
 
     // ------------------------------------------------------------ catch estimate
@@ -537,7 +577,13 @@ class TripTrackerService : Service() {
             Log.i(GPS_TAG, "boarding stop location: ${if (stopLatLon != null) "known" else "unknown"}")
         }
         val now = System.currentTimeMillis()
-        if (riderListener != null || now < nextFixAt) return
+        // An old position must not decide "leave now" / "you won't make it": the rider has likely walked on since
+        // (EM-0032). When the estimate from it says so, look again right away instead of at the planned time.
+        val stale = lastFix?.let { now - it.time > FRESH_FIX_MS } ?: false
+        val urgent = stale && lastDetail?.let { d ->
+            catchFor(withLocalDelay(d), p)?.verdict.let { it == CatchEstimate.Verdict.LeaveNow || it == CatchEstimate.Verdict.Miss }
+        } == true
+        if (riderListener != null || (now < nextFixAt && !urgent)) return
         val fix = Locations.current(this, maxAgeMs = 20_000L)
         if (fix != null) lastFix = fix
         val meters = fix?.let { f -> stopLatLon?.let { (lat, lon) -> LiveRepository.distanceMeters(f.latitude, f.longitude, lat, lon) } }
@@ -593,6 +639,9 @@ class TripTrackerService : Service() {
     }
 
     private fun sendCatchAlerts(current: TrackedTrip, detail: TripDetail, p: TripProgress, estimate: CatchEstimate) {
+        // Only a fresh position may alarm the rider (EM-0032); updateLocation fetches one first.
+        val fresh = lastFix?.let { System.currentTimeMillis() - it.time <= FRESH_FIX_MS } ?: false
+        if (!fresh && !herePressed && !leavingPressed && !ridingBus) return
         // Timetable-only guesses alert only if the user asked for that (fewer false alarms).
         if (!positionKnown(detail) && !prefs.getCatchTimetableAlerts()) return
         val walk = (estimate.walkSeconds / 60.0).roundToInt().coerceAtLeast(1)
@@ -655,9 +704,7 @@ class TripTrackerService : Service() {
                 updateLocation(current, progress)
                 updateRiderTracking(current, fetched ?: detail, progress)
                 val estimate = updateCatch(detail, progress)
-                val catch = catchLine(detail, progress)
-                TripTracking.publish(this, FollowView(current, detail, progress, catch, positionKnown(detail)))
-                NotificationManagerCompat.from(this).notifySafely(NOTIFICATION_ID, liveNotification(current, detail, progress, catch))
+                show(current, detail, progress, catchLine(detail, progress))
                 sendAlerts(current, progress)
                 estimate?.let { sendCatchAlerts(current, detail, progress, it) }
             }
@@ -738,34 +785,42 @@ class TripTrackerService : Service() {
             else -> delayText(detail.delaySeconds)
         } + (reportNote?.let { "\n" + it } ?: "")
         // Only when the bus can actually be seen: from 30 min before it is due at the user's stop.
-        if (buttonsOn(detail) && (p.onBoard || p.secondsToBoarding <= REPORT_WINDOW_S)) {
+        if (waitingAtStop && !p.onBoard && !herePressed) {
+            waitingActions(p).forEach { builder.addAction(it) }
+        } else if (buttonsOn(detail) && (p.onBoard || p.secondsToBoarding <= REPORT_WINDOW_S)) {
             communityActions(detail, p).forEach { builder.addAction(it) }
         }
         if (!p.onBoard) {
             // Waiting at the stop: countdown to departure, and whether the user will make it.
+            shown = Shown(
+                getString(R.string.track_title, trip.ref.line, detail.destination),
+                getString(R.string.track_waiting_text, Format.clock(p.boardingExpectedMs), p.boardingStopName) +
+                    (catchLine?.let { "\n" + it } ?: "") + delayText + (thenLine(trip)?.let { "\n" + it } ?: ""),
+                shortMinutes(p.secondsToBoarding)
+            )
             builder
-                .setContentTitle(getString(R.string.track_title, trip.ref.line, detail.destination))
-                .setContentText(
-                    getString(R.string.track_waiting_text, Format.clock(p.boardingExpectedMs), p.boardingStopName) +
-                        (catchLine?.let { "\n" + it } ?: "") + delayText + (thenLine(trip)?.let { "\n" + it } ?: "")
-                )
-                .setShortCriticalText(shortMinutes(p.secondsToBoarding))
+                .setContentTitle(shown.title)
+                .setContentText(shown.text)
+                .setShortCriticalText(shown.countdown)
                 .setWhen(p.boardingExpectedMs)
                 .setShowWhen(true)
                 .setUsesChronometer(false)
         } else {
             // On board: time to the next stop, current stop underneath.
             val next = p.nextStopName ?: detail.destination
+            shown = Shown(
+                getString(R.string.track_next_title, next, Format.clock(p.nextExpectedMs)),
+                listOfNotNull(
+                    p.currentStopName?.let { getString(R.string.track_now_at, it) },
+                    p.alightStopName?.let { getString(R.string.track_get_off_at, it) },
+                    thenLine(trip)
+                ).joinToString("\n") + delayText,
+                shortMinutes(p.secondsToNext)
+            )
             builder
-                .setContentTitle(getString(R.string.track_next_title, next, Format.clock(p.nextExpectedMs)))
-                .setContentText(
-                    listOfNotNull(
-                        p.currentStopName?.let { getString(R.string.track_now_at, it) },
-                        p.alightStopName?.let { getString(R.string.track_get_off_at, it) },
-                        thenLine(trip)
-                    ).joinToString("\n") + delayText
-                )
-                .setShortCriticalText(shortMinutes(p.secondsToNext))
+                .setContentTitle(shown.title)
+                .setContentText(shown.text)
+                .setShortCriticalText(shown.countdown)
                 .setWhen(p.nextExpectedMs)
                 .setShowWhen(true)
         }
@@ -806,6 +861,24 @@ class TripTrackerService : Service() {
             detail.stops.getOrNull(p.nextIndex)?.let { add(action(REQUEST_REPORT_NEXT, getString(R.string.community_at, short(it.name)), p.nextIndex)) }
             detail.stops.getOrNull(p.nextIndex - 1)?.let { add(action(REQUEST_REPORT_BEHIND, getString(R.string.community_still_at, short(it.name)), p.nextIndex - 1)) }
         }
+    }
+
+    /** The rider waits at the stop and the bus is late: "Bus is here" (reported for everyone) or "It already left". */
+    private fun waitingActions(p: TripProgress): List<NotificationCompat.Action> {
+        val boarding = p.boardingIndex ?: return emptyList()
+        val here = PendingIntent.getService(
+            this, REQUEST_REPORT_HERE,
+            Intent(this, TripTrackerService::class.java).setAction(ACTION_REPORT).putExtra("stop", boarding).putExtra("leaving", false),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val gone = PendingIntent.getService(
+            this, REQUEST_GONE, Intent(this, TripTrackerService::class.java).setAction(ACTION_GONE),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        return listOf(
+            NotificationCompat.Action(0, getString(R.string.community_bus_here), here),
+            NotificationCompat.Action(0, getString(R.string.community_bus_gone), gone)
+        )
     }
 
     /** One segment per stop-to-stop hop; points mark where you get on and off. */
@@ -889,6 +962,7 @@ class TripTrackerService : Service() {
     companion object {
         const val ACTION_STOP = "com.ksjd.testem.TRACK_STOP"
         const val ACTION_REPORT = "com.ksjd.testem.TRACK_REPORT"
+        const val ACTION_GONE = "com.ksjd.testem.TRACK_GONE"
         const val ACTION_RIDE = "com.ksjd.testem.TRACK_RIDE"
         const val ACTION_PROMOTE = "com.ksjd.testem.TRACK_PROMOTE"
         private const val EXTRA_RIDE = "ride"
@@ -901,6 +975,7 @@ class TripTrackerService : Service() {
         private const val REQUEST_REPORT_NEXT = 11
         private const val REQUEST_REPORT_BEHIND = 12
         private const val REQUEST_REPORT_LEAVING = 13
+        private const val REQUEST_GONE = 14
         /** Within this of the boarding stop the rider is "at the stop": live GPS on. */
         private const val NEAR_STOP_M = 150
         /** A bus standing this close to a stop is stopped there (timetable stop positions can be tens of metres off). */
@@ -910,6 +985,8 @@ class TripTrackerService : Service() {
         /** Live GPS at the stop starts this long before the bus can come. */
         private const val LIVE_GPS_BEFORE_MS = 4 * 60_000L
         private const val MAX_FIX_ACCURACY_M = 300f
+        /** A position older than this is re-checked before it can say "leave now" or "you won't make it". */
+        private const val FRESH_FIX_MS = 45_000L
         private const val REPORT_WINDOW_S = 30 * 60
         private const val NOTIFICATION_ID = 4200
         private const val ALERT_ID_BASE = 5000
