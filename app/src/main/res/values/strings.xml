@@ -542,7 +542,8 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• IDS BBSK: add your eshop.idsbbsk.sk account; its QR code, credit, tickets and history sit next to SAD Zvolen, and the home tab switches to the right ticket for each bus.\n• Add credit to your card (Account): you pay SAD Zvolen directly on its own payment gateway.
+    <string name="whats_new_body">• Plan&amp;Ride on Wear OS: the followed bus, its stops, transfers and alerts, departures and credit on your watch (Account → Watch).
+• IDS BBSK: add your eshop.idsbbsk.sk account; its QR code, credit, tickets and history sit next to SAD Zvolen, and the home tab switches to the right ticket for each bus.\n• Add credit to your card (Account): you pay SAD Zvolen directly on its own payment gateway.
 • Choose your own change: where to get off the first bus and where to get on the next, also a stop you search for (Change stop).\n• Unsent bug reports and suggestions are kept, photos too.\n• Tap the History chart or a stop for a closer look.\n• The widget now looks like the live card on the home tab.\n• Waiting at your stop for a late bus asks whether it came.\n• “You won\'t make it” no longer comes from an old position; History loads right after unlocking.</string>
     <string name="topup_button">Add credit</string>
     <string name="topup_title">Add credit to your card</string>
@@ -587,4 +588,26 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="ticket_auto_switch_hint">While following a bus: SAD Zvolen for city buses in Banská Bystrica and Zvolen, IDS BBSK for regional buses</string>
     <string name="ticket_default">Ticket shown first</string>
     <string name="ticket_default_change">Change</string>
+    <string name="transfer_risk_title">You may miss line %1$s</string>
+    <string name="transfer_risk_body">This bus is about %1$d min late: at %2$s around %3$s, but line %4$s leaves at %5$s. Look for another way in the planner.</string>
+    <string name="watch_report_channel">Reports from the watch</string>
+    <string name="watch_report_title">Watch logs received</string>
+    <string name="watch_report_body">Tap to describe the problem and send the report with the watch\'s logs.</string>
+    <string name="settings_watch">Watch</string>
+    <string name="settings_watch_hint">The followed bus on your Wear OS watch</string>
+    <string name="watch_checking">Looking for the Plan&amp;Ride watch app…</string>
+    <string name="watch_found">The Plan&amp;Ride watch app is on your watch.</string>
+    <string name="watch_not_found">No watch with the Plan&amp;Ride watch app was found. Install it from Google Play on a Wear OS watch (Galaxy Watch4 or newer).</string>
+    <string name="watch_enabled">Show the followed bus on the watch</string>
+    <string name="watch_enabled_hint">Countdown, stops, transfers and alerts in the watch app and its tile</string>
+    <string name="watch_ongoing">Countdown on the watch face</string>
+    <string name="watch_ongoing_hint">The bus and its countdown on the watch face while you follow it</string>
+    <string name="watch_alerts">Alerts on the watch too</string>
+    <string name="watch_alerts_hint">Arriving, leave now, change here and the rest also vibrate on the watch. Off: on the phone only.</string>
+    <string name="watch_next_stops">Next stops in the watch app</string>
+    <string name="watch_next_none">None</string>
+    <string name="watch_next_count">Next %1$d</string>
+    <string name="watch_report_hint">Something wrong on the watch? Tap Report a problem in the watch app: its logs come to the phone and the bug report attaches them.</string>
+    <string name="watch_credit">Credit on the watch</string>
+    <string name="watch_credit_hint">SAD Zvolen and IDS BBSK credit in the watch app</string>
 </resources>

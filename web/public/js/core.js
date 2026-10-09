@@ -1,7 +1,7 @@
 // Shared helpers for the web client: DOM, storage, API, formatting, sheets, logs.
 import { t, lang } from './i18n.js';
 
-export const VERSION = '2.11.1';
+export const VERSION = '2.13.0';
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -60,8 +60,9 @@ export async function loadConfig() {
 
 // ------------------------------------------------------------------ formatting
 const locale = () => (lang() === 'en' ? 'en-GB' : 'sk-SK');
-export const clock = (ms) => new Date(ms).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
-export const dateText = (ms) => new Date(ms).toLocaleDateString(locale(), { day: 'numeric', month: 'numeric', year: 'numeric' });
+// Slovak buses run on Slovak time, also on a phone set to another time zone.
+export const clock = (ms) => new Date(ms).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Bratislava' });
+export const dateText = (ms) => new Date(ms).toLocaleDateString(locale(), { day: 'numeric', month: 'numeric', year: 'numeric', timeZone: 'Europe/Bratislava' });
 export const money = (v, cur = '€') => `${Number(v).toFixed(2).replace('.', lang() === 'en' ? '.' : ',')} ${cur || '€'}`;
 export function countdown(seconds) {
   const m = Math.round(seconds / 60);

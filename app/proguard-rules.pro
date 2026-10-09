@@ -36,3 +36,10 @@
 -keep class com.ksjd.testem.live.TrackedTrip { *; }
 -keep class com.ksjd.testem.live.TripRef { *; }
 -keep class * extends com.google.gson.reflect.TypeToken
+# IDS BBSK account (2.13, EM-0043): stored with Gson, so its classes and generic types must keep their shape,
+# or the saved lists come back as Gson maps and the account screen crashes reading them.
+-keep class com.ksjd.testem.IdsAccount { *; }
+-keep class com.ksjd.testem.IdsIdentifier { *; }
+-keep class com.ksjd.testem.IdsTicket { *; }
+-keep class com.ksjd.testem.IdsTopUp { *; }
+-keep class com.ksjd.testem.CredentialsManager$ReportDraft { *; }

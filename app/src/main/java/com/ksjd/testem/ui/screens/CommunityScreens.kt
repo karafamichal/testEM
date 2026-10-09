@@ -556,10 +556,13 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
             scope.launch {
                 runCatching {
                     val encoded = withContext(Dispatchers.IO) { images.map { encodeReportImage(context, it) } }
+                    // Started on the watch ("Report a problem" there): filed as the watch's; the phone is in the logs.
+                    val watch = if (AppLogs.fromWatch) AppLogs.watchInfo(context) else null
                     HubClient.submitBug(
-                        BugReport(category, title.trim(), description.trim(), name.trim(), email.trim(), AppLogs.device(),
-                            if (attachLogs) logs else "", kind = if (feature) "feature" else "bug", images = encoded)
-                    )
+                        BugReport(category, title.trim(), description.trim(), name.trim(), email.trim(), watch?.second ?: AppLogs.device(),
+                            if (attachLogs) logs else "", kind = if (feature) "feature" else "bug", images = encoded,
+                            platform = if (watch != null) "wearos" else "android", appVersion = watch?.first ?: com.ksjd.testem.BuildConfig.VERSION_NAME)
+                    ).also { AppLogs.fromWatch = false }
                 }.onSuccess {
                     sentCode = it
                     Haptics.perform(view, Haptics.CONFIRM)

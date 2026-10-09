@@ -348,3 +348,14 @@ details summary { color: var(--accent-text); font-weight: 600; cursor: pointer; 
 .ride-editor .chips { border: 0; padding: 0; margin: 0; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .conn-head .icon-btn.star.on { color: var(--amber); }
+
+/* Two tickets (SAD Zvolen, IDS BBSK, EM-0023): side by side, swiped one at a time. */
+.passes { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+.passes::-webkit-scrollbar { display: none; }
+.pass { flex: 0 0 100%; scroll-snap-align: center; min-width: 0; }
+/* The carrier's tab on top of a pass: SAD Zvolen in the app's colour, IDS BBSK in its charcoal and red. */
+.lip { display: inline-block; margin: 8px 0 -6px 34px; padding: 4px 12px 8px; border-radius: 10px 10px 0 0; font-size: 13px; font-weight: 700; color: #fff; background: var(--accent); }
+.lip.ids { background: #31323C; }
+.lip.ids::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 2px; background: #ED1C24; }
+.ids-qr { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+.qr-full-code .ids-qr { width: min(90vw, 420px); height: auto; }

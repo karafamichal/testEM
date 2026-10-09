@@ -47,7 +47,10 @@ data class BugReport(
     /** "bug" or "feature" (a suggestion; emhub lists them separately). */
     val kind: String = "bug",
     /** Base64 JPEGs, at most 3 (emhub rejects anything else). */
-    val images: List<String> = emptyList()
+    val images: List<String> = emptyList(),
+    /** "android", or "wearos" for a report started on the watch (its logs came through the phone). */
+    val platform: String = "android",
+    val appVersion: String = BuildConfig.VERSION_NAME
 )
 
 /** emhub: timetables (planner, other carriers, stop lists), bug reports and community bus delays. */
@@ -70,8 +73,8 @@ object HubClient {
             addProperty("description", report.description)
             addProperty("name", report.name)
             addProperty("email", report.email)
-            addProperty("platform", "android")
-            addProperty("appVersion", BuildConfig.VERSION_NAME)
+            addProperty("platform", report.platform)
+            addProperty("appVersion", report.appVersion)
             addProperty("device", report.device)
             addProperty("logs", report.logs)
             addProperty("consent", true)

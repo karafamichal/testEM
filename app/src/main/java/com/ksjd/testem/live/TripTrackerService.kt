@@ -80,13 +80,35 @@ object TripTracking {
     private val _view = MutableStateFlow<FollowView?>(null)
     val view: StateFlow<FollowView?> = _view
     internal fun publish(context: Context, value: FollowView?) { _view.value = value; refreshWidget(context) }
+
+    /** This trip's alerts (newest last), listed on the watch: the notifications reach it bridged from the phone. */
+    data class Alert(val atMs: Long, val title: String, val body: String, val key: String = "")
+    private val _alerts = MutableStateFlow<List<Alert>>(emptyList())
+    val alerts: StateFlow<List<Alert>> = _alerts
+    internal fun recordAlert(context: Context, key: String, title: String, body: String) {
+        _alerts.value = (_alerts.value + Alert(System.currentTimeMillis(), title, body, key)).takeLast(10)
+        refreshWidget(context)
+    }
+
+    /** The follow notification's buttons right now ("Bus is here", "At <stop>"…): the watch shows and presses them too. */
+    @Volatile internal var buttons: List<androidx.core.app.NotificationCompat.Action> = emptyList()
+
+    /** A button pressed on the watch: the same as on the phone's notification. */
+    fun pressButton(index: Int) {
+        runCatching { buttons.getOrNull(index)?.actionIntent?.send() }
+    }
     private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    /** The home-screen widget shows the followed bus too (EM-0017). */
+    /** The watch settings changed on the phone: send the followed bus again with them. */
+    fun refreshWatch(context: Context) = refreshWidget(context)
+
+    /** The home-screen widget (EM-0017) and the watch app (EM-0041) show the followed bus too. */
     private fun refreshWidget(context: Context) {
         val app = context.applicationContext
         widgetScope.launch { com.ksjd.testem.widget.PlanRideWidget.refresh(app) }
+        widgetScope.launch { WatchSync.send(app, _active.value, _view.value) }
     }
     internal fun set(context: Context, value: TrackedTrip?) {
+        if (value == null) _alerts.value = emptyList()
         _active.value = value
         refreshWidget(context)
         if (value == null || _view.value?.trip?.ref != value.ref) _view.value = null
@@ -503,7 +525,18 @@ class TripTrackerService : Service() {
             Log.i(GPS_TAG, "arrived at stop $nearest (${detail.stops[nearest].name})")
             return send(nearest, scheduled[nearest], "arrival")
         }
-        if (index < boarding + 0.05f || !moving) return
+        if (index < boarding + 0.05f) return
+        if (!moving) {
+            // EM-0040: standing (traffic, a long stop) the bus gets later by the minute, though the timetable moves on.
+            // Only later, never earlier: a bus waiting at a stop for its departure isn't early.
+            val standing = RoutePosition.delayAt(index, scheduled, now)
+            if (ridingBus && standing > (localDelay?.first ?: detail.delaySeconds ?: 0)) {
+                localDelay = standing to now
+                localFromGps = true
+                redraw(current, detail)
+            }
+            return
+        }
         localDelay = RoutePosition.delayAt(index, scheduled, now) to now
         localFromGps = true
         redraw(current, detail)
@@ -681,7 +714,7 @@ class TripTrackerService : Service() {
                 TripTracking.set(this@TripTrackerService, current)
             }
             if (fetched != null && fetched.stops.isNotEmpty()) lastDetail = fetched
-            val detail = fetched?.let(::withLocalDelay)
+            var detail = fetched?.let(::withLocalDelay)
             if (detail == null || detail.stops.isEmpty()) {
                 failures++
                 if (failures >= 20) {
@@ -690,7 +723,15 @@ class TripTrackerService : Service() {
                 }
             } else {
                 failures = 0
-                val progress = TripProgress.from(detail, current)
+                var progress = TripProgress.from(detail, current)
+                if (progress.finished && current.nextLegs.isNotEmpty() && stillOnBoard(progress)) {
+                    // EM-0040: by the clock the bus is at the change stop, but the rider's phone is still on it before
+                    // there: it is late. Keep following it, as late as where the rider is.
+                    localDelay = RoutePosition.delayAt(lastRiderIndex, detail.stops.map { it.scheduledMs }, System.currentTimeMillis()) to System.currentTimeMillis()
+                    localFromGps = true
+                    detail = withLocalDelay(detail)
+                    progress = TripProgress.from(detail, current)
+                }
                 if (progress.finished) {
                     val next = current.nextLegs.firstOrNull()
                     if (next != null) {
@@ -706,10 +747,38 @@ class TripTrackerService : Service() {
                 val estimate = updateCatch(detail, progress)
                 show(current, detail, progress, catchLine(detail, progress))
                 sendAlerts(current, progress)
+                sendTransferRisk(current, detail, progress)
                 estimate?.let { sendCatchAlerts(current, detail, progress, it) }
             }
             delay(REFRESH_MS)
         }
+    }
+
+    /** The rider's phone, fresh, is on this bus before their stop (where the bus really is, whatever the clock says). */
+    private fun stillOnBoard(p: TripProgress): Boolean {
+        val alight = p.alightIndex ?: return false
+        val fresh = lastFix?.let { System.currentTimeMillis() - it.time <= FRESH_FIX_MS } ?: false
+        return ridingBus && fresh && lastRiderIndex >= 0f && lastRiderIndex < alight - 0.3f
+    }
+
+    /**
+     * EM-0040: this bus is late enough that the next one of the journey leaves before the rider can be there
+     * (arrival at the change stop plus their change time). Said once, while there's still time to plan another way.
+     */
+    private fun sendTransferRisk(current: TrackedTrip, detail: TripDetail, p: TripProgress) {
+        val next = current.nextLegs.firstOrNull() ?: return
+        val alight = p.alightIndex ?: return
+        if (!positionKnown(detail) || next.ref.plannedSecondOfDay < 0) return
+        val stop = detail.stops.getOrNull(alight) ?: return
+        val arrival = stop.actualMs ?: (stop.scheduledMs + (detail.delaySeconds ?: 0) * 1000L)
+        val date = runCatching { java.time.LocalDate.parse(next.ref.serviceDate) }.getOrNull() ?: return
+        val departure = date.atStartOfDay(com.ksjd.testem.SK_ZONE).toInstant().toEpochMilli() + next.ref.plannedSecondOfDay * 1000L
+        if (arrival + com.ksjd.testem.TimetableService.changeMinutes * 60_000L <= departure) return
+        notifyAlert(
+            "transfer_risk", getString(R.string.transfer_risk_title, next.ref.line),
+            getString(R.string.transfer_risk_body, (detail.delaySeconds ?: 0) / 60, p.alightStopName ?: stop.name,
+                com.ksjd.testem.ui.Format.clock(arrival), next.ref.line, com.ksjd.testem.ui.Format.clock(departure))
+        )
     }
 
     /** "Then bus 101 → Krupina" on a journey with changes. */
@@ -766,6 +835,7 @@ class TripTrackerService : Service() {
             .setContentIntent(contentIntent())
             .addAction(stopAction())
             .setRequestPromotedOngoing(true)
+            .setLocalOnly(WatchSync.watchApp) // EM-0041: no second ongoing card next to the watch app's
             .setContentTitle(getString(R.string.track_title, trip.ref.line, trip.ref.destination))
 
     private fun placeholderNotification(trip: TrackedTrip) =
@@ -784,11 +854,12 @@ class TripTrackerService : Service() {
             detail.positionSource == PositionSource.Timetable && trip.ref.isScheduleOnly -> "\n" + getString(R.string.track_schedule_only)
             else -> delayText(detail.delaySeconds)
         } + (reportNote?.let { "\n" + it } ?: "")
+        TripTracking.buttons = emptyList()
         // Only when the bus can actually be seen: from 30 min before it is due at the user's stop.
         if (waitingAtStop && !p.onBoard && !herePressed) {
-            waitingActions(p).forEach { builder.addAction(it) }
+            waitingActions(p).also { TripTracking.buttons = it }.forEach { builder.addAction(it) }
         } else if (buttonsOn(detail) && (p.onBoard || p.secondsToBoarding <= REPORT_WINDOW_S)) {
-            communityActions(detail, p).forEach { builder.addAction(it) }
+            communityActions(detail, p).also { TripTracking.buttons = it }.forEach { builder.addAction(it) }
         }
         if (!p.onBoard) {
             // Waiting at the stop: countdown to departure, and whether the user will make it.
@@ -920,6 +991,7 @@ class TripTrackerService : Service() {
 
     private fun notifyAlert(key: String, title: String, body: String) {
         if (!alertsSent.add(key)) return
+        TripTracking.recordAlert(this, key, title, body)
         val notification = NotificationCompat.Builder(this, CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_stat_bus)
             .setContentTitle(title)
@@ -928,6 +1000,8 @@ class TripTrackerService : Service() {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setContentIntent(contentIntent())
             .setAutoCancel(true)
+            // Account → Watch: alerts on the phone only. "Get off next" the watch app announces itself, with its own vibration.
+            .setLocalOnly(!prefs.getWatchAlerts() || (key == "alight" && WatchSync.watchApp && prefs.getWatchEnabled()))
             .build()
         NotificationManagerCompat.from(this).notifySafely(ALERT_ID_BASE + key.hashCode() % 1000, notification)
     }

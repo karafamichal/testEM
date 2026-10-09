@@ -10,6 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as transit from './transit.js';
+import { idsLogin, idsAccount, idsQr, idsHistory } from './ids.js';
 import { startFollowing, stopFollowing, vapidPublicKey, syncRides } from './push.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -535,7 +536,9 @@ app.use((req, res, next) => (req.path === '/api/hub/bugs' ? bugJson : smallJson)
 app.use((req, res, next) => {
   res.set({
     'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-      "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
+      "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; " +
+      // Credit top-up posts the carrier's signed order form to its payment gateway (GP webpay).
+      "form-action 'self' https://3dsecure.gpwebpay.com https://*.gpwebpay.com; object-src 'none'",
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'same-origin',
     'X-Frame-Options': 'DENY',
@@ -558,7 +561,7 @@ function limiter(limit, windowMs) {
 const loginLimit = limiter(10, 15 * 60 * 1000);
 
 function sendError(res, err) {
-  const status = err instanceof HttpError ? err.status : 500;
+  const status = err instanceof HttpError || Number.isInteger(err?.status) ? err.status : 500;
   res.status(status).json({ success: false, error: err.message || 'Server error' });
 }
 
@@ -630,6 +633,111 @@ app.post('/api/select-card', (req, res) => {
   if (!session) return res.status(401).json({ success: false, error: 'Session expired' });
   session.serial = String(serial || '').trim();
   res.json({ success: true, serial: session.serial });
+});
+
+// ---------------------------------------------------------------------------
+// Credit top-up (SAD Zvolen, "Vklad na kartu"), as the Android app: sadzv makes the order and the rider pays it
+// on the carrier's own gateway (GP webpay). The money goes to the carrier, never through this server.
+// ---------------------------------------------------------------------------
+async function sadzvJson(jar, path, init = {}) {
+  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers: baseHeaders(jar, { Referer: `${BASE_URL}/account`, ...(init.headers || {}) }), redirect: 'follow' });
+  if (res.status === 401 || (res.url && res.url.includes('/account/login'))) throw new HttpError(401, 'Session expired');
+  const text = await res.text();
+  if (!res.ok) throw new HttpError(502, `sadzv HTTP ${res.status}`);
+  if (text.trimStart().startsWith('<')) throw new HttpError(401, 'Session expired');
+  return JSON.parse(text);
+}
+
+app.post('/api/topup/limits', async (req, res) => {
+  try {
+    const session = getSession(req.body?.sessionId);
+    if (!session) return res.status(401).json({ success: false, error: 'Session expired' });
+    const tariffId = (await sadzvJson(session.jar, '/accountapi/getCardDepositTariff')).tariffId;
+    const props = (await sadzvJson(session.jar, `/ticketapi/getTariffInformation/${encodeURIComponent(tariffId)}`)).properties || [];
+    const cents = (name, d) => Number(props.find((p) => p.name === name)?.valueText) || d;
+    res.json({ success: true, tariffId, minCents: cents('MinVklad', 200), maxCents: cents('MaxVklad', 5000), defaultCents: cents('DefaultVklad', 500) });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post('/api/topup/start', async (req, res) => {
+  try {
+    const session = getSession(req.body?.sessionId);
+    if (!session) return res.status(401).json({ success: false, error: 'Session expired' });
+    const cents = Math.round(Number(req.body?.cents));
+    const tariffId = Number(req.body?.tariffId);
+    if (!session.serial || !Number.isFinite(cents) || cents < 100 || !tariffId) return res.status(400).json({ success: false, error: 'Bad amount' });
+    const order = [{ snr: session.serial, tariffId, zoneId: 0, validFrom: 0, amountInCents: cents, paymentTypeId: 3 }];
+    const json = await sadzvJson(session.jar, '/ticketapi/buyTicket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', Origin: BASE_URL },
+      body: new URLSearchParams({ post: JSON.stringify(order) }),
+    });
+    const gateway = String(json.gatewayUrl || '');
+    // Only ever hand the rider's browser to the bank's gateway.
+    let host = '';
+    try { host = new URL(gateway).hostname; } catch { /* not a URL */ }
+    if (!gateway.startsWith('https://') || !(host === 'gpwebpay.com' || host.endsWith('.gpwebpay.com')) || !Array.isArray(json.requestFields)) {
+      throw new HttpError(502, 'No payment gateway');
+    }
+    res.json({ success: true, gatewayUrl: gateway, fields: json.requestFields.map((f) => ({ name: String(f.name), value: String(f.value) })) });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// IDS BBSK account (eshop.idsbbsk.sk, EM-0023): its static QR code, credit, tickets and history.
+// ---------------------------------------------------------------------------
+const idsSessions = new Map(); // id -> { jar, name, createdAt }
+
+function idsSession(id) {
+  const s = idsSessions.get(id);
+  if (!s || Date.now() - s.createdAt > SESSION_TTL_MS) { idsSessions.delete(id); return null; }
+  return s;
+}
+
+app.post('/api/ids/login', async (req, res) => {
+  try {
+    if (!loginLimit(clientIp(req))) return res.status(429).json({ success: false, error: 'Too many sign-in attempts. Try again in a few minutes.' });
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ success: false, error: 'Email and password are required' });
+    const jar = await idsLogin(String(email), String(password));
+    const account = await idsAccount(jar);
+    const id = crypto.randomBytes(24).toString('hex');
+    idsSessions.set(id, { jar, name: account.name, createdAt: Date.now() });
+    res.json({ success: true, sessionId: id, account, history: idsHistory(account) });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post('/api/ids/account', async (req, res) => {
+  try {
+    const session = idsSession(req.body?.sessionId);
+    if (!session) return res.status(401).json({ success: false, error: 'Session expired' });
+    const account = await idsAccount(session.jar, session.name);
+    res.json({ success: true, account, history: idsHistory(account) });
+  } catch (err) {
+    if (err.status === 401) idsSessions.delete(req.body?.sessionId);
+    sendError(res, err);
+  }
+});
+
+app.post('/api/ids/qr', async (req, res) => {
+  try {
+    const session = idsSession(req.body?.sessionId);
+    if (!session) return res.status(401).json({ success: false, error: 'Session expired' });
+    res.json({ success: true, image: await idsQr(session.jar, String(req.body?.qrId || '')) });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post('/api/ids/logout', (req, res) => {
+  idsSessions.delete(req.body?.sessionId);
+  res.json({ success: true });
 });
 
 // ---------------------------------------------------------------------------

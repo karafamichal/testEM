@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tells the phone app the Plan&Ride watch app is installed (Data Layer capability), so it keeps its own
+     ongoing card off the watch and this app's Ongoing Activity is the only one. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@array/android_wear_capabilities">
+    <string-array name="android_wear_capabilities" translatable="false">
+        <item>plan_ride_watch</item>
+    </string-array>
+</resources>

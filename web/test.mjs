@@ -146,3 +146,28 @@ assert.ok(historyToCsv(items).includes('"Jednorazový, ""x"""'));
 if (process.env.TZ === 'Europe/Bratislava') assert.ok(historyToCsv(items).includes('2026-09-03 10:00'));
 
 console.log('ok');
+
+// ---- 2.13: which ticket a bus takes, and the IDS BBSK e-shop pages (trimmed copies, made-up card numbers)
+{
+  const { walletForLine } = await import('./public/js/logic.js');
+  assert.equal(walletForLine('34'), 'sadzv');
+  assert.equal(walletForLine('60101'), 'ids');
+  assert.equal(walletForLine('Bus 060400'), 'ids');
+  assert.equal(walletForLine('609503'), null);
+  const ids = await import('./ids.js');
+  const ticket = `<tr class="my-tickets__table-row" data-id-order-detail="2">
+    <td><div class="my-tickets__table-highlight breakable"> IDS Sieťovka 365 dní </div><div class="my-tickets__msg-alert"> Platnosť l&iacute;stka vypr&scaron;ala </div></td>
+    <td> od: 29. 8. 2025 13:28 do: 28. 8. 2026 23:59 </td><td> identifikátor č. 5 <br>(NFC Karta) <br>01C55703 </td><td> 399,00 € </td></tr>`;
+  const [t] = ids.parseTickets(ticket);
+  assert.equal(t.price, '399,00 €'); // the card number right before the price isn't part of it
+  assert.equal(t.valid, false);
+  assert.equal(t.identifierNumber, 5);
+  assert.equal(new Date(t.validFromMs).toISOString(), '2025-08-29T11:28:00.000Z'); // Slovak summer time
+  assert.equal(ids.idsHistory({ tickets: [t], topUps: [] })[0].amountCents, -39900);
+  const [card] = ids.parseIdentifiers(`<tr class="my-tokens__table-row" data-token="B"><td><div>Identifik&aacute;tor č. 5</div></td>
+    <td><input class="my-tokens__card-info token-alias-input" value="NFC Karta" disabled /></td><td><a href="x">Platné lístky: 1</a></td>
+    <td><div class="my-tokens__msg-success"> Platn&yacute; </div></td></tr>`);
+  assert.ok(card.hasProducts && card.valid && card.alias === 'NFC Karta');
+  assert.equal(ids.parseCredit('<div class="my-credit__credit-amount">\n 0,15\n</div>'), 0.15);
+  console.log('ok 2.13: tickets by bus, IDS BBSK pages');
+}

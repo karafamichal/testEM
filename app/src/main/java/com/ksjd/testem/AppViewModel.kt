@@ -579,6 +579,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setLanguageCode(languageCode: String) {
+        // The watch app speaks the phone app's language: it learns it with the next update.
+        com.ksjd.testem.live.TripTracking.refreshWatch(app)
         prefs.saveLanguageCode(languageCode)
         AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(languageCode))
         _appState.update { it.copy(languageCode = languageCode) }

@@ -54,6 +54,10 @@
     <div class="narrow">
       <div class="brand"><img src="/icons/icon-192.png" alt="" class="brand-logo" /><h1 id="login-title">Plan&amp;Ride</h1><p class="hint" id="login-sub"></p></div>
       <form id="login-form" class="stack" autocomplete="on">
+        <div class="segmented" id="login-kind" role="radiogroup">
+          <button type="button" role="radio" aria-checked="true" data-kind="sadzv">SAD Zvolen</button>
+          <button type="button" role="radio" aria-checked="false" data-kind="ids">IDS BBSK</button>
+        </div>
         <label class="field"><span data-i18n="email">Email</span><input id="email" type="email" inputmode="email" autocomplete="username" required /></label>
         <label class="field"><span data-i18n="password">Password</span><input id="password" type="password" autocomplete="current-password" required /></label>
         <button id="login-btn" type="submit" class="btn wide" data-i18n="login">Sign in</button>

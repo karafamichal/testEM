@@ -369,3 +369,15 @@ export function historyToCsv(items) {
   }
   return out;
 }
+
+/**
+ * Which ticket a bus takes, as the Android app's WalletRule: SAD Zvolen's city buses in Banská Bystrica and Zvolen
+ * (not in IDS BBSK) the sadzv.qrbus.me card; IDS BBSK lines (licence 060xxx: regional buses, and the city buses of
+ * Žiar nad Hronom, Brezno and Nová Baňa) the IDS BBSK one. null: neither for sure, the default is shown.
+ */
+export function walletForLine(line) {
+  const number = String(line || '').trim().split(' ').at(-1);
+  if (/^0?60\d{3}$/.test(number)) return 'ids';
+  if (/^\d{1,3}[A-Z]?$/.test(number)) return 'sadzv';
+  return null;
+}

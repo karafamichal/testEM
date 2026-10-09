@@ -2,7 +2,7 @@
 // PIN lock, bug reports and suggestions. The account is optional, like in the Android app.
 import { t, lang, setLang, applyI18n } from './js/i18n.js';
 import { $, $$, esc, api, apiJson, store, config, loadConfig, clock, dateText, money, toMs, toast, openPage, closeOverlay, switchRow, collectLogs, log, plate, countdown, VERSION } from './js/core.js';
-import { historyInsights, historyToCsv, nextRideDeparture, pickRideConnection, readableStop, lineNumber, todayLocal } from './js/logic.js';
+import { historyInsights, historyToCsv, nextRideDeparture, pickRideConnection, readableStop, lineNumber, todayLocal, walletForLine } from './js/logic.js';
 import * as live from './js/live.js';
 import { renderPlanner, searchAt, savedJourneys, journeyTimes, removeJourney } from './js/planner.js';
 import { rides, rideDayText, resyncRides } from './js/rides.js';
@@ -15,6 +15,10 @@ const s = {
   sessionId: null, serial: '', account: null,
   lastBase64: null, lastTokenAt: 0, pollTimer: null, polling: false, reauthInFlight: false,
   history: null, historyError: false, tab: 'ticket', wakeLock: null, hiddenAt: 0, pin: null,
+  // IDS BBSK (eshop.idsbbsk.sk, EM-0023): its session on our server, account, history and static QR code.
+  ids: { sessionId: null, account: null, history: [], qr: null, loading: false, signedOut: false },
+  // Ticket shown by hand (null: by the followed bus or the default); the line that last decided it.
+  wallet: null, ruledLine: '', accountWallet: 'sadzv',
 };
 
 // ------------------------------------------------------------------ theme
@@ -60,6 +64,12 @@ async function decryptCreds(pin) {
 const hasPin = () => !!store.get('credsEnc');
 /** An account is saved on this device (older versions could keep it without a PIN). */
 const hasAccount = () => hasPin() || !!store.get('creds')?.password;
+/** Which accounts are saved: sadzv.qrbus.me (every account before 2.13) and/or eshop.idsbbsk.sk. */
+const hasSadzv = () => hasAccount() && store.get('sadzvAccount', true);
+const hasIds = () => hasAccount() && store.get('idsAccount', false);
+const both = () => hasSadzv() && hasIds();
+/** The email filled in reports: the primary account's when the two differ. */
+const contactEmail = () => (both() && store.get('primaryAccount') === 'ids' ? s.creds?.ids?.email : s.creds?.email || s.creds?.ids?.email) || '';
 /** The ticket and account may be shown: the password is decrypted in memory. */
 const unlocked = () => hasAccount() && !!s.creds;
 /** The password is only ever stored encrypted with the PIN. */
@@ -115,9 +125,15 @@ $('#pin-form').onsubmit = async (e) => {
   await encryptCreds(s.creds, s.pin);
   store.set('creds', null);
   showApp();
-  if (s.sessionId) startPolling(); else signIn(s.creds);
+  afterUnlock();
 };
 $('#pin-cancel').onclick = () => removeAccount();
+
+/** The passwords are decrypted: sign in to each saved account (or resume). */
+function afterUnlock() {
+  if (s.creds?.password) { if (s.sessionId) startPolling(); else signIn(s.creds); }
+  if (s.creds?.ids && !s.ids.sessionId) idsSignIn(s.creds.ids);
+}
 
 /** PIN (the dialog) -> the password is decrypted -> signed in -> the ticket shows. */
 function unlockDialog() {
@@ -163,7 +179,7 @@ function unlockDialog() {
     // Show the ticket at once ("Connecting…"); signing in to sadzv takes a few seconds and
     // until now the screen still looked locked, so people entered the PIN again and again.
     selectTab(s.tab);
-    if (s.sessionId) startPolling(); else signIn(creds);
+    afterUnlock();
   };
 }
 
@@ -188,11 +204,19 @@ $('#login-form').onsubmit = async (e) => {
   btn.disabled = true;
   btn.textContent = t('logging_in');
   $('#login-error').hidden = true;
-  const ok = await signIn(creds, { fromForm: true });
+  const ok = loginKind === 'ids' ? await idsSignIn(creds, { fromForm: true }) : await signIn(creds, { fromForm: true });
   btn.disabled = false;
   btn.textContent = t('login');
   if (ok) $('#password').value = '';
 };
+let loginKind = 'sadzv';
+function setLoginKind(kind) {
+  loginKind = kind;
+  $$('#login-kind [data-kind]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === kind)));
+  $('#login-sub').textContent = t(kind === 'ids' ? 'login_sub_ids' : 'login_sub');
+  $('#email').value = (kind === 'ids' ? s.creds?.ids?.email : s.creds?.email) || '';
+}
+$('#login-kind').onclick = (e) => { const b = e.target.closest('[data-kind]'); if (b) setLoginKind(b.dataset.kind); };
 // Welcome: continue without an account. From Settings: cancel.
 $('#browse-btn').onclick = () => { store.set('onboarded', true); showApp(); };
 
@@ -218,17 +242,18 @@ async function doSignIn(creds, { fromForm } = {}) {
     return false;
   }
   store.set('onboarded', true);
+  store.set('sadzvAccount', true);
   s.sessionId = r.json.sessionId;
   if (!hasPin()) {
     // A new account: the password is saved only once a PIN encrypts it.
-    s.creds = creds;
+    s.creds = { ...(s.creds || {}), ...creds };
     setAccount(r.json.account);
     s.serial = r.json.serial || '';
     showPinSetup();
     return true;
   }
   // A new password from the form is encrypted again; after an unlock it is unchanged.
-  if (fromForm) await saveCreds(creds); else s.creds = creds;
+  if (fromForm) await saveCreds({ ...(s.creds || {}), email: creds.email, password: creds.password }); else s.creds = { ...(s.creds || {}), ...creds };
   setAccount(r.json.account);
   // Keep the card the user picked last time.
   const preferred = store.get('serial', '');
@@ -240,7 +265,7 @@ async function doSignIn(creds, { fromForm } = {}) {
 }
 
 async function reauth() {
-  if (s.reauthInFlight || !s.creds) return false;
+  if (s.reauthInFlight || !s.creds?.password) return false;
   s.reauthInFlight = true;
   try {
     const r = await api('/api/login', { ...s.creds, serial: s.serial });
@@ -253,20 +278,26 @@ async function reauth() {
 }
 
 /** welcome: the first-run screen (the account is optional); otherwise adding one from Settings. */
-function showLogin({ welcome = false } = {}) {
+function showLogin({ welcome = false, kind = null } = {}) {
   show('login-view');
   applyI18n($('#login-view'));
   $('#login-title').textContent = welcome ? t('welcome_title') : t('login');
   $('#login-sub').textContent = welcome ? t('welcome_body') : t('login_sub');
   $('#browse-btn').textContent = welcome ? t('welcome_skip') : t('cancel');
   $('#welcome-hint').hidden = !welcome;
-  $('#email').value = s.creds?.email || '';
   $('#login-error').hidden = true;
+  setLoginKind(kind || (hasSadzv() && !hasIds() ? 'ids' : 'sadzv'));
+  if (welcome) $('#login-sub').textContent = t('welcome_body');
 }
 
 /** Removes the account from this device: password, PIN, card; the app keeps working without it. */
 function removeAccount() {
   if (s.sessionId) api('/api/logout', { sessionId: s.sessionId });
+  if (s.ids.sessionId) api('/api/ids/logout', { sessionId: s.ids.sessionId });
+  s.ids = { sessionId: null, account: null, history: [], qr: null, loading: false, signedOut: false };
+  store.set('sadzvAccount', null);
+  store.set('idsAccount', null);
+  store.set('primaryAccount', null);
   stopPolling();
   Object.assign(s, { creds: null, pin: null, sessionId: null, account: null, lastBase64: null, history: null, serial: '' });
   store.set('creds', null);
@@ -277,6 +308,86 @@ function removeAccount() {
   $('#unlock')?.remove();
   s.tab = 'ticket';
   showApp();
+}
+
+// ------------------------------------------------------------------ IDS BBSK (EM-0023)
+
+async function idsSignIn(creds, { fromForm } = {}) {
+  s.ids.loading = true;
+  const r = await api('/api/ids/login', creds);
+  s.ids.loading = false;
+  if (!r.ok || !r.json.success) {
+    if (fromForm) { $('#login-error').textContent = r.json.error === 'offline' ? t('ticket_offline_no_code') : r.json.error || t('login_failed', r.status); $('#login-error').hidden = false; }
+    else if (r.status === 401) s.ids.signedOut = true;
+    if (s.tab === 'ticket' || s.tab === 'account') selectTab(s.tab);
+    return false;
+  }
+  store.set('onboarded', true);
+  store.set('idsAccount', true);
+  Object.assign(s.ids, { sessionId: r.json.sessionId, account: r.json.account, history: r.json.history || [], signedOut: false });
+  if (!hasPin()) {
+    // The first account is IDS BBSK only: the password is saved once a PIN encrypts it.
+    store.set('sadzvAccount', false);
+    s.creds = { ...(s.creds || {}), ids: creds };
+    showPinSetup();
+  } else {
+    if (fromForm) await saveCreds({ ...(s.creds || {}), ids: creds });
+    if (fromForm) showApp(); else if (['ticket', 'account', 'history'].includes(s.tab)) selectTab(s.tab);
+  }
+  loadIdsQr();
+  return true;
+}
+
+/** The virtual card's QR code: static, so once per sign-in (kept in memory only). */
+async function loadIdsQr() {
+  const qrId = s.ids.account?.identifiers?.find((i) => i.qrId)?.qrId;
+  if (!qrId || s.ids.qr || !s.ids.sessionId) return;
+  const r = await api('/api/ids/qr', { sessionId: s.ids.sessionId, qrId });
+  if (r.ok && r.json.image) s.ids.qr = r.json.image;
+  if (s.tab === 'ticket') renderTicket($('#tab-ticket'));
+}
+
+async function refreshIds() {
+  if (!s.ids.sessionId) return s.creds?.ids && idsSignIn(s.creds.ids);
+  const r = await api('/api/ids/account', { sessionId: s.ids.sessionId });
+  if (r.status === 401) { s.ids.sessionId = null; return s.creds?.ids && idsSignIn(s.creds.ids); }
+  if (r.ok) Object.assign(s.ids, { account: r.json.account, history: r.json.history || [] });
+  loadIdsQr();
+}
+
+/** Removes one of two accounts; the last one goes with the PIN (removeAccount). */
+async function removeOne(wallet) {
+  if (!both()) return removeAccount();
+  if (wallet === 'ids') {
+    if (s.ids.sessionId) api('/api/ids/logout', { sessionId: s.ids.sessionId });
+    s.ids = { sessionId: null, account: null, history: [], qr: null, loading: false, signedOut: false };
+    store.set('idsAccount', false);
+    const { ids, ...rest } = s.creds || {};
+    await saveCreds(rest);
+  } else {
+    if (s.sessionId) api('/api/logout', { sessionId: s.sessionId });
+    stopPolling();
+    Object.assign(s, { sessionId: null, account: null, lastBase64: null, history: null, serial: '' });
+    store.set('sadzvAccount', false);
+    await saveCreds({ ids: s.creds?.ids });
+  }
+  store.set('primaryAccount', null);
+  s.accountWallet = hasIds() ? 'ids' : 'sadzv';
+  showApp();
+}
+
+/** Two accounts under different emails: which one goes on reports (asked once). */
+function askPrimary(force = false) {
+  const a = s.creds?.email, b = s.creds?.ids?.email;
+  if (!both() || !a || !b || $('#primary') || (!force && (store.get('primaryAccount') || a.toLowerCase() === b.toLowerCase()))) return;
+  const d = document.createElement('div');
+  d.id = 'primary';
+  d.className = 'dialog-backdrop';
+  d.innerHTML = `<div class="dialog stack" role="dialog" aria-modal="true"><h2>${t('primary_title')}</h2><p class="hint small">${t('primary_body')}</p>
+    <button class="btn outline wide" data-primary="sadzv">${esc(a)}<br><small>SAD Zvolen</small></button>
+    <button class="btn outline wide" data-primary="ids">${esc(b)}<br><small>IDS BBSK</small></button></div>`;
+  d.onclick = (e) => { const x = e.target.closest('[data-primary]'); if (x) { store.set('primaryAccount', x.dataset.primary); d.remove(); if (s.tab === 'account') renderAccount($('#tab-account')); } };
+  document.body.appendChild(d);
 }
 
 // ------------------------------------------------------------------ app shell & tabs
@@ -294,6 +405,7 @@ function showApp() {
   selectTab(s.tab);
   maybeAskPrivacy();
   requestWakeLock();
+  if (unlocked()) askPrimary();
 }
 
 function selectTab(tab) {
@@ -345,15 +457,42 @@ async function selectCard(serial) {
 
 // ------------------------------------------------------------------ ticket tab
 
+/** The tickets on the slider, and which one shows: the followed bus decides (city bus: SAD Zvolen, IDS line: IDS BBSK). */
+const wallets = () => [hasSadzv() && 'sadzv', hasIds() && 'ids'].filter(Boolean);
+function shownWallet() {
+  const list = wallets();
+  const line = live.followedLine();
+  const ruled = store.get('ticketAuto', true) ? walletForLine(line) : null;
+  // A new deciding bus overrides a hand-picked ticket; swiping still works until the next one.
+  if (ruled && line !== s.ruledLine) { s.ruledLine = line; s.wallet = null; }
+  const pick = s.wallet || (ruled && list.includes(ruled) ? ruled : store.get('ticketDefault', 'sadzv'));
+  return list.includes(pick) ? pick : list[0];
+}
+
+function idsPassHtml() {
+  const card = s.ids.account?.identifiers?.find((i) => i.qrId);
+  const body = s.ids.qr
+    ? `<img class="ids-qr" alt="${esc(t('ticket_fullscreen'))}" src="${esc(s.ids.qr)}">`
+    : `<span class="qr-placeholder">${s.ids.signedOut ? t('ids_signed_out') : !s.ids.account ? t('ticket_loading') : !card ? t('ids_no_virtual_card') : t('ids_qr_missing')}</span>`;
+  return `<section class="ticket"><button class="qr-wrap" id="ids-qr-btn" aria-label="${esc(t('ticket_fullscreen'))}">${body}</button>
+    <div class="stub"><p class="status">${esc(card?.alias || 'IDS BBSK')}</p></div></section>`;
+}
+
 function renderTicket(el) {
   const cards = s.account?.cards || [];
   const open = unlocked();
+  const list = wallets(), shown = shownWallet();
+  const lip = (w) => (list.length > 1 ? `<span class="lip ${w}">${w === 'ids' ? 'IDS BBSK' : 'SAD Zvolen'}</span>` : '');
   el.innerHTML = `
     <header class="screen-head"><div><h1>${esc(open && s.account?.userName ? s.account.userName.split(' ')[0] : hasAccount() ? t('tab_ticket') : 'Plan&Ride')}</h1><p class="hint small" id="card-type"></p></div></header>
     <div id="banners"></div>
     ${!hasAccount() ? '' : !open
       ? `<button class="locked-stub" data-unlock><span class="locked-icon" aria-hidden="true">▦</span><span class="row-text"><span class="row-title">${t('ticket_locked_title')}</span><span class="row-sub">${t('ticket_locked_body')}</span></span><span aria-hidden="true">🔒</span></button>`
-      : `${cards.length > 1 ? `<div class="segmented card-switch" role="radiogroup" aria-label="${esc(t('ticket_card'))}">${cards.map((c) => `<button role="radio" aria-checked="${c.serialNumber === s.serial}" data-card="${esc(c.serialNumber)}">${esc(c.cardTypeName || c.serialNumber)}</button>`).join('')}</div>` : ''}
+      : `${list.length > 1 ? `<div class="segmented" id="wallet-switch" role="radiogroup">${list.map((w) => `<button role="radio" aria-checked="${w === shown}" data-wallet="${w}">${w === 'ids' ? 'IDS BBSK' : 'SAD Zvolen'}</button>`).join('')}</div>
+      <p class="hint small pad">${walletForLine(live.followedLine()) === shown && store.get('ticketAuto', true) ? esc(t('ticket_auto_for_line', live.followedLine())) : t('ticket_swipe_hint')}</p>` : ''}
+    <div class="passes" id="passes">
+    ${hasSadzv() ? `<div class="pass" data-pass="sadzv">${lip('sadzv')}
+    ${cards.length > 1 ? `<div class="segmented card-switch" role="radiogroup" aria-label="${esc(t('ticket_card'))}">${cards.map((c) => `<button role="radio" aria-checked="${c.serialNumber === s.serial}" data-card="${esc(c.serialNumber)}">${esc(c.cardTypeName || c.serialNumber)}</button>`).join('')}</div>` : ''}
     <section class="ticket">
       <button class="qr-wrap" id="qr-btn" aria-label="${esc(t('ticket_fullscreen'))}"><div id="qr" class="qr"></div><span id="qr-placeholder" class="qr-placeholder">${t('ticket_loading')}</span></button>
       <div class="stub">
@@ -361,7 +500,9 @@ function renderTicket(el) {
         <p id="status" class="status" role="status">${t('ticket_connecting')}</p>
         <p id="validity" class="hint small"></p>
       </div>
-    </section>`}
+    </section></div>` : ''}
+    ${hasIds() ? `<div class="pass" data-pass="ids">${lip('ids')}${idsPassHtml()}</div>` : ''}
+    </div>`}
     <div id="follow-slot-ticket"></div>
     <div id="journeys">${journeysHtml()}</div>
     <div id="rides-next">${ridesHtml()}</div>
@@ -371,6 +512,9 @@ function renderTicket(el) {
     const c = e.target.closest('[data-card]');
     if (c) { selectCard(c.dataset.card); renderTicket(el); }
     if (e.target.closest('#qr-btn') && s.lastBase64) openFullscreenQr();
+    if (e.target.closest('#ids-qr-btn') && s.ids.qr) openFullscreenQr(s.ids.qr);
+    const w = e.target.closest('[data-wallet]');
+    if (w) { s.wallet = w.dataset.wallet; scrollToPass(el, true); }
     if (e.target.closest('[data-unlock]')) unlockDialog();
     if (e.target.closest('[data-add-account]')) showLogin();
     const stop = e.target.closest('[data-preview-stop]');
@@ -389,7 +533,19 @@ function renderTicket(el) {
     if (e.target.closest('[data-rides-open]')) selectTab('planner');
   };
   if (open && s.lastBase64) renderQR(s.lastBase64);
-  if (open) { renderBanners(); updateStatus(); }
+  if (open) { renderBanners(); updateStatus(); scrollToPass(el, false); }
+  // Swiping the passes: the switch follows (a hand-picked ticket until the next deciding bus).
+  const passes = $('#passes', el);
+  if (passes && list.length > 1) {
+    passes.onscroll = () => {
+      clearTimeout(passes._t);
+      passes._t = setTimeout(() => {
+        const w = list[Math.round(passes.scrollLeft / passes.clientWidth)] || list[0];
+        if (w !== shownWallet()) s.wallet = w;
+        $$('#wallet-switch [data-wallet]', el).forEach((b) => b.setAttribute('aria-checked', String(b.dataset.wallet === w)));
+      }, 120);
+    };
+  }
   live.renderFollowSlot($('#follow-slot-ticket', el));
   renderPreview();
 }
@@ -464,10 +620,23 @@ function renderQR(text) {
   $('#qr-placeholder').hidden = true;
 }
 
-function openFullscreenQr() {
+function scrollToPass(el, smooth) {
+  const passes = $('#passes', el);
+  const i = wallets().indexOf(shownWallet());
+  if (passes && i >= 0) passes.scrollTo({ left: i * passes.clientWidth, behavior: smooth ? 'smooth' : 'instant' });
+}
+
+/** A ticket's code over the whole screen: the SAD Zvolen one drawn here, or the IDS BBSK picture ([image]). */
+function openFullscreenQr(image) {
   const o = document.createElement('div');
   o.className = 'qr-full';
   o.innerHTML = `<div class="qr-full-code"></div><p>${t('ticket_fullscreen_close')}</p>`;
+  if (image) {
+    $('.qr-full-code', o).innerHTML = `<img class="ids-qr" alt="" src="${esc(image)}">`;
+    o.onclick = () => o.remove();
+    document.body.appendChild(o);
+    return;
+  }
   const qr = qrcode(0, 'H');
   qr.addData(s.lastBase64);
   qr.make();
@@ -551,15 +720,30 @@ async function requestWakeLock() {
 
 // ------------------------------------------------------------------ history tab
 
+/** The history shown: SAD Zvolen, IDS BBSK, or both merged (the selector on top with two accounts). */
+function historyItems() {
+  const which = both() ? store.get('historyWallet', null) : hasIds() && !hasSadzv() ? 'ids' : 'sadzv';
+  const sad = hasSadzv() ? s.history || [] : [];
+  const ids = (s.ids.history || []).map((x) => ({ ...x }));
+  if (which === 'sadzv') return sad;
+  if (which === 'ids') return ids;
+  return [...sad.map((x) => ({ ...x, wallet: 'sadzv' })), ...ids].sort((a, b) => b.timestampMs - a.timestampMs);
+}
+
 async function renderHistory(el) {
+  const which = both() ? store.get('historyWallet', null) : null;
+  const items = historyItems();
   el.innerHTML = `<header class="screen-head"><h1>${t('history_title')}</h1>
-    <span><button class="text-btn" data-csv ${s.history?.length ? '' : 'disabled'}>${t('export_csv')}</button><button class="text-btn" data-reload>${t('refresh')}</button></span></header>
-    <div id="hist-body">${s.history ? '' : '<p class="hint"><span class="spinner"></span></p>'}</div>`;
+    <span><button class="text-btn" data-csv ${items.length ? '' : 'disabled'}>${t('export_csv')}</button><button class="text-btn" data-reload>${t('refresh')}</button></span></header>
+    ${both() ? `<div class="segmented" role="radiogroup">${[[null, t('wallet_both')], ['sadzv', 'SAD Zvolen'], ['ids', 'IDS BBSK']].map(([w, label]) => `<button role="radio" aria-checked="${w === which}" data-hist="${w ?? ''}">${esc(label)}</button>`).join('')}</div>` : ''}
+    <div id="hist-body">${s.history || !hasSadzv() ? '' : '<p class="hint"><span class="spinner"></span></p>'}</div>`;
   el.onclick = (e) => {
-    if (e.target.closest('[data-reload]')) { s.history = null; renderHistory(el); }
+    if (e.target.closest('[data-reload]')) { s.history = null; refreshIds(); renderHistory(el); }
     if (e.target.closest('[data-csv]')) exportCsv();
+    const h = e.target.closest('[data-hist]');
+    if (h) { store.set('historyWallet', h.dataset.hist || null); renderHistory(el); }
   };
-  if (!s.history) {
+  if (!s.history && hasSadzv()) {
     const r = await api('/api/history', { sessionId: s.sessionId, limit: 100 });
     if (r.status === 401 && await reauth()) return renderHistory(el);
     s.historyError = !r.ok;
@@ -568,10 +752,12 @@ async function renderHistory(el) {
     return;
   }
   const body = $('#hist-body', el);
-  if (s.historyError) { body.innerHTML = `<div class="notice error">${t('history_failed')}</div>`; return; }
-  if (!s.history.length) { body.innerHTML = `<div class="empty"><p>${t('history_empty')}</p></div>`; return; }
+  if (s.historyError && which !== 'ids') { body.innerHTML = `<div class="notice error">${t('history_failed')}</div>`; return; }
+  if (!items.length) { body.innerHTML = `<div class="empty"><p>${t('history_empty')}</p></div>`; return; }
   const card = selectedCard();
-  const ins = historyInsights(s.history, card?.creditLastBalance ?? null);
+  const balance = which === 'ids' ? s.ids.account?.credit ?? null : which === 'sadzv' || !hasIds() ? card?.creditLastBalance ?? null
+    : (card?.creditLastBalance ?? 0) + (s.ids.account?.credit ?? 0);
+  const ins = historyInsights(items, balance);
   const max = Math.max(1, ...ins.months.map((m) => m.spentCents));
   const monthName = (m) => new Date(m.year, m.month, 1).toLocaleDateString(lang() === 'en' ? 'en-GB' : 'sk-SK', { month: 'short' });
   const tripsText = (n) => (n === 1 ? t('trip_count_1') : t('trips_count', n));
@@ -587,18 +773,19 @@ async function renderHistory(el) {
       ${ins.topStops.length ? `<h2 class="section-label">${t('top_stops')}</h2><ol class="top-stops">${ins.topStops.map(([name, n]) => `<li><span>${esc(name)}</span><b>${n}×</b></li>`).join('')}</ol>` : ''}
       ${ins.oldestRecordMs ? `<p class="hint small">${t('insights_basis', dateText(ins.oldestRecordMs))}</p>` : ''}
     </section>
-    <ul class="list history">${s.history.map((it) => {
+    <ul class="list history">${items.map((it) => {
       const amt = (it.amountText || '').trim();
       const cls = amt.startsWith('+') ? 'pos' : amt.startsWith('-') ? 'neg' : '';
-      const d = new Date(it.timestampMs);
-      // Real UTC timestamps, shown in the phone's time zone like the Android app.
-      const when = `${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-      return `<li class="row"><span class="row-text"><span class="row-title">${esc(it.title)}</span><span class="row-sub">${esc(when)}${it.subtitle ? ' · ' + esc(it.subtitle) : ''}</span></span>${amt ? `<b class="amount ${cls}">${esc(amt)}</b>` : ''}</li>`;
+      // Real UTC timestamps, shown in Slovak time like the Android app.
+      const when = `${dateText(it.timestampMs)} ${clock(it.timestampMs)}`;
+      // Merged: which account each line is from.
+      const tag = which === null && both() ? ` · ${it.wallet === 'ids' ? 'IDS BBSK' : 'SAD Zvolen'}` : '';
+      return `<li class="row"><span class="row-text"><span class="row-title">${esc(it.title)}</span><span class="row-sub">${esc(when)}${it.subtitle ? ' · ' + esc(it.subtitle) : ''}${esc(tag)}</span></span>${amt ? `<b class="amount ${cls}">${esc(amt)}</b>` : ''}</li>`;
     }).join('')}</ul>`;
 }
 
 function exportCsv() {
-  const blob = new Blob(['﻿' + historyToCsv(s.history)], { type: 'text/csv' });
+  const blob = new Blob(['﻿' + historyToCsv(historyItems())], { type: 'text/csv' });
   const file = new File([blob], `testem-history-${new Date().toISOString().slice(0, 10)}.csv`, { type: 'text/csv' });
   if (navigator.canShare?.({ files: [file] })) { navigator.share({ files: [file] }).catch(() => {}); return; }
   const a = document.createElement('a');
@@ -610,8 +797,120 @@ function exportCsv() {
 
 // ------------------------------------------------------------------ account tab
 
+function idsAccountHtml() {
+  const a = s.ids.account;
+  if (!a) return `<div class="notice">${s.ids.signedOut ? t('ids_signed_out') : '<span class="spinner"></span>'}</div>`;
+  const now = Date.now();
+  const valid = (a.tickets || []).filter((x) => x.valid && (!x.validToMs || x.validToMs > now));
+  const days = (to) => Math.floor((to - now) / 86400000);
+  return `<div class="big-stat"><span class="hint">${t('balance')}</span><strong>${a.credit != null ? money(a.credit) : '—'}</strong>
+      <span class="hint small">${esc(a.creditNote || '')}</span></div>
+    <p class="pad"><a class="btn outline" href="https://eshop.idsbbsk.sk/praca-s-kreditom" target="_blank" rel="noopener">${t('ids_open_shop')}</a></p>
+    <h2 class="section-label">${t('validity')}</h2><ul class="list">${valid.length ? valid.map((x) => `<li class="row"><span class="row-text"><span class="row-title">${esc(x.name)}</span>
+      <span class="row-sub">${dateText(x.validFromMs)} – ${dateText(x.validToMs)} · ${esc(x.identifier)}</span></span><b class="days">${t('days_left', days(x.validToMs))}</b></li>`).join('')
+      : `<li class="row"><span class="row-title">${t('ids_no_ticket')}</span></li>`}</ul>
+    <h2 class="section-label">${t('ids_identifiers')}</h2><ul class="list">${(a.identifiers || []).map((i) => `<li class="row"><span class="row-text">
+      <span class="row-title">${esc(i.alias || t('ids_identifier', i.number))}${i.qrId ? ' ▦' : ''}</span><span class="row-sub">${esc([i.cardNumber, i.products.join(', ')].filter(Boolean).join(' · '))}</span></span></li>`).join('')}</ul>`;
+}
+
+/** Credit top-up (SAD Zvolen): the amount here, the payment on the carrier's gateway; the money never goes through us. */
+async function openTopUp() {
+  const body = openPage(t('topup_title'));
+  body.innerHTML = '<p class="hint pad"><span class="spinner"></span></p>';
+  const r = await api('/api/topup/limits', { sessionId: s.sessionId });
+  if (!r.ok) { body.innerHTML = `<div class="notice error">${t('topup_error')}</div>`; return; }
+  const { tariffId, minCents, maxCents, defaultCents } = r.json;
+  const chips = [5, 10, 20, 50].filter((e) => e * 100 >= minCents && e * 100 <= maxCents);
+  body.innerHTML = `<div class="stack pad">
+      <div class="chips">${chips.map((e) => `<button class="chip" data-eur="${e}">${e} €</button>`).join('')}</div>
+      <label class="field"><span>${t('topup_amount')}</span><input id="topup-eur" type="number" inputmode="numeric" min="${minCents / 100}" max="${maxCents / 100}" value="${defaultCents / 100}"></label>
+      <p class="hint small">${t('topup_range', minCents / 100, maxCents / 100)}</p>
+      <p class="hint small">🔒 ${t('topup_who')}</p>
+      <p class="hint small">${t('topup_after')}</p>
+      <button class="btn wide" id="topup-pay"></button><p class="error-text" hidden></p></div>`;
+  const input = $('#topup-eur', body), pay = $('#topup-pay', body);
+  const update = () => { const v = Number(input.value); pay.disabled = !(v * 100 >= minCents && v * 100 <= maxCents); pay.textContent = t('topup_pay', money(v || 0)); };
+  update();
+  input.oninput = update;
+  body.onclick = async (e) => {
+    const chip = e.target.closest('[data-eur]');
+    if (chip) { input.value = chip.dataset.eur; update(); }
+    if (e.target !== pay || pay.disabled) return;
+    pay.disabled = true;
+    const start = await api('/api/topup/start', { sessionId: s.sessionId, tariffId, cents: Math.round(Number(input.value) * 100) });
+    if (!start.ok) { $('.error-text', body).textContent = t('topup_error'); $('.error-text', body).hidden = false; pay.disabled = false; return; }
+    // The carrier's signed order to its gateway, as its website does.
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = start.json.gatewayUrl;
+    for (const f of start.json.fields) { const i = document.createElement('input'); i.type = 'hidden'; i.name = f.name; i.value = f.value; form.appendChild(i); }
+    document.body.appendChild(form);
+    form.submit();
+  };
+}
+
+/** Settings, the other account, ticket settings and removal: under either account's view. */
+function accountRestHtml(open, view) {
+  const link = (page, title, hint) => `<li><button class="row link" data-page="${page}"><span class="row-text"><span class="row-title">${esc(title)}</span>${hint ? `<span class="row-sub">${esc(hint)}</span>` : ''}</span><span aria-hidden="true">›</span></button></li>`;
+  const other = hasAccount() && open && !both() ? (hasSadzv() ? 'ids' : 'sadzv') : null;
+  const name = (w) => (w === 'ids' ? 'IDS BBSK' : 'SAD Zvolen');
+  return `${other ? `<h2 class="section-label">${t('account_add_other')}</h2><ul class="list"><li><button class="row link" data-add-other="${other}"><span class="row-text"><span class="row-title">${name(other)}</span>
+      <span class="row-sub">${t(other === 'ids' ? 'wallet_ids_covers' : 'wallet_sadzv_covers')}</span></span><span aria-hidden="true">›</span></button></li></ul>` : ''}
+    ${open && both() ? `<h2 class="section-label">${t('tickets_settings')}</h2><ul class="list">${switchRow('ticket-auto', t('ticket_auto_switch'), t('ticket_auto_switch_hint'), store.get('ticketAuto', true))}
+      <li><button class="row link" data-ticket-default><span class="row-text"><span class="row-title">${t('ticket_default')}</span><span class="row-sub">${name(store.get('ticketDefault', 'sadzv'))}</span></span><span aria-hidden="true">⇄</span></button></li>
+      ${s.creds?.email && s.creds?.ids?.email && s.creds.email.toLowerCase() !== s.creds.ids.email.toLowerCase() ? `<li><button class="row link" data-primary-ask><span class="row-text"><span class="row-title">${t('primary_setting')}</span><span class="row-sub">${esc(contactEmail())}</span></span><span aria-hidden="true">›</span></button></li>` : ''}</ul>` : ''}
+    <h2 class="section-label">${t('settings')}</h2>
+    <ul class="list">
+      ${link('reminders', t('s_reminders'), hasAccount() ? t('s_reminders_hint') : t('s_reminders_hint_guest'))}
+      ${hasAccount() ? link('security', t('s_security'), t('s_security_hint')) : ''}
+      ${link('appearance', t('s_appearance'), t('s_appearance_hint'))}
+      ${link('language', t('s_language'), lang() === 'en' ? t('lang_en') : t('lang_sk'))}
+      ${link('community', t('s_community'), t('s_community_hint'))}
+      ${link('about', t('s_about'), t('version', VERSION))}
+    </ul>
+    <ul class="list">${link('bug', t('s_bug'), t('s_bug_hint'))}${link('feature', t('s_feature'), t('s_feature_hint'))}<li><button class="row link" data-support><span class="row-text"><span class="row-title">${t('s_support')}</span><span class="row-sub">${t('s_support_hint')}</span></span><span aria-hidden="true">›</span></button></li></ul>
+    ${hasAccount() ? `<ul class="list">${open ? `<li><button class="row link" data-lock><span class="row-title">${t('lock_now')}</span></button></li>` : ''}<li><button class="row link danger" data-remove-account="${view}"><span class="row-text"><span class="row-title">${both() && open ? esc(t('account_remove_which', name(view))) : t('account_remove')}</span><span class="row-sub">${t('account_remove_hint')}</span></span></button></li></ul>` : ''}`;
+}
+
+/** Clicks in accountRestHtml; true when handled. */
+function accountRestClick(e, el) {
+  const open = unlocked();
+  const page = e.target.closest('[data-page]');
+  // Security needs the PIN first.
+  if (page) { page.dataset.page === 'security' && !open ? unlockDialog() : openSettings(page.dataset.page); return true; }
+  if (e.target.closest('[data-add-account]')) { showLogin(); return true; }
+  const other = e.target.closest('[data-add-other]');
+  if (other) { showLogin({ kind: other.dataset.addOther }); return true; }
+  if (e.target.closest('[data-unlock]')) { unlockDialog(); return true; }
+  if (e.target.closest('[data-lock]')) { lockNow(); return true; }
+  // Removing needs the PIN too, so someone holding the phone can't wipe it.
+  const remove = e.target.closest('[data-remove-account]');
+  if (remove) { if (!open) unlockDialog(); else if (confirm(t('remove_confirm'))) removeOne(remove.dataset.removeAccount); return true; }
+  if (e.target.closest('[data-support]')) { showSupport(); return true; }
+  if (e.target.closest('[data-ticket-default]')) { store.set('ticketDefault', store.get('ticketDefault', 'sadzv') === 'ids' ? 'sadzv' : 'ids'); renderAccount(el); return true; }
+  if (e.target.closest('[data-primary-ask]')) { askPrimary(true); return true; }
+  if (e.target.id === 'ticket-auto') { store.set('ticketAuto', e.target.checked); return true; }
+  return false;
+}
+
 function renderAccount(el) {
   const open = unlocked();
+  const view = both() ? s.accountWallet : hasIds() && !hasSadzv() ? 'ids' : 'sadzv';
+  if (open && view === 'ids') {
+    const name = s.ids.account?.name || 'IDS BBSK';
+    el.innerHTML = `<header class="screen-head"><div><h1>${esc(name)}</h1><p class="hint small">${esc(s.creds?.ids?.email || '')}</p></div>
+      <button class="text-btn" data-refresh-ids>${t('refresh')}</button></header>
+      ${both() ? `<div class="segmented" role="radiogroup">${['sadzv', 'ids'].map((w) => `<button role="radio" aria-checked="${w === view}" data-awallet="${w}">${w === 'ids' ? 'IDS BBSK' : 'SAD Zvolen'}</button>`).join('')}</div>` : ''}
+      ${idsAccountHtml()}<div id="acct-rest"></div>`;
+    el.onclick = (e) => {
+      const w = e.target.closest('[data-awallet]');
+      if (w) { s.accountWallet = w.dataset.awallet; renderAccount(el); }
+      if (e.target.closest('[data-refresh-ids]')) refreshIds().then(() => renderAccount(el));
+      accountRestClick(e, el);
+    };
+    $('#acct-rest', el).innerHTML = accountRestHtml(open, 'ids');
+    return;
+  }
   const card = open ? selectedCard() : null;
   const cards = open ? s.account?.cards || [] : [];
   const days = (to) => Math.floor((toMs(to) - Date.now()) / 86400000);
@@ -623,35 +922,23 @@ function renderAccount(el) {
     : !open
       ? `<div class="notice">${t('account_locked')} <button class="text-btn" data-unlock>${t('unlock')}</button></div>`
       : `${card?.cardTemplateBase64 ? `<img class="card-image" alt="" src="data:image/png;base64,${esc(card.cardTemplateBase64.replace(/[^A-Za-z0-9+/=_-]/g, ''))}">` : ''}
-    ${card?.creditLastBalance != null ? `<div class="big-stat"><span class="hint">${t('balance')}</span><strong>${money(card.creditLastBalance, card.currencySymbol)}</strong><span class="hint small">${esc(card.cardTypeName || '')}</span></div>` : ''}
+    ${card?.creditLastBalance != null ? `<div class="big-stat"><span class="hint">${t('balance')}</span><strong>${money(card.creditLastBalance, card.currencySymbol)}</strong><span class="hint small">${esc(card.cardTypeName || '')}</span>
+      <span><button class="btn" data-topup>${t('topup')}</button></span></div>` : ''}
     ${card ? `<h2 class="section-label">${t('validity')}</h2><ul class="list">${validity(t('ticket'), card.ticketValidFrom, card.ticketValidTo)}${validity(t('card'), card.cardValidFrom, card.cardValidTo)}${card.discountValidTo ? validity(t('discount'), card.discountValidFrom, card.discountValidTo) : ''}</ul>` : ''}
     ${cards.length > 1 ? `<h2 class="section-label">${t('cards')}</h2><ul class="list">${cards.map((c) => `<li><label class="row"><span class="row-text"><span class="row-title">${esc(c.cardTypeName || c.serialNumber)}</span><span class="row-sub">${esc([c.organizationName, c.creditLastBalance != null ? money(c.creditLastBalance, c.currencySymbol) : ''].filter(Boolean).join(', '))}</span></span><input type="radio" name="card" value="${esc(c.serialNumber)}" ${c.serialNumber === s.serial ? 'checked' : ''}></label></li>`).join('')}</ul>` : ''}
     ${card ? `<h2 class="section-label">${t('details')}</h2><ul class="list">${card.organizationName ? `<li class="row"><span class="row-text"><span class="row-title">${t('organization')}</span><span class="row-sub">${esc(card.organizationName)}</span></span></li>` : ''}<li class="row"><span class="row-text"><span class="row-title">${t('card_number')}</span><span class="row-sub">${esc(card.serialNumber || s.serial)}</span></span></li></ul>` : ''}`;
   el.innerHTML = `
     <header class="screen-head"><div><h1>${esc(open ? s.account?.userName || t('account_title') : hasAccount() ? t('account_title') : t('settings'))}</h1><p class="hint small">${esc(open ? s.creds?.email || '' : '')}</p></div>
       ${open ? `<button class="text-btn" data-refresh-account>${t('refresh')}</button>` : ''}</header>
+    ${open && both() ? `<div class="segmented" role="radiogroup">${['sadzv', 'ids'].map((w) => `<button role="radio" aria-checked="${w === view}" data-awallet="${w}">${w === 'ids' ? 'IDS BBSK' : 'SAD Zvolen'}</button>`).join('')}</div>` : ''}
     ${account}
-    <h2 class="section-label">${t('settings')}</h2>
-    <ul class="list">
-      ${link('reminders', t('s_reminders'), hasAccount() ? t('s_reminders_hint') : t('s_reminders_hint_guest'))}
-      ${hasAccount() ? link('security', t('s_security'), t('s_security_hint')) : ''}
-      ${link('appearance', t('s_appearance'), t('s_appearance_hint'))}
-      ${link('language', t('s_language'), lang() === 'en' ? t('lang_en') : t('lang_sk'))}
-      ${link('community', t('s_community'), t('s_community_hint'))}
-      ${link('about', t('s_about'), t('version', VERSION))}
-    </ul>
-    <ul class="list">${link('bug', t('s_bug'), t('s_bug_hint'))}${link('feature', t('s_feature'), t('s_feature_hint'))}<li><button class="row link" data-support><span class="row-text"><span class="row-title">${t('s_support')}</span><span class="row-sub">${t('s_support_hint')}</span></span><span aria-hidden="true">›</span></button></li></ul>
-    ${hasAccount() ? `<ul class="list">${open ? `<li><button class="row link" data-lock><span class="row-title">${t('lock_now')}</span></button></li>` : ''}<li><button class="row link danger" data-remove-account><span class="row-text"><span class="row-title">${t('account_remove')}</span><span class="row-sub">${t('account_remove_hint')}</span></span></button></li></ul>` : ''}`;
+    ${accountRestHtml(open, 'sadzv')}
+`;
   el.onclick = async (e) => {
-    const page = e.target.closest('[data-page]');
-    // Security needs the PIN first.
-    if (page) return page.dataset.page === 'security' && !open ? unlockDialog() : openSettings(page.dataset.page);
-    if (e.target.closest('[data-add-account]')) return showLogin();
-    if (e.target.closest('[data-unlock]')) return unlockDialog();
-    if (e.target.closest('[data-lock]')) return lockNow();
-    // Removing needs the PIN too, so someone holding the phone can't wipe it.
-    if (e.target.closest('[data-remove-account]')) return open ? (confirm(t('remove_confirm')) && removeAccount()) : unlockDialog();
-    if (e.target.closest('[data-support]')) return showSupport();
+    const w = e.target.closest('[data-awallet]');
+    if (w) { s.accountWallet = w.dataset.awallet; return renderAccount(el); }
+    if (e.target.closest('[data-topup]')) return openTopUp();
+    if (accountRestClick(e, el)) return;
     if (e.target.closest('[data-refresh-account]')) {
       const r = await api('/api/account', { sessionId: s.sessionId });
       if (r.ok) { setAccount(r.json.account); renderAccount(el); }
@@ -817,7 +1104,7 @@ function bugReport(body, feature = false) {
   if (!config.hub) { body.innerHTML = `<div class="notice warn">${t('bug_off')}</div>`; return; }
   const logs = feature ? '' : collectLogs();
   // Only while unlocked: the name and email belong to the protected account.
-  const name = unlocked() ? s.account?.userName || '' : '', email = unlocked() ? s.creds?.email || '' : '';
+  const name = unlocked() ? s.account?.userName || s.ids.account?.name || '' : '', email = unlocked() ? contactEmail() : '';
   body.innerHTML = `<form class="stack" id="bug-form">
     ${feature ? '' : `<fieldset class="chips"><legend class="section-label">${t('bug_category')}</legend>
       ${CATEGORIES.map((c, i) => `<label class="chip"><input type="radio" name="category" value="${c}" ${i === CATEGORIES.length - 1 ? 'checked' : ''}>${t('cat_' + c)}</label>`).join('')}</fieldset>`}

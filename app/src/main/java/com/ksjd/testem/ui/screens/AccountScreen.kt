@@ -87,12 +87,17 @@ import com.ksjd.testem.ui.components.SectionLabel
 import com.ksjd.testem.ui.components.daysLeftText
 import com.ksjd.testem.ui.theme.TransitTheme
 
-private enum class SettingsPage { Appearance, Security, Reminders, Language, Community, BugReport, Feature, Developer }
+private enum class SettingsPage { Appearance, Security, Reminders, Language, Community, Watch, BugReport, Feature, Developer }
 
 @Composable
 fun AccountScreen(viewModel: AppViewModel, onUnlock: () -> Unit, onSignIn: (Wallet) -> Unit) {
     val app by viewModel.appState.collectAsState()
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
+    // "Report a problem" on the watch sent its logs: the form, with them attached.
+    val reportRequested by com.ksjd.testem.hub.AppLogs.reportRequested.collectAsState()
+    LaunchedEffect(reportRequested) {
+        if (reportRequested) { page = SettingsPage.BugReport; com.ksjd.testem.hub.AppLogs.reportRequested.value = false }
+    }
     val current = page
     // Pages behind the PIN close when the app locks.
     if (current != null && current in LOCKED_PAGES && !(app.anyAccount && app.isAppUnlocked)) page = null
@@ -276,6 +281,8 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
             SettingsLink(stringResource(R.string.language_title), languageName(app.languageCode)) { onOpen(SettingsPage.Language) }
             GroupDivider()
             SettingsLink(stringResource(R.string.settings_community), stringResource(R.string.settings_community_hint)) { onOpen(SettingsPage.Community) }
+            GroupDivider()
+            SettingsLink(stringResource(R.string.settings_watch), stringResource(R.string.settings_watch_hint)) { onOpen(SettingsPage.Watch) }
             if (app.hasAccount) {
                 GroupDivider()
                 SettingsLink(stringResource(R.string.settings_developer), stringResource(R.string.settings_developer_hint)) {
@@ -558,6 +565,7 @@ private fun SettingsPageScreen(page: SettingsPage, viewModel: AppViewModel, onBa
         SettingsPage.Reminders -> stringResource(R.string.settings_reminders)
         SettingsPage.Language -> stringResource(R.string.language_title)
         SettingsPage.Community -> stringResource(R.string.settings_community)
+        SettingsPage.Watch -> stringResource(R.string.settings_watch)
         SettingsPage.BugReport -> stringResource(R.string.bug_title)
         SettingsPage.Feature -> stringResource(R.string.feature_title)
         SettingsPage.Developer -> stringResource(R.string.settings_developer)
@@ -578,6 +586,7 @@ private fun SettingsPageScreen(page: SettingsPage, viewModel: AppViewModel, onBa
             SettingsPage.Reminders -> ReminderSettings(app, viewModel)
             SettingsPage.Language -> LanguageSettings(app, viewModel)
             SettingsPage.Community -> CommunitySettings()
+            SettingsPage.Watch -> WatchSettings()
             SettingsPage.BugReport -> BugReportForm(viewModel, onDone = onBack)
             SettingsPage.Feature -> BugReportForm(viewModel, onDone = onBack, feature = true)
             SettingsPage.Developer -> DeveloperSettings(viewModel)

@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "testEM"
 include(":app")
+include(":wear")

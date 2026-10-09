@@ -79,7 +79,6 @@ class MainActivity : AppCompatActivity() {
         }
         com.ksjd.testem.ui.components.Haptics.enabled = CredentialsManager(this).getHapticsEnabled()
         TimetableService.changeMinutes = CredentialsManager(this).getChangeMinutes()
-        com.ksjd.testem.hub.AppLogs.installCrashRecorder(applicationContext)
         // Cheap, and catches a changed alarm permission or a missed reboot.
         com.ksjd.testem.rides.RideScheduler.reschedule(applicationContext)
         enableEdgeToEdge()
@@ -109,6 +108,12 @@ private fun handleIntent(intent: android.content.Intent?) {
     if (intent?.getBooleanExtra(com.ksjd.testem.live.TripTracking.EXTRA_SHOW_FOLLOWED, false) == true) {
         intent.removeExtra(com.ksjd.testem.live.TripTracking.EXTRA_SHOW_FOLLOWED) // not again after rotation
         com.ksjd.testem.live.TripTracking.requestShow()
+    }
+    // Logs arrived from the watch: straight to the bug report form.
+    if (intent?.getBooleanExtra(com.ksjd.testem.live.WatchSync.EXTRA_REPORT, false) == true) {
+        intent.removeExtra(com.ksjd.testem.live.WatchSync.EXTRA_REPORT)
+        com.ksjd.testem.hub.AppLogs.fromWatch = true
+        com.ksjd.testem.hub.AppLogs.reportRequested.value = true
     }
 }
 
@@ -191,6 +196,8 @@ private fun MainScaffold(
     if (unlocking) UnlockDialog(viewModel, appState, activity, onDismiss = { unlocking = false })
 
     BackHandler(enabled = selected != AppTab.Home) { selected = AppTab.Home }
+    val reportRequested by com.ksjd.testem.hub.AppLogs.reportRequested.collectAsState()
+    LaunchedEffect(reportRequested) { if (reportRequested) selected = AppTab.Account }
 
     // Follow notification tapped: home tab (the ticket is one swipe away) with the bus's stops on top.
     val showFollowed by com.ksjd.testem.live.TripTracking.showRequested.collectAsState()

@@ -1,14 +1,27 @@
 # Changelog
 
+## 2.13.1
+
+### Fixed
+- **Crash on the IDS BBSK ticket or account right after unlocking** (EM-0043, EM-0045): the saved IDS BBSK account was read back wrongly in the Play build, so opening it before the e-shop's fresh data arrived crashed the app.
+- **Cut-off texts on round watches** (EM-0044): long destinations get two lines, and texts keep clear of the round screen's edge.
+- **Reports from the watch** are filed as the watch's (its model, Wear OS and the watch app's version); the phone's details are in the logs.
+
 ## 2.13.0
 
 ### New
+- **Plan&Ride on Wear OS** (EM-0041): a watch app for Wear OS 3 and newer (Galaxy Watch4 onward). While you follow a bus on the phone, the watch shows its countdown on the watch face (Ongoing Activity), the line, destination, delay and your ride so far as a ring, the next stops, all stops (where you get on and off marked), the journey's transfers and the trip's alerts, a tile with the departure time, and a button to stop following. Each alert comes to the watch once (from the phone), and the phone's own follow card stays off the watch while the watch app shows the bus.
+- **More on the watch**: the follow notification's buttons (*Bus is here*, *Bus is leaving*, *At <stop>*, *It already left*) right under the countdown; *My trips* to start a starred journey or a regular ride from the watch; departures at your favourite stops and *Departures nearby* (located by the phone, so the watch's GPS stays off); credit; tiles for favourite stops and credit; a complication with the followed bus's countdown for any watch face; and *Get off at the next stop* with its own vibration (three long pulses), announced once by the watch. The watch app speaks the phone app's language.
+- **Watch settings** (Account → Watch): show the bus on the watch or not, the countdown on the watch face, alerts on the watch too or on the phone only, credit on the watch, and how many next stops the watch lists.
+- **Reports from the watch**: *Report a problem* in the watch app sends its logs to the phone, which opens the bug report with them attached.
 - **IDS BBSK account and QR code** (EM-0023): add your eshop.idsbbsk.sk account next to (or instead of) sadzv.qrbus.me, on the welcome screen or in Account. The home tab shows both tickets on a slider (swipe, or the SAD Zvolen / IDS BBSK switch above it); the IDS BBSK one is the virtual card's QR code, kept for offline use. Account shows the IDS credit, valid tickets and identifiers, History the IDS top-ups and passes, one account at a time or both together.
 - **The right ticket for each bus**: while following a journey the home tab switches by itself: SAD Zvolen for city buses in Banská Bystrica and Zvolen, IDS BBSK for regional lines (060xxx, also the city buses of Žiar nad Hronom, Brezno and Nová Baňa). It can be turned off, and the ticket shown first chosen, in Account → Tickets.
 - **Email for reports** (EM-0037): with two accounts under different emails, the app asks once which is yours and fills it in bug reports and suggestions; change it in Account.
 - **Add credit to your card** (*Account → Add credit*): pick an amount (2–50 €, 5 € suggested, the limits come from sadzv) and pay on the operator's own payment gateway (GP webpay), the same as on sadzv.qrbus.me. The payment goes straight to SAD Zvolen: Plan&Ride only opens the gateway, takes no fee and never sees your card details. Afterwards the app shows whether it was paid and refreshes your credit and History.
 
 ### Fixed
+- **Logs after a crash**: a bug report sent after the app crashed now includes the log lines from before the crash (they belonged to the crashed session and were left out), also when the crash was in the background (following a bus, a regular ride). Same on the watch.
+- **A late bus on a journey with a change** (EM-0040): the app moved on to the next bus by the timetable while the rider was still on the first one, 20 min late. With the phone's position (automatic mode) it now keeps following the bus as late as it really is, also while it stands in traffic, and doesn't change before the rider gets there. When the next bus leaves before the late one arrives (plus your change time), it warns *You may miss line …* in time to look for another way.
 - **Getting off elsewhere in a planner result** (EM-0039): tapping another stop in a bus's stop list (*Show all stops*) only marked where following ends; now the connection changes too: the rest of the journey is planned from that stop, a short walk allowed.
 - **Times on phones set to another time zone**: *Now* in the planner searched from the phone's clock time instead of Slovak time, and the stop list in *Change stop* was off by the difference. All bus times are now Slovak time.
 - **Widget layout**: the route line starts and ends at your stops like on the home card (it ran past them), and the last line (*Will I catch it?*) is no longer cut off.

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Plan&amp;Ride</string>
+    <string name="nothing_followed">Follow a bus in Plan&amp;Ride on your phone to see it here.</string>
+    <string name="stop_following">Stop following</string>
+    <string name="now">now</string>
+    <string name="minutes">%1$d min</string>
+    <string name="line_to">%1$s → %2$s</string>
+    <string name="tile_label">Followed bus</string>
+    <string name="channel_follow">Followed bus</string>
+    <string name="next_stops">Next stops</string>
+    <string name="all_stops">All stops</string>
+    <string name="transfers">Transfers</string>
+    <string name="transfers_count">Transfers (%1$d)</string>
+    <string name="alerts">Alerts</string>
+    <string name="alerts_count">Alerts (%1$d)</string>
+    <string name="you_board">you get on</string>
+    <string name="you_alight">you get off</string>
+    <string name="get_off_at">Get off at %1$s, %2$s</string>
+    <string name="change_at">from %1$s</string>
+    <string name="departs_at">leaves %1$s</string>
+    <string name="report_problem">Report a problem</string>
+    <string name="report_sent">Logs sent. Finish the report on your phone.</string>
+    <string name="report_no_phone">Phone not connected: logs not sent.</string>
+    <string name="more">Plan&amp;Ride</string>
+    <string name="my_trips">My trips</string>
+    <string name="favourites">Favourite stops</string>
+    <string name="nearby">Departures nearby</string>
+    <string name="credit">Credit</string>
+    <string name="no_favourites">Star stops in Departures on your phone to see them here.</string>
+    <string name="no_credit">Add your account in Plan&amp;Ride on your phone to see your credit.</string>
+    <string name="no_trips">Star a journey or set up a regular ride on your phone to start it from here.</string>
+    <string name="starting">Starting on your phone…</string>
+    <string name="nearby_no_location">Your phone couldn\'t find where it is. Open Plan&amp;Ride on it once.</string>
+    <string name="updating">Updating…</string>
+    <string name="line_countdown">Line %1$s</string>
+    <string name="channel_get_off">Get off next</string>
+    <string name="complication_label">Followed bus</string>
+</resources>

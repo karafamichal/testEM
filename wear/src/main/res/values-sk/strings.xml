@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nothing_followed">Sledujte autobus v Plan&amp;Ride v telefóne a uvidíte ho tu.</string>
+    <string name="stop_following">Zastaviť sledovanie</string>
+    <string name="now">teraz</string>
+    <string name="minutes">%1$d min</string>
+    <string name="line_to">%1$s → %2$s</string>
+    <string name="tile_label">Sledovaný autobus</string>
+    <string name="channel_follow">Sledovaný autobus</string>
+    <string name="next_stops">Ďalšie zastávky</string>
+    <string name="all_stops">Všetky zastávky</string>
+    <string name="transfers">Prestupy</string>
+    <string name="transfers_count">Prestupy (%1$d)</string>
+    <string name="alerts">Upozornenia</string>
+    <string name="alerts_count">Upozornenia (%1$d)</string>
+    <string name="you_board">nastupujete</string>
+    <string name="you_alight">vystupujete</string>
+    <string name="get_off_at">Vystúpte: %1$s, %2$s</string>
+    <string name="change_at">zo zastávky %1$s</string>
+    <string name="departs_at">odchod %1$s</string>
+    <string name="report_problem">Nahlásiť problém</string>
+    <string name="report_sent">Záznamy sú v telefóne. Dokončite hlásenie tam.</string>
+    <string name="report_no_phone">Telefón nie je pripojený, záznamy sa neodoslali.</string>
+    <string name="my_trips">Moje cesty</string>
+    <string name="favourites">Obľúbené zastávky</string>
+    <string name="nearby">Odchody v okolí</string>
+    <string name="credit">Kredit</string>
+    <string name="no_favourites">Označte zastávky hviezdičkou v Odchodoch v telefóne a uvidíte ich tu.</string>
+    <string name="no_credit">Pridajte si účet v Plan&amp;Ride v telefóne a uvidíte tu kredit.</string>
+    <string name="no_trips">Označte cestu hviezdičkou alebo nastavte pravidelnú jazdu v telefóne a spustíte ju odtiaľto.</string>
+    <string name="starting">Spúšťa sa v telefóne…</string>
+    <string name="nearby_no_location">Telefón nezistil, kde je. Raz v ňom otvorte Plan&amp;Ride.</string>
+    <string name="updating">Aktualizuje sa…</string>
+    <string name="line_countdown">Linka %1$s</string>
+    <string name="channel_get_off">Vystupujete</string>
+    <string name="complication_label">Sledovaný autobus</string>
+</resources>

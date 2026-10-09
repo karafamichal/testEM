@@ -208,14 +208,14 @@ object IdsParser {
     fun identifiers(html: String): List<IdsIdentifier> = rows(html, "my-tokens__table-row").mapNotNull { row ->
         val t = text(row)
         val number = Regex("""Identifikátor č\.\s*(\d+)""").find(t)?.groupValues?.get(1)?.toIntOrNull() ?: return@mapNotNull null
-        val products = Regex("""(?s)my-tokens__msg-(?:success|alert)">(.*?)</div>""").findAll(row).map { text(it.groupValues[1]) }
-            .filter { it.isNotBlank() && it != "Platný" && it != "Neplatný" }.toList()
+        // "Platné lístky: 1" is a link to the tickets, the rest status boxes.
+        val products = Regex("""Kredit aktívny|Žiadne produkty|Platné lístky:\s*\d+""").findAll(t).map { it.value }.toList()
         IdsIdentifier(
             number = number,
             alias = Regex("""token-alias-input"\s*value="([^"]*)"""").find(row)?.groupValues?.get(1)?.let(::text).orEmpty(),
             cardNumber = Regex("""Číslo karty:\s*(\S+)""").find(t)?.groupValues?.get(1).orEmpty(),
             products = products,
-            hasProducts = products.any { it.startsWith("Platné lístky") },
+            hasProducts = Regex("""Platné lístky:\s*[1-9]""").containsMatchIn(t),
             valid = Regex("""\bPlatný\b""").containsMatchIn(t),
             qrId = Regex("""id_token=(\d+)&(?:amp;)?action=qr""").find(row)?.groupValues?.get(1)
         )

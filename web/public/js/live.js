@@ -413,6 +413,9 @@ export function startFollow({ ref, boardingPlatformIds, alightOrder, detail, nex
   live.onChange();
 }
 
+/** The followed bus's line ("" when none): the ticket shown switches by it. */
+export const followedLine = () => follow?.ref?.line || '';
+
 export function stopFollow() {
   if (follow?.pushId) api('/api/unfollow', { id: follow.pushId });
   follow = null;

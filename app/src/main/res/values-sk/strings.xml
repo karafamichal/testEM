@@ -555,7 +555,8 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="feature_send">Odoslať návrh</string>
     <string name="feature_sent_title">Návrh %1$s odoslaný</string>
     <string name="feature_sent_body">Ďakujeme za nápad. Ak ste nechali e-mail, ozveme sa, keď bude novinka.</string>
-    <string name="whats_new_body">• IDS BBSK: pridajte si účet eshop.idsbbsk.sk; jeho QR kód, kredit, lístky a história sú vedľa SAD Zvolen a domovská obrazovka prepne na správny lístok pre každý autobus.\n• Dobitie kreditu na kartu (Účet): platíte priamo SAD Zvolen na jej platobnej bráne.
+    <string name="whats_new_body">• Plan&amp;Ride na hodinkách s Wear OS: sledovaný autobus, zastávky, prestupy, upozornenia, odchody aj kredit (Účet → Hodinky).
+• IDS BBSK: pridajte si účet eshop.idsbbsk.sk; jeho QR kód, kredit, lístky a história sú vedľa SAD Zvolen a domovská obrazovka prepne na správny lístok pre každý autobus.\n• Dobitie kreditu na kartu (Účet): platíte priamo SAD Zvolen na jej platobnej bráne.
 • Vlastný prestup: vyberte, kde vystúpite z prvého autobusu a kde nastúpite na ďalší, aj vyhľadanú zastávku (Zmeniť prestup).\n• Neodoslané hlásenia a návrhy sa uchovajú, aj s fotkami.\n• Ťuknite na graf alebo zastávku v Histórii a uvidíte podrobnosti.\n• Widget teraz vyzerá ako živá karta na domovskej obrazovke aplikácie.\n• Keď čakáte na zastávke na meškajúci autobus, aplikácia sa spýta, či už prišiel.\n• „Nestihnete“ už nevychádza zo starej polohy; História sa načíta hneď po odomknutí.</string>
     <string name="topup_button">Dobiť kredit</string>
     <string name="topup_title">Dobitie kreditu na kartu</string>
@@ -600,4 +601,26 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="ticket_auto_switch_hint">Počas sledovania: SAD Zvolen pre MHD v Banskej Bystrici a vo Zvolene, IDS BBSK pre regionálne autobusy</string>
     <string name="ticket_default">Lístok zobrazený ako prvý</string>
     <string name="ticket_default_change">Zmeniť</string>
+    <string name="transfer_risk_title">Linku %1$s asi nestihnete</string>
+    <string name="transfer_risk_body">Tento autobus mešká asi %1$d min: na zastávke %2$s bude okolo %3$s, ale linka %4$s odchádza o %5$s. Pozrite si inú cestu vo vyhľadávači.</string>
+    <string name="watch_report_channel">Hlásenia z hodiniek</string>
+    <string name="watch_report_title">Záznamy z hodiniek sú v telefóne</string>
+    <string name="watch_report_body">Ťuknite, opíšte problém a odošlite hlásenie so záznamami z hodiniek.</string>
+    <string name="settings_watch">Hodinky</string>
+    <string name="settings_watch_hint">Sledovaný autobus na hodinkách s Wear OS</string>
+    <string name="watch_checking">Hľadá sa aplikácia Plan&amp;Ride na hodinkách…</string>
+    <string name="watch_found">Aplikácia Plan&amp;Ride je na vašich hodinkách.</string>
+    <string name="watch_not_found">Nenašli sa hodinky s aplikáciou Plan&amp;Ride. Nainštalujte ju z Google Play na hodinky s Wear OS (Galaxy Watch4 a novšie).</string>
+    <string name="watch_enabled">Zobrazovať sledovaný autobus na hodinkách</string>
+    <string name="watch_enabled_hint">Odpočítavanie, zastávky, prestupy a upozornenia v aplikácii na hodinkách a v jej dlaždici</string>
+    <string name="watch_ongoing">Odpočítavanie na ciferníku</string>
+    <string name="watch_ongoing_hint">Autobus a odpočítavanie na ciferníku, kým ho sledujete</string>
+    <string name="watch_alerts">Upozornenia aj na hodinkách</string>
+    <string name="watch_alerts_hint">Príchod autobusu, vyrazte, prestúpte a ďalšie zavibrujú aj na hodinkách. Vypnuté: len v telefóne.</string>
+    <string name="watch_next_stops">Ďalšie zastávky v aplikácii na hodinkách</string>
+    <string name="watch_next_none">Žiadne</string>
+    <string name="watch_next_count">Najbližšie %1$d</string>
+    <string name="watch_report_hint">Niečo nefunguje na hodinkách? V aplikácii na hodinkách ťuknite na Nahlásiť problém: záznamy prídu do telefónu a hlásenie ich priloží.</string>
+    <string name="watch_credit">Kredit na hodinkách</string>
+    <string name="watch_credit_hint">Kredit SAD Zvolen a IDS BBSK v aplikácii na hodinkách</string>
 </resources>

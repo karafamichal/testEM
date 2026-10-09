@@ -113,6 +113,24 @@ class CredentialsManager(context: Context) {
     fun getHistoryWallet(): Wallet? = prefs.getString("history_wallet", null)?.let { runCatching { Wallet.valueOf(it) }.getOrNull() }
     fun saveHistoryWallet(wallet: Wallet?) = prefs.edit().putString("history_wallet", wallet?.name).apply()
 
+    // ------------------------------------------------------------- watch (EM-0041)
+
+    /** Show the followed bus in the Plan&Ride watch app. */
+    fun getWatchEnabled(): Boolean = prefs.getBoolean("watch_enabled", true)
+    fun saveWatchEnabled(enabled: Boolean) = prefs.edit().putBoolean("watch_enabled", enabled).apply()
+    /** The ticking countdown on the watch face (the watch app's Ongoing Activity). */
+    fun getWatchOngoing(): Boolean = prefs.getBoolean("watch_ongoing", true)
+    fun saveWatchOngoing(enabled: Boolean) = prefs.edit().putBoolean("watch_ongoing", enabled).apply()
+    /** The phone's alerts also on the watch (bridged); off keeps them on the phone only. */
+    fun getWatchAlerts(): Boolean = prefs.getBoolean("watch_alerts", true)
+    fun saveWatchAlerts(enabled: Boolean) = prefs.edit().putBoolean("watch_alerts", enabled).apply()
+    /** Credit (SAD Zvolen, IDS BBSK) in the watch app's tile. */
+    fun getWatchCredit(): Boolean = prefs.getBoolean("watch_credit", true)
+    fun saveWatchCredit(enabled: Boolean) = prefs.edit().putBoolean("watch_credit", enabled).apply()
+    /** Next stops on the watch app's main screen (0, 3 or 5). */
+    fun getWatchNextStops(): Int = prefs.getInt("watch_next_stops", 3)
+    fun saveWatchNextStops(count: Int) = prefs.edit().putInt("watch_next_stops", count).apply()
+
     // ------------------------------------------------------------- appearance
 
     fun saveThemePresets(presets: List<ThemePreset>) {
