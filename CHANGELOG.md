@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.14.2 (web version)
+
+### Fixed
+- **IDS BBSK sign-in said the password was wrong** (EM-0050): eshop.idsbbsk.sk sometimes asks the web version's server to confirm it's not a robot, which the web version can't do. It now says so, instead of blaming the email or password. (The Android app signs in from the phone itself and isn't affected.)
+- The sign-in page now says Plan&Ride is an unofficial client for both sadzv.qrbus.me and eshop.idsbbsk.sk.
+
+## 2.14.1 (web version)
+
+### Fixed
+- **Choosing a colour on iPhone** (EM-0049): the background and theme colours are picked in Plan&Ride's own colour picker (ready colours, a colour square, hex or R, G, B), and nothing changes until you tap *Use*. iPhone's own picker applied every move of its sliders.
+
 ## 2.14.0
 
 ### New

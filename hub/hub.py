@@ -47,7 +47,7 @@ from pathlib import Path
 import sadzv
 import timetable
 
-VERSION = "1.16.0"
+VERSION = "1.17.1"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -115,6 +115,21 @@ CREATE TABLE IF NOT EXISTS map_stops (
   lon REAL NOT NULL,
   orig_lat REAL,
   orig_lon REAL,
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS map_stations (
+  station_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  data TEXT NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS map_children (
+  child_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  parent_id TEXT NOT NULL,
+  data TEXT NOT NULL,
   updated_by TEXT NOT NULL DEFAULT '',
   updated_at INTEGER NOT NULL
 );
@@ -263,6 +278,35 @@ def load_map_edits():
                                                       "origLon": r["orig_lon"] if r["orig_lon"] is not None else r["lon"]}
                                     for r in conn.execute("SELECT * FROM map_stops")}
         timetable.edits["segments"] = {r["segment"]: json.loads(r["points"]) for r in conn.execute("SELECT segment, points FROM map_segments")}
+        timetable.edits["stations"] = {r["station_id"]: dict(json.loads(r["data"]), name=r["name"]) for r in conn.execute("SELECT * FROM map_stations")}
+        timetable.edits["children"] = {r["child_id"]: dict(json.loads(r["data"]), name=r["name"], parent=r["parent_id"])
+                                       for r in conn.execute("SELECT * FROM map_children")}
+
+
+def clean_lines(value):
+    """Lines boarding at a place: "34, 60101" or a list -> ["34", "60101"]."""
+    items = value if isinstance(value, list) else re.split(r"[,\s]+", str(value or ""))
+    return [one_line(x, 12) for x in items if one_line(x, 12)][:200]
+
+
+def clean_place(p):
+    lat, lon = float(p["lat"]), float(p["lon"])
+    if not (47 < lat < 51 and 16 < lon < 23.5):
+        raise ValueError("A place is outside Slovakia")
+    return {"label": one_line(p.get("label"), 60), "lat": round(lat, 6), "lon": round(lon, 6), "lines": clean_lines(p.get("lines"))}
+
+
+def clean_zone(z):
+    """None, a circle {"type": "circle", "lat", "lon", "radius" (m)} or a drawn shape {"type": "polygon", "points"}."""
+    if not z:
+        return None
+    if z.get("type") == "circle":
+        center = clean_place(z)
+        return {"type": "circle", "lat": center["lat"], "lon": center["lon"], "radius": max(10, min(3000, int(z.get("radius") or 100)))}
+    points = [[clean_place({"lat": p[0], "lon": p[1]})[k] for k in ("lat", "lon")] for p in (z.get("points") or [])][:300]
+    if len(points) < 3:
+        raise ValueError("A zone needs at least 3 points")
+    return {"type": "polygon", "points": points}
 
 
 OSRM_URL = ENV("HUB_OSRM_URL", "https://router.project-osrm.org")
@@ -2039,6 +2083,9 @@ class Handler(BaseHTTPRequestHandler):
                                 return cache[key]
                     return None
                 return self.send(200, {"vehicles": t.vehicles(int(time.time()), box(), delay_of), "at": now()})
+        if method == "GET" and route == "station":
+            s = t.by_id.get(query.get("id") or "")
+            return self.send(200, t.station_detail(s)) if s is not None else self.error(404, "No such stop")
         if method == "GET" and route == "trip":
             shape = t.trip_shape(query.get("id") or "") if re.fullmatch(r"[^:]+:.+:\d{8}", query.get("id") or "") else None
             return self.send(200, shape) if shape else self.error(404, "No such trip")
@@ -2069,6 +2116,56 @@ class Handler(BaseHTTPRequestHandler):
                     t.lat[s], t.lon[s] = lat, lon  # in use right away; the rebuild keeps it
             load_map_edits()
             return self.send(200, t.station_json(s))
+        if route == "station":
+            # A station's extra places, zone and central flag; fields left out stay as they are.
+            s = t.by_id.get(str(data.get("id")))
+            if s is None:
+                return self.error(404, "No such stop")
+            sid = t.station_ids[s]
+            with db() as conn:
+                row = conn.execute("SELECT data FROM map_stations WHERE station_id=?", (sid,)).fetchone()
+                current = json.loads(row["data"]) if row else {}
+                if "places" in data:
+                    current["places"] = [clean_place(p) for p in (data["places"] or [])][:100]
+                if "zone" in data:
+                    current["zone"] = clean_zone(data["zone"])
+                if "central" in data:
+                    current["central"] = bool(data["central"])
+                if not current.get("central"):  # no longer central: its sub-stations are ordinary stops again
+                    conn.execute("DELETE FROM map_children WHERE parent_id=?", (sid,))
+                if not any(current.get(k) for k in ("places", "zone", "central")):
+                    conn.execute("DELETE FROM map_stations WHERE station_id=?", (sid,))
+                else:
+                    conn.execute("""INSERT INTO map_stations(station_id, name, data, updated_by, updated_at) VALUES (?,?,?,?,?)
+                                    ON CONFLICT(station_id) DO UPDATE SET data=excluded.data, updated_by=excluded.updated_by,
+                                    updated_at=excluded.updated_at""", (sid, t.names[s], json.dumps(current), user["username"], now()))
+            load_map_edits()
+            t.apply_station_edits()
+            return self.send(200, t.station_detail(s))
+        if route in ("child", "child/remove"):
+            # A central station's sub-station: another stop that is its platform for some lines.
+            child = t.by_id.get(str(data.get("child")))
+            if child is None:
+                return self.error(404, "No such stop")
+            with db() as conn:
+                if route == "child/remove":
+                    conn.execute("DELETE FROM map_children WHERE child_id=?", (t.station_ids[child],))
+                else:
+                    parent = t.by_id.get(str(data.get("parent")))
+                    if parent is None or parent == child:
+                        return self.error(400, "Pick another stop as the central one")
+                    if parent not in t.central:
+                        return self.error(400, "Make the station central first")
+                    if child in t.central:
+                        return self.error(400, "A central station can't be a sub-station")
+                    conn.execute("""INSERT INTO map_children(child_id, name, parent_id, data, updated_by, updated_at) VALUES (?,?,?,?,?,?)
+                                    ON CONFLICT(child_id) DO UPDATE SET parent_id=excluded.parent_id, data=excluded.data,
+                                    updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+                                 (t.station_ids[child], t.names[child], t.station_ids[parent],
+                                  json.dumps({"label": one_line(data.get("label"), 60), "lines": clean_lines(data.get("lines"))}), user["username"], now()))
+            load_map_edits()
+            t.apply_station_edits()
+            return self.send(200, t.station_detail(t.parent_of[child][0]) if child in t.parent_of else t.station_detail(child))
         if route in ("segment", "segment/reset"):
             key = f"{data.get('from')}>{data.get('to')}"
             if data.get("from") not in t.by_id or data.get("to") not in t.by_id:
@@ -2094,6 +2191,9 @@ class Handler(BaseHTTPRequestHandler):
                 manual = {r[0] for r in conn.execute("SELECT segment FROM map_segments WHERE source='manual'")}
                 for seg in shape["segments"]:
                     key = f"{seg['from']}>{seg['to']}"
+                    # One part only (the dashboard goes part by part, to show its progress).
+                    if data.get("from") and (seg["from"], seg["to"]) != (data.get("from"), data.get("to")):
+                        continue
                     if key in manual or len(seg["points"]) < 2 or (data.get("keep") and seg["traced"]):
                         continue
                     try:

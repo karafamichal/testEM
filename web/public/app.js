@@ -340,7 +340,11 @@ async function idsSignIn(creds, { fromForm } = {}) {
   const r = await api('/api/ids/login', creds);
   s.ids.loading = false;
   if (!r.ok || !r.json.success) {
-    if (fromForm) { $('#login-error').textContent = r.json.error === 'offline' ? t('ticket_offline_no_code') : r.json.error || t('login_failed', r.status); $('#login-error').hidden = false; }
+    if (fromForm) {
+      $('#login-error').textContent = r.json.error === 'offline' ? t('ticket_offline_no_code') : r.json.error === 'robot' ? t('ids_robot_check')
+        : r.status === 401 ? t('ids_login_rejected') : r.json.error || t('login_failed', r.status);
+      $('#login-error').hidden = false;
+    }
     else if (r.status === 401) s.ids.signedOut = true;
     if (s.tab === 'ticket' || s.tab === 'account') selectTab(s.tab);
     return false;
@@ -1070,28 +1074,102 @@ function appearance(body) {
   const bgNow = store.get('bgColor', null);
   body.innerHTML = `<h2 class="section-label">${t('theme_colours')}</h2>
     <ul class="list">${PRESETS.map((p) => `<li><label class="row"><span class="swatch" style="background:${p.color}"></span><span class="row-title">${esc(p.name)}</span><input type="radio" name="theme" value="${p.id}" ${id === p.id ? 'checked' : ''}></label></li>`).join('')}
-      <li><label class="row"><input type="color" id="custom-color" value="${esc(store.get('themeColor', '#1D4FB8'))}" aria-label="${esc(t('theme_custom'))}"><span class="row-title">${t('theme_custom')}</span><input type="radio" name="theme" value="custom" ${id === 'custom' ? 'checked' : ''}></label></li></ul>
+      <li><label class="row"><button type="button" class="swatch-btn" data-pick-theme style="background:${esc(store.get('themeColor', '#1D4FB8'))}" aria-label="${esc(t('theme_custom'))}"></button><span class="row-title">${t('theme_custom')}</span><input type="radio" name="theme" value="custom" ${id === 'custom' ? 'checked' : ''}></label></li></ul>
     <h2 class="section-label">${t('theme_mode')}</h2>
     <ul class="list">${['auto', 'light', 'dark'].map((m) => `<li><label class="row"><span class="row-title">${t('mode_' + m)}</span><input type="radio" name="mode" value="${m}" ${store.get('themeMode', 'auto') === m ? 'checked' : ''} ${bgNow ? 'disabled' : ''}></label></li>`).join('')}</ul>
     <h2 class="section-label">${t('background_title')}</h2>
     <div class="bg-choices">${BACKGROUNDS.map((c) => `<button class="swatch-btn ${bgNow === c ? 'on' : ''}" data-bg="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}
-      <label class="swatch-btn custom ${bgNow && !BACKGROUNDS.includes(bgNow) ? 'on' : ''}" aria-label="${esc(t('theme_custom'))}"><input type="color" id="bg-color" value="${esc(bgNow || '#1C2433')}"></label></div>
+      <button type="button" class="swatch-btn custom ${bgNow && !BACKGROUNDS.includes(bgNow) ? 'on' : ''}" data-pick-bg aria-label="${esc(t('theme_custom'))}">${bgNow && !BACKGROUNDS.includes(bgNow) ? `<i style="background:${esc(bgNow)}"></i>` : ''}</button></div>
     <p class="hint small">${t('background_hint')} ${bgNow ? `<button class="text-btn" data-bg-reset>${t('background_reset')}</button>` : ''}</p>
     <ul class="list">${switchRow('amoled', t('amoled'), t('amoled_hint'), store.get('amoled', false))}</ul>`;
   body.onchange = (e) => {
     if (e.target.name === 'theme') store.set('themeId', e.target.value);
-    if (e.target.id === 'custom-color') { store.set('themeColor', e.target.value); store.set('themeId', 'custom'); $('input[value="custom"]', body).checked = true; }
     if (e.target.name === 'mode') store.set('themeMode', e.target.value);
     if (e.target.id === 'amoled') store.set('amoled', e.target.checked);
-    if (e.target.id === 'bg-color') { store.set('bgColor', e.target.value); applyTheme(); return appearance(body); }
     applyTheme();
   };
-  body.onclick = (e) => {
+  body.onclick = async (e) => {
+    // EM-0049: our own colour picker; nothing changes until "Use" (iPhone's applied every slider move).
+    if (e.target.closest('[data-pick-bg]')) {
+      const c = await pickColor(bgNow || '#1C2433', t('background_title'));
+      if (c) { store.set('bgColor', c); applyTheme(); appearance(body); }
+      return;
+    }
+    if (e.target.closest('[data-pick-theme]')) {
+      e.preventDefault();
+      const c = await pickColor(store.get('themeColor', '#1D4FB8'), t('theme_custom'));
+      if (c) { store.set('themeColor', c); store.set('themeId', 'custom'); applyTheme(); appearance(body); }
+      return;
+    }
     const b = e.target.closest('[data-bg]');
     if (b) store.set('bgColor', b.dataset.bg);
     if (e.target.closest('[data-bg-reset]')) store.set('bgColor', null);
     if (b || e.target.closest('[data-bg-reset]')) { applyTheme(); appearance(body); }
   };
+}
+
+/**
+ * A colour picker of our own (EM-0049): ready colours, a saturation/brightness square and a hue bar to drag, and the
+ * code as hex or R, G, B. Resolves with "#rrggbb" on "Use", null on cancel; nothing is applied before.
+ */
+function pickColor(initial, title) {
+  const READY = ['#FFFFFF', '#F3EEE4', '#E8F0E6', '#E6EEF7', '#F6E8EC', '#EDE7F6', '#1C2433', '#1E2A22', '#2B1F2E', '#263238', '#121212', '#000000',
+    '#1D4FB8', '#0F766E', '#15803D', '#E0A100', '#EA580C', '#B91C1C', '#BE185D', '#7C3AED'];
+  const toHsv = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+    const h = d === 0 ? 0 : max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [(h * 60 + 360) % 360, max ? d / max : 0, max];
+  };
+  const toHex = (h, sat, v) => {
+    const f = (n) => { const k = (n + h / 60) % 6; return v - v * sat * Math.max(0, Math.min(k, 4 - k, 1)); };
+    return '#' + [f(5), f(3), f(1)].map((x) => Math.round(x * 255).toString(16).padStart(2, '0')).join('').toUpperCase();
+  };
+  const valid = (x) => /^#?[0-9a-f]{6}$/i.test(x.trim());
+  let [h, sat, v] = toHsv(valid(initial) ? initial : '#1D4FB8');
+  return new Promise((resolve) => {
+    const d = document.createElement('div');
+    d.className = 'dialog-backdrop';
+    d.innerHTML = `<div class="dialog color-dialog" role="dialog" aria-modal="true" aria-labelledby="cp-title">
+      <h2 id="cp-title">${esc(title)}</h2>
+      <div class="cp-ready">${READY.map((c) => `<button type="button" class="swatch-btn" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}</div>
+      <div class="cp-sv"><i class="cp-dot"></i></div>
+      <div class="cp-hue"><i class="cp-dot"></i></div>
+      <div class="cp-row"><span class="cp-preview"></span><label class="field"><span>${t('color_hex')}</span><input id="cp-hex" maxlength="7" autocomplete="off" autocapitalize="characters"></label></div>
+      <div class="cp-row">${['R', 'G', 'B'].map((x) => `<label class="field"><span>${x}</span><input data-rgb="${x}" inputmode="numeric" maxlength="3"></label>`).join('')}</div>
+      <div class="pin-actions"><button type="button" class="text-btn" data-cancel>${t('cancel')}</button><button type="button" class="btn" data-use>${t('color_use')}</button></div></div>`;
+    document.body.appendChild(d);
+    const sv = $('.cp-sv', d), hue = $('.cp-hue', d), hex = $('#cp-hex', d);
+    const draw = (from) => {
+      const c = toHex(h, sat, v);
+      sv.style.background = `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, ${toHex(h, 1, 1)})`;
+      $('.cp-dot', sv).style.cssText = `left:${sat * 100}%;top:${(1 - v) * 100}%`;
+      $('.cp-dot', hue).style.cssText = `left:${(h / 360) * 100}%`;
+      $('.cp-preview', d).style.background = c;
+      if (from !== 'hex') hex.value = c;
+      if (from !== 'rgb') d.querySelectorAll('[data-rgb]').forEach((el, i) => (el.value = parseInt(c.slice(1 + i * 2, 3 + i * 2), 16)));
+    };
+    const drag = (el, move) => {
+      const at = (e) => { const r = el.getBoundingClientRect(); move(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))); draw(); };
+      el.onpointerdown = (e) => { el.setPointerCapture(e.pointerId); at(e); el.onpointermove = at; };
+      el.onpointerup = el.onpointercancel = () => { el.onpointermove = null; };
+    };
+    drag(sv, (x, y) => { sat = x; v = 1 - y; });
+    drag(hue, (x) => { h = x * 359.9; });
+    hex.oninput = () => { if (valid(hex.value)) { [h, sat, v] = toHsv('#' + hex.value.trim().replace('#', '')); draw('hex'); } };
+    d.querySelectorAll('[data-rgb]').forEach((el) => (el.oninput = () => {
+      const rgb = [...d.querySelectorAll('[data-rgb]')].map((x) => Math.min(255, Math.max(0, Number(x.value.replace(/\D/g, '')) || 0)));
+      [h, sat, v] = toHsv('#' + rgb.map((x) => x.toString(16).padStart(2, '0')).join('')); draw('rgb');
+    }));
+    const close = (value) => { d.remove(); resolve(value); };
+    d.onclick = (e) => {
+      const ready = e.target.closest('[data-c]');
+      if (ready) { [h, sat, v] = toHsv(ready.dataset.c); draw(); }
+      if (e.target === d || e.target.closest('[data-cancel]')) close(null);
+      if (e.target.closest('[data-use]')) close(toHex(h, sat, v));
+    };
+    draw();
+  });
 }
 
 function language(body) {

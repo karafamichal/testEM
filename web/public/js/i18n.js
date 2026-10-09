@@ -1,5 +1,10 @@
 // Slovak (default, like the Android app) and English. t('key', a, b) fills %1, %2.
 const en = {
+  ids_robot_check: "eshop.idsbbsk.sk wants to check that you're not a robot, so the web version can't sign in to it right now. Your email and password weren't the problem. Try again later, or add the account in the Plan&Ride Android app.",
+  ids_login_rejected: "eshop.idsbbsk.sk didn't accept this email or password.",
+
+  color_hex: 'Hex code', color_use: 'Use',
+
   share_back: 'Show them where I am', share_accepted_loc: 'They see your bus and where you are until you stop following.',
 
   share_how: 'Send a link anyone can open, or show a one-time code to tell someone: you see their name and choose whether they get your bus.',
@@ -41,7 +46,7 @@ const en = {
   install_android_1: 'Tap the ⋮ menu in your browser.', install_android_2: 'Choose Install app (or Add to Home screen).', install_button: 'Install app',
   install_note: 'It must run from the Home Screen to work correctly.',
   login_sub: "Use the email and password of your sadzv.qrbus.me account.", email: 'Email', password: 'Password', login: 'Sign in', logging_in: 'Signing in…',
-  login_browse: 'Browse departures without signing in', login_disclaimer: 'Unofficial client for sadzv.qrbus.me. Not affiliated with EMtest. Your password stays on this device.',
+  login_browse: 'Browse departures without signing in', login_disclaimer: 'Unofficial client for sadzv.qrbus.me and eshop.idsbbsk.sk. Not affiliated with EMtest. Your password stays on this device.',
   login_failed: 'Sign-in failed (%1)', sign_in: 'Sign in',
   lock_title: 'Enter your PIN', lock_wrong: 'Wrong PIN. %1 tries left.', lock_wait: 'Too many tries. Wait %1 s.', unlock: 'Unlock', lock_forgot: "Forgot PIN? Remove the account",
   ticket_ready: 'Ticket ready', ticket_refresh_in: 'New code in %1 s', ticket_connecting: 'Connecting…', ticket_reconnecting: 'Session expired, reconnecting…',
@@ -182,6 +187,11 @@ const en = {
 };
 
 const sk = {
+  ids_robot_check: 'eshop.idsbbsk.sk chce overiť, že nie ste robot, preto sa k nemu webová verzia teraz nevie prihlásiť. E-mail ani heslo neboli problém. Skúste to neskôr alebo si účet pridajte v aplikácii Plan&Ride pre Android.',
+  ids_login_rejected: 'eshop.idsbbsk.sk neprijal tento e-mail alebo heslo.',
+
+  color_hex: 'Hex kód', color_use: 'Použiť',
+
   share_back: 'Ukázať im, kde som', share_accepted_loc: 'Vidí váš spoj a kde ste, kým sledovanie neukončíte.',
 
   share_how: 'Pošlite odkaz, ktorý otvorí ktokoľvek, alebo ukážte jednorazový kód a povedzte ho niekomu: uvidíte jeho meno a vyberiete, či váš spoj dostane.',
@@ -223,7 +233,7 @@ const sk = {
   install_android_1: 'Ťuknite na menu ⋮ v prehliadači.', install_android_2: 'Zvoľte Inštalovať aplikáciu (alebo Pridať na plochu).', install_button: 'Inštalovať aplikáciu',
   install_note: 'Aby fungoval správne, musí bežať z plochy.',
   login_sub: "Použite e-mail a heslo k účtu sadzv.qrbus.me.", email: 'E-mail', password: 'Heslo', login: 'Prihlásiť sa', logging_in: 'Prihlasuje sa…',
-  login_browse: 'Pozrieť odchody bez prihlásenia', login_disclaimer: 'Neoficiálny klient pre sadzv.qrbus.me. Nie je spojený s EMtest. Heslo zostáva v tomto zariadení.',
+  login_browse: 'Pozrieť odchody bez prihlásenia', login_disclaimer: 'Neoficiálny klient pre sadzv.qrbus.me a eshop.idsbbsk.sk. Nie je spojený s EMtest. Heslo zostáva v tomto zariadení.',
   login_failed: 'Prihlásenie zlyhalo (%1)', sign_in: 'Prihlásiť sa',
   lock_title: 'Zadajte PIN', lock_wrong: 'Nesprávny PIN. Zostáva %1 pokusov.', lock_wait: 'Príliš veľa pokusov. Počkajte %1 s.', unlock: 'Odomknúť', lock_forgot: "Zabudli ste PIN? Odstrániť účet",
   ticket_ready: 'Lístok je pripravený', ticket_refresh_in: 'Nový kód o %1 s', ticket_connecting: 'Pripája sa…', ticket_reconnecting: 'Relácia vypršala, znova sa pripája…',

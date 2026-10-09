@@ -568,6 +568,29 @@ assert traced["traced"] and len(traced["points"]) == 3 and traced["points"][1] =
 assert call("/admin/api/map/segment/reset", {"from": "town as", "to": "town park"}, cookie)[0] == 200
 assert call("/admin/api/map/stop/reset", {"id": "town park"}, cookie)[0] == 200 and tt.lat[tt.by_id["town park"]] == 48.71
 assert call("/admin/api/map/vehicles?bbox=48,18,49.5,20.5", cookie=cookie)[0] == 200
+# Stations set up by hand: an extra place where line 101 stops, a zone, and a central station with a sub-station.
+place = {"label": "Smer centrum", "lat": 48.7105, "lon": 19.1215, "lines": "101"}
+st_ = json.loads(call("/admin/api/map/station", {"id": "town park", "places": [place], "zone": {"type": "circle", "lat": 48.71, "lon": 19.12, "radius": 150}}, cookie)[2])
+assert st_["places"][0]["lines"] == ["101"] and st_["zone"]["radius"] == 150, st_
+a1 = tt.trip(now_bus[0]["tripId"])
+park = next(x for x in a1["stops"] if x["name"] == "Town, Park")
+assert (park["lat"], park["lon"], park["platform"]) == (48.7105, 19.1215, "Smer centrum") and park["zone"]["type"] == "circle", park
+assert tt.near(48.7108, 19.1208, 50)[0]["meters"] == 0, "inside the zone counts as at the stop"
+assert call("/admin/api/map/station", {"id": "town park", "zone": {"type": "polygon", "points": [[48.7, 19.1]]}}, cookie)[0] == 400
+village_id = tt.station_ids[village]
+assert call("/admin/api/map/child", {"parent": "town as", "child": village_id, "lines": "101"}, cookie)[0] == 400, "central first"
+assert json.loads(call("/admin/api/map/station", {"id": "town as", "central": True}, cookie)[2])["central"]
+fam = json.loads(call("/admin/api/map/child", {"parent": "town as", "child": village_id, "label": "Platform 2", "lines": "101"}, cookie)[2])
+assert fam["children"][0]["id"] == village_id and fam["children"][0]["label"] == "Platform 2", fam
+board = tt.departures([tt.by_id["town as"]], at("05:50"), 10)
+assert board[0]["stop"]["id"] == village_id and board[0]["platform"] == "Platform 2", "the central station lists its sub-station's buses"
+a1 = tt.trip(board[0]["tripId"])
+assert a1["stops"][0]["central"]["id"] == "town as" and a1["stops"][0]["platform"] == "Platform 2", a1["stops"][0]
+rebuilt = timetable.Timetable({"a": os.path.join(folder, "a.zip"), "b": os.path.join(folder, "b.zip")}, today=datetime.date(2026, 9, 29))
+assert rebuilt.platform_for(rebuilt.by_id["town park"], "101")[2] == "Smer centrum" and rebuilt.by_id["town as"] in rebuilt.central, "kept through a rebuild"
+assert json.loads(call("/admin/api/map/station", {"id": "town as", "central": False}, cookie)[2])["children"] == [], "not central: no sub-stations"
+call("/admin/api/map/station", {"id": "town park", "places": [], "zone": None}, cookie)
+assert tt.platform_for(tt.by_id["town park"], "101") is None
 
 # ---- city buses from sadzv live data: direct buses between stops the timetable doesn't serve
 import sadzv  # noqa: E402

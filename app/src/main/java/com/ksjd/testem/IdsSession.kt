@@ -174,7 +174,10 @@ class IdsSession(private val email: String, private val password: String) {
             val json = runCatching { JsonParser.parseString(response.body?.string().orEmpty()).asJsonObject }.getOrNull()
                 ?: throw IOException("Login answer not understood")
             if (json.get("loginSuccess")?.asBoolean != true) {
-                android.util.Log.w("IdsSession", "login refused: ${json.keySet()} ${json.get("errors") ?: ""}")
+                val said = json.get("errors")?.toString().orEmpty()
+                android.util.Log.w("IdsSession", "login refused: ${json.keySet()} $said")
+                // EM-0050: "confirm you're not a robot" (a CAPTCHA) isn't a wrong password.
+                if (said.contains("robot", ignoreCase = true) || said.contains("captcha", ignoreCase = true)) throw IOException("IDS BBSK robot check")
                 throw LoginRejectedException()
             }
         }

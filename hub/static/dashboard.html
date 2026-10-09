@@ -202,6 +202,31 @@
   .bus-icon.late { background: #C77700; }
   .bus-icon.very { background: #C0392B; }
   .vertex { background: #fff; border: 2px solid #1D4FB8; border-radius: 50%; }
+  .map-side h3 { font-size: 15px; margin: 16px 0 4px; }
+  .map-side .input { padding: 5px 8px; font-size: 14px; min-width: 0; }
+  .child-row { border-top: 1px solid var(--line); padding: 6px 0; display: grid; gap: 6px; }
+  .place-row { border-top: 1px solid var(--line); padding: 6px 0; display: grid; gap: 6px; }
+  .place-row .row { margin: 0; }
+  .lines-pick { display: grid; gap: 4px; }
+  #snap-progress progress { width: 100%; height: 10px; accent-color: var(--ink); }
+  .lines-pick details { border: 1px solid var(--line); border-radius: 3px; padding: 4px 8px; background: var(--paper); }
+  .lines-pick summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  .lines-pick details[open] { max-height: 280px; overflow-y: auto; }
+  .pick { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 14px; }
+  .pick input { flex: none; }
+  .pick-tools { display: flex; gap: 6px; margin: 6px 0; }
+  @media (max-width: 900px) {
+    /* Phones: the map stays at the top (pinned, over the menu) while the panel under it scrolls. */
+    .map-wrap { display: block; height: auto; }
+    #map { position: sticky; top: 0; z-index: 6; height: 46dvh; border-bottom: 2px solid var(--line); }
+    .map-side { border-left: 0; overflow: visible; min-height: 60dvh; }
+    .page-head .legend { display: flex; flex-wrap: wrap; gap: 4px 0; }
+    .map-side .row { flex-wrap: wrap; }
+    .map-side button { padding: 8px 12px; }
+    .map-side .input { font-size: 16px; } /* phones zoom into smaller fields */
+    .leaflet-touch .leaflet-control-zoom a { width: 36px; height: 36px; line-height: 36px; }
+  }
+  .child-row p { margin: 4px 0; }
 </style>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -285,7 +310,7 @@ async function route() {
   try {
     if (page === "community") return await renderCommunity(arg);
     if (page === "timetable") return await renderTimetable();
-    if (page === "map") return renderMap();
+    if (page === "map") return renderMap(arg ? decodeURIComponent(arg) : null);
     if (page === "settings") return await renderSettings(arg);
     if (page === "templates") return await renderTemplates(arg);
     if (page === "site") return await renderSite(arg);
@@ -544,7 +569,9 @@ let ttPoll = null;
 
 let mapState = null;
 
-function renderMap() {
+function renderMap(stationId = null) {
+  // Changing only the station in the address (#map/<id>) keeps the map, and opens that station.
+  if (stationId && mapState && $("#map")) return showStation(stationId, true);
   clearInterval(mapState?.timer);
   view.innerHTML = `
     <div class="page-head"><h1>Map</h1><span class="muted small legend">
@@ -561,6 +588,8 @@ function renderMap() {
   sideHelp();
   const load = () => { loadStops(); loadBuses(); };
   map.on("moveend", load);
+  if (stationId) showStation(stationId, true);
+  map.on("click", (e) => mapState.mapClick?.(e));
   load();
   // Buses move: refresh while the map is the page shown.
   mapState.timer = setInterval(() => { if (location.hash.startsWith("#map")) loadBuses(); else clearInterval(mapState.timer); }, 10000);
@@ -574,7 +603,8 @@ function bbox() {
 function sideHelp() {
   $("#map-side").innerHTML = `<h2>Map</h2>
     <p class="muted">Buses on the road now: green ones are where riders' phones or reports put them, grey ones where the timetable does. Stops show from zoom 14.</p>
-    <p class="muted"><b>Move a stop:</b> click it, then drag it where it really is. The place is kept through every timetable update (by its id, or its name nearby if renamed).</p>
+    <p class="muted"><b>A stop:</b> click it to move it, give it more places (with the lines that stop at each), a zone (circle or shape), or make it a central station whose platforms are other stops. All of it is kept through every timetable update.</p>
+    <p class="muted small">Purple dots: extra places. Green ring: central station; green dots and dashed lines: its platforms. Shaded: zones.</p>
     <p class="muted"><b>Road traces:</b> click a bus to see its trip. Snap it to the roads (OpenStreetMap routing), or click a part between two stops to draw it by hand: drag the points, click the map to add one, right-click a point to remove it.</p>`;
 }
 
@@ -583,12 +613,280 @@ async function loadStops() {
   stops.clearLayers();
   if (map.getZoom() < 14) return;
   const r = await api("map/stations?bbox=" + bbox());
+  const at = Object.fromEntries(r.stations.map((s) => [s.id, s]));
   for (const s of r.stations) {
-    const m = L.circleMarker([s.lat, s.lon], { radius: 6, color: "#fff", weight: 2, fillColor: s.moved ? "#FFB21E" : "#1D4FB8", fillOpacity: 1 });
-    m.bindTooltip(esc(s.name));
-    m.on("click", () => editStop(s));
+    // What was set up by hand: the zone, extra places, and the line to the central station.
+    if (s.zone) stops.addLayer(zoneLayer(s.zone, { interactive: false }));
+    for (const p of s.places || []) {
+      stops.addLayer(L.circleMarker([p.lat, p.lon], { radius: 4, color: "#fff", weight: 1, fillColor: "#7C3AED", fillOpacity: 1 })
+        .bindTooltip(esc([s.name, p.label, (p.lines || []).join(", ")].filter(Boolean).join(" · "))));
+      stops.addLayer(L.polyline([[s.lat, s.lon], [p.lat, p.lon]], { color: "#7C3AED", weight: 1, dashArray: "3 4", interactive: false }));
+    }
+    if (s.parent && at[s.parent]) stops.addLayer(L.polyline([[s.lat, s.lon], [at[s.parent].lat, at[s.parent].lon]], { color: "#0F766E", weight: 2, dashArray: "6 5", interactive: false }));
+    // bubblingMouseEvents: a click on a stop isn't also a click on the map (adding a place, a zone corner).
+    const m = L.circleMarker([s.lat, s.lon], { bubblingMouseEvents: false, radius: s.central ? 9 : 6, color: s.central ? "#0F766E" : "#fff", weight: s.central ? 4 : 2,
+      fillColor: s.moved ? "#FFB21E" : s.parent ? "#0F766E" : "#1D4FB8", fillOpacity: 1 });
+    m.bindTooltip(esc(s.name) + (s.central ? " (central)" : "") + (s.parent && at[s.parent] ? ` (platform of ${esc(at[s.parent].name)})` : ""));
+    m.on("click", () => stopClicked(s));
     stops.addLayer(m);
   }
+}
+
+function zoneLayer(z, options = {}) {
+  const style = { color: "#0F766E", weight: 2, fillOpacity: 0.12, ...options };
+  return z.type === "circle" ? L.circle([z.lat, z.lon], { radius: z.radius, ...style }) : L.polygon(z.points, style);
+}
+
+/** A stop clicked: its panel, or (choosing a sub-station for a central station) that stop becomes one. */
+function stopClicked(s) {
+  if (mapState.pick) return mapState.pick(s);
+  showStation(s.id);
+}
+
+/**
+ * A station's panel: move it; extra places (each may say which lines board there); a zone (circle or drawn shape);
+ * central station with sub-stations (other stops that are its platforms for some lines). Everything survives timetable updates.
+ */
+async function showStation(id, center = false) {
+  const { map } = mapState;
+  endEditing();
+  const st = await api("map/station?id=" + encodeURIComponent(id));
+  if (center) map.setView([st.lat, st.lon], 17);
+  // The address names the station: a link to it, and reload keeps it open.
+  history.replaceState(null, "", "#map/" + encodeURIComponent(st.id));
+  const layer = L.layerGroup().addTo(map);
+  mapState.editing = { layer, cleanup: [] };
+  const side = $("#map-side");
+  const lines = (l) => (l || []).join(", ");
+  side.innerHTML = `<h2>${esc(st.name)}</h2>
+    <p class="muted small">${esc(st.id)}${st.moved ? " · moved by hand" : ""}${st.central ? " · central station" : ""}${st.parent ? ` · platform of <a href="#" data-open="${esc(st.parent.id)}">${esc(st.parent.name)}</a>` : ""}</p>
+    <h3>Position</h3>
+    <div class="row"><button id="st-move">Move</button>${st.moved ? '<button id="st-unmove">Back to the timetable\'s place</button>' : ""}</div>
+    <h3>Places</h3>
+    <p class="muted small">More places for this station (e.g. each side of the road, or a stand further away). Lines: which buses stop there (empty: just another place).</p>
+    <datalist id="dir-options">${directionOptions(st.serving)}</datalist>
+    <div id="st-places">${st.places.map((p, i) => placeRow(p, i, st.serving)).join("")}</div>
+    <div class="row"><button id="st-add-place">Add a place (click the map)</button><button class="primary" id="st-save-places">Save places</button></div>
+    <h3>Zone</h3>
+    <p class="muted small">The area that counts as this station (being in it is being at the stop).</p>
+    <div class="row"><button data-zone="circle">Circle</button><button data-zone="polygon">Draw a shape</button>${st.zone ? '<button data-zone="none">Remove zone</button>' : ""}</div>
+    <div id="st-zone-edit"></div>
+    <h3>Central station</h3>
+    <label class="row"><input type="checkbox" id="st-central" ${st.central ? "checked" : ""} ${st.parent ? "disabled" : ""}> Central station: other stops are its platforms</label>
+    <div id="st-children">${st.central ? `<p class="muted small">${st.children.length} sub-station(s)</p>${st.children.map((c) => childRow(c, st.serving)).join("") || '<p class="muted small">No sub-stations yet.</p>'}
+      <div class="row"><button id="st-add-child">Add a sub-station (click a stop on the map)</button></div>` : ""}</div>
+    <div class="row"><button id="st-close">Close</button></div>`;
+
+  // Draw what's set up, editable.
+  const placeMarkers = [];
+  const addPlaceMarker = (p) => {
+    const m = L.marker([p.lat, p.lng ?? p.lon], { draggable: true, icon: L.divIcon({ className: "vertex", iconSize: [14, 14] }) }).addTo(layer);
+    placeMarkers.push(m);
+    return m;
+  };
+  st.places.forEach((p) => addPlaceMarker(p));
+  if (st.zone) layer.addLayer(zoneLayer(st.zone));
+  L.circleMarker([st.lat, st.lon], { radius: 10, color: "#FFB21E", weight: 3, fill: false }).addTo(layer);
+
+  side.querySelectorAll("[data-open]").forEach((a) => a.onclick = (e) => { e.preventDefault(); showStation(a.dataset.open); });
+  bindLinePickers(side);
+  // On a phone the panel is under the pinned map: scroll so the panel starts right under it.
+  if (matchMedia("(max-width: 900px)").matches) window.scrollTo({ top: side.getBoundingClientRect().top + scrollY - $("#map").offsetHeight, behavior: "smooth" });
+  $("#st-close").onclick = () => { endEditing(); sideHelp(); history.replaceState(null, "", "#map"); };
+
+  // Position
+  $("#st-move").onclick = () => {
+    const m = L.marker([st.lat, st.lon], { draggable: true }).addTo(layer);
+    $("#st-move").outerHTML = '<button class="primary" id="st-move-save">Save position</button>';
+    $("#st-move-save").onclick = async () => { const p = m.getLatLng(); await api("map/stop", { id: st.id, lat: p.lat, lon: p.lng }); toast("Position saved"); loadStops(); showStation(st.id); };
+  };
+  if (st.moved) $("#st-unmove").onclick = async () => { await api("map/stop/reset", { id: st.id }); toast("Back where the timetable has it"); loadStops(); showStation(st.id); };
+
+  // Places
+  const placesBox = $("#st-places");
+  placesBox.onclick = (e) => {
+    const del = e.target.closest("[data-del-place]");
+    if (!del) return;
+    const i = Number(del.dataset.delPlace);
+    layer.removeLayer(placeMarkers[i]); placeMarkers[i] = null;
+    del.closest(".place-row").remove();
+  };
+  $("#st-add-place").onclick = () => {
+    toast("Click the map where the place is");
+    mapState.mapClick = (e) => {
+      mapState.mapClick = null;
+      const i = placeMarkers.length;
+      addPlaceMarker(e.latlng);
+      placesBox.insertAdjacentHTML("beforeend", placeRow({ label: "", lines: [] }, i, st.serving));
+    };
+  };
+  $("#st-save-places").onclick = async () => {
+    const places = [];
+    placesBox.querySelectorAll(".place-row").forEach((row) => {
+      const m = placeMarkers[Number(row.dataset.i)];
+      if (!m) return;
+      const p = m.getLatLng();
+      places.push({ lat: p.lat, lon: p.lng, label: $("[data-label]", row).value, lines: $("[data-lines]", row).value });
+    });
+    await api("map/station", { id: st.id, places });
+    toast("Places saved"); loadStops(); showStation(st.id);
+  };
+
+  // Zone
+  side.querySelectorAll("[data-zone]").forEach((b) => b.onclick = () => editZone(st, b.dataset.zone, layer));
+
+  // Central and sub-stations
+  $("#st-central").onchange = async (e) => {
+    if (!e.target.checked && st.children.length && !confirm("Its sub-stations become ordinary stops again. Continue?")) { e.target.checked = true; return; }
+    await api("map/station", { id: st.id, central: e.target.checked });
+    loadStops(); showStation(st.id);
+  };
+  if (st.central) {
+    $("#st-add-child").onclick = () => {
+      toast("Click the stop that is one of its platforms");
+      mapState.pick = async (child) => {
+        mapState.pick = null;
+        if (child.id === st.id) return toast("That's the central station itself");
+        await api("map/child", { parent: st.id, child: child.id, label: "", lines: "" });
+        toast(child.name + " is now a platform of " + st.name); loadStops(); showStation(st.id);
+      };
+    };
+    $("#st-children").onclick = async (e) => {
+      const row = e.target.closest(".child-row");
+      if (!row) return;
+      if (e.target.closest("[data-child-save]")) {
+        await api("map/child", { parent: st.id, child: row.dataset.id, label: $("[data-label]", row).value, lines: $("[data-lines]", row).value });
+        toast("Saved"); loadStops();
+      }
+      if (e.target.closest("[data-child-remove]")) { await api("map/child/remove", { child: row.dataset.id }); loadStops(); showStation(st.id); }
+      if (e.target.closest("[data-open]")) { e.preventDefault(); showStation(row.dataset.id); }
+    };
+  }
+}
+
+/**
+ * Lines as a writable field plus a tick list of the lines that stop there (with where they go); ticking adds or
+ * removes a line in the field, typing works too.
+ */
+function linesPicker(chosen, serving) {
+  const picked = new Set(chosen || []);
+  const extra = [...picked].filter((l) => !serving.lines.some((x) => x.line === l));
+  const options = [...serving.lines, ...extra.map((line) => ({ line, headsigns: [] }))];
+  return `<div class="lines-pick"><input class="input" data-lines placeholder="Lines (34, 60101)" value="${esc([...picked].join(", "))}">
+    <details><summary>Choose lines${options.length ? ` (${options.length})` : ""}</summary>
+      <div class="pick-tools"><button type="button" data-all>All</button><button type="button" data-none>None</button></div>
+      ${options.map((o) => `<label class="pick"><input type="checkbox" value="${esc(o.line)}" ${picked.has(o.line) ? "checked" : ""}>
+        <b>${esc(o.line)}</b> <span class="muted small">${esc(o.headsigns.join(", "))}</span></label>`).join("") || '<p class="muted small">No timetable lines stop here.</p>'}
+    </details></div>`;
+}
+
+/** Keeps a lines picker's field and ticks in step (one handler for the whole panel). */
+function bindLinePickers(root) {
+  const sync = (box) => {
+    const field = $("[data-lines]", box);
+    const typed = field.value.split(/[,\s]+/).filter(Boolean);
+    const listed = [...box.querySelectorAll(".pick input")].map((c) => c.value);
+    const ticked = [...box.querySelectorAll(".pick input:checked")].map((c) => c.value);
+    field.value = [...typed.filter((l) => !listed.includes(l)), ...ticked].join(", ");
+  };
+  root.addEventListener("change", (e) => {
+    const box = e.target.closest(".lines-pick");
+    if (!box) return;
+    if (e.target.matches("[data-lines]")) {
+      const typed = new Set(e.target.value.split(/[,\s]+/).filter(Boolean));
+      box.querySelectorAll(".pick input").forEach((c) => (c.checked = typed.has(c.value)));
+    } else sync(box);
+  });
+  root.addEventListener("click", (e) => {
+    const box = e.target.closest(".lines-pick");
+    if (!box || !e.target.matches("[data-all], [data-none]")) return;
+    box.querySelectorAll(".pick input").forEach((c) => (c.checked = e.target.matches("[data-all]")));
+    sync(box);
+  });
+}
+
+/** Suggestions for a place's name: "Smer <where its buses go>". */
+function directionOptions(serving) {
+  const towns = new Set();
+  serving.lines.forEach((l) => l.headsigns.forEach((h) => towns.add(h)));
+  return [...towns].sort().map((h) => `<option value="Smer ${esc(h)}">`).join("");
+}
+
+/** Platform suggestions: the timetable's platform numbers here, then 1 to 30. */
+function platformOptions(...servings) {
+  const codes = new Set(servings.flatMap((x) => x.platforms));
+  for (let n = 1; n <= 30; n++) codes.add(String(n));
+  return [...codes].sort((a, b) => a.padStart(4, "0").localeCompare(b.padStart(4, "0"))).map((c) => `<option value="Nástupište ${esc(c)}">`).join("");
+}
+
+function placeRow(p, i, serving) {
+  return `<div class="place-row" data-i="${i}">
+    <div class="row"><input class="input" data-label list="dir-options" placeholder="Name (e.g. Smer centrum)" value="${esc(p.label)}" style="flex:1">
+      <button data-del-place="${i}" title="Remove this place">✕</button></div>
+    ${linesPicker(p.lines, serving)}</div>`;
+}
+
+function childRow(c, parentServing) {
+  return `<div class="child-row" data-id="${esc(c.id)}"><p><a href="#" data-open>${esc(c.name)}</a></p>
+    <input class="input" data-label list="pf-${esc(c.id)}" placeholder="Platform (e.g. Nástupište 5)" value="${esc(c.label)}">
+    <datalist id="pf-${esc(c.id)}">${platformOptions(c.serving, parentServing)}</datalist>
+    ${linesPicker(c.lines, c.serving.lines.length ? c.serving : parentServing)}
+    <div class="row"><button class="primary" data-child-save>Save</button><button data-child-remove>Remove</button></div></div>`;
+}
+
+/** The station's zone: a circle (drag its centre, set the radius) or a shape (click the map for each corner). */
+function editZone(st, kind, layer) {
+  const box = $("#st-zone-edit");
+  if (kind === "none") {
+    api("map/station", { id: st.id, zone: null }).then(() => { toast("Zone removed"); loadStops(); showStation(st.id); });
+    return;
+  }
+  if (kind === "circle") {
+    const z = st.zone?.type === "circle" ? st.zone : { lat: st.lat, lon: st.lon, radius: 80 };
+    const circle = L.circle([z.lat, z.lon], { radius: z.radius, color: "#0F766E", fillOpacity: 0.15 }).addTo(layer);
+    const center = L.marker([z.lat, z.lon], { draggable: true }).addTo(layer);
+    center.on("drag", () => circle.setLatLng(center.getLatLng()));
+    box.innerHTML = `<div class="row"><label>Radius <input class="input" type="number" id="zone-r" min="10" max="3000" value="${z.radius}" style="width:90px"> m</label>
+      <button class="primary" id="zone-save">Save circle</button></div>`;
+    $("#zone-r").oninput = (e) => circle.setRadius(Number(e.target.value) || 10);
+    $("#zone-save").onclick = async () => {
+      const c = center.getLatLng();
+      await api("map/station", { id: st.id, zone: { type: "circle", lat: c.lat, lon: c.lng, radius: Number($("#zone-r").value) } });
+      toast("Zone saved"); loadStops(); showStation(st.id);
+    };
+    return;
+  }
+  const points = (st.zone?.type === "polygon" ? st.zone.points : []).map((p) => L.latLng(p[0], p[1]));
+  const shape = L.polygon(points, { color: "#0F766E", fillOpacity: 0.15 }).addTo(layer);
+  const corners = L.layerGroup().addTo(layer);
+  const redraw = () => {
+    shape.setLatLngs(points);
+    corners.clearLayers();
+    points.forEach((p, i) => {
+      const v = L.marker(p, { draggable: true, icon: L.divIcon({ className: "vertex", iconSize: [12, 12] }) }).addTo(corners);
+      v.on("drag", (e) => { points[i] = e.target.getLatLng(); shape.setLatLngs(points); });
+      v.on("contextmenu", () => { points.splice(i, 1); redraw(); });
+    });
+  };
+  redraw();
+  mapState.mapClick = (e) => { points.push(e.latlng); redraw(); };
+  box.innerHTML = `<p class="muted small">Click the map for each corner; drag corners; right-click one to remove it.</p>
+    <div class="row"><button class="primary" id="zone-save">Save shape</button><button id="zone-clear">Start over</button></div>`;
+  $("#zone-clear").onclick = () => { points.length = 0; redraw(); };
+  $("#zone-save").onclick = async () => {
+    if (points.length < 3) return toast("A shape needs at least 3 corners");
+    mapState.mapClick = null;
+    await api("map/station", { id: st.id, zone: { type: "polygon", points: points.map((p) => [p.lat, p.lng]) } });
+    toast("Zone saved"); loadStops(); showStation(st.id);
+  };
+}
+
+/** Leave whatever the station panel was editing. */
+function endEditing() {
+  if (!mapState) return;
+  mapState.mapClick = null;
+  mapState.pick = null;
+  if (mapState.editing) { mapState.map.removeLayer(mapState.editing.layer); mapState.editing = null; }
 }
 
 async function loadBuses() {
@@ -606,25 +904,6 @@ async function loadBuses() {
   }
 }
 
-function editStop(s) {
-  const { map } = mapState;
-  const side = $("#map-side");
-  side.innerHTML = `<h2>${esc(s.name)}</h2><p class="muted small">${esc(s.id)}${s.moved ? " · moved by hand" : ""}</p>
-    <p class="muted">Drag the marker to where the stop really is, then save.</p>
-    <div class="row"><button class="primary" id="stop-save" disabled>Save place</button>${s.moved ? '<button id="stop-reset">Back to the timetable\'s place</button>' : ""}<button id="stop-close">Close</button></div>`;
-  const marker = L.marker([s.lat, s.lon], { draggable: true }).addTo(map);
-  marker.on("dragend", () => { $("#stop-save").disabled = false; });
-  const done = () => { map.removeLayer(marker); sideHelp(); loadStops(); };
-  $("#stop-close").onclick = done;
-  $("#stop-save").onclick = async () => {
-    const p = marker.getLatLng();
-    await api("map/stop", { id: s.id, lat: p.lat, lon: p.lng });
-    toast("Saved: " + s.name);
-    done();
-  };
-  if (s.moved) $("#stop-reset").onclick = async () => { await api("map/stop/reset", { id: s.id }); toast("Back where the timetable has it"); done(); };
-}
-
 async function showTripOnMap(tripId) {
   const t = await api("map/trip?id=" + encodeURIComponent(tripId));
   mapState.tripId = tripId;
@@ -633,12 +912,25 @@ async function showTripOnMap(tripId) {
   side.innerHTML = `<h2>${esc(t.line)} → ${esc(t.headsign)}</h2><p class="muted small">${esc(t.operator)} · ${esc(tripId)}</p>
     <p class="muted">${t.segments.filter((s) => s.traced).length} of ${t.segments.length} parts follow the roads. Click a part to draw it by hand.</p>
     <div class="row"><button class="primary" id="snap">Snap to roads</button><button id="snap-missing">Snap only the straight parts</button><button id="trip-close">Close</button></div>
+    <div id="snap-progress"></div>
     <ol class="small">${t.stops.map((s) => `<li>${esc(s.name)} <span class="muted">${new Date(s.departure).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></li>`).join("")}</ol>`;
+  // Part by part, with a progress bar: it takes about a second a part, and it should be clear it's working.
   const snap = async (keep) => {
-    $("#snap").disabled = $("#snap-missing").disabled = true;
-    toast("Snapping to roads: about a second a part…");
-    const r = await api("map/snap", { id: tripId, keep });
-    toast(`Snapped ${r.snapped} part(s)` + (r.failed ? `, ${r.failed} couldn't be routed` : ""));
+    const todo = t.segments.filter((x) => x.points.length >= 2 && !(keep && x.traced));
+    if (!todo.length) return toast("Every part already follows the roads");
+    side.querySelectorAll("button").forEach((b) => (b.disabled = true));
+    $("#snap-progress").innerHTML = `<p class="small"><span id="snap-text"></span></p><progress id="snap-bar" max="${todo.length}" value="0"></progress>`;
+    let done = 0, failed = 0, skipped = 0;
+    for (const [i, seg] of todo.entries()) {
+      $("#snap-text").textContent = `Snapping to roads: part ${i + 1} of ${todo.length}…`;
+      try {
+        const r = await api("map/snap", { id: tripId, keep, from: seg.from, to: seg.to });
+        done += r.snapped; failed += r.failed; skipped += r.snapped || r.failed ? 0 : 1;
+        if (r.trip) drawTrip(r.trip, false); // each part shows on the map as it's done
+      } catch (e) { failed++; }
+      $("#snap-bar").value = i + 1;
+    }
+    toast(`Snapped ${done} part(s)` + (failed ? `, ${failed} couldn't be routed` : "") + (skipped ? `, ${skipped} drawn by hand kept` : ""));
     showTripOnMap(tripId);
   };
   $("#snap").onclick = () => snap(false);
@@ -646,7 +938,7 @@ async function showTripOnMap(tripId) {
   $("#trip-close").onclick = () => { mapState.trip.clearLayers(); mapState.tripId = null; sideHelp(); };
 }
 
-function drawTrip(t) {
+function drawTrip(t, fit = true) {
   const { map, trip } = mapState;
   trip.clearLayers();
   const bounds = [];
@@ -658,7 +950,7 @@ function drawTrip(t) {
     bounds.push(...seg.points);
   });
   t.stops.forEach((s) => { if (s.lat != null) trip.addLayer(L.circleMarker([s.lat, s.lon], { radius: 5, color: "#fff", weight: 2, fillColor: "#14213D", fillOpacity: 1 }).bindTooltip(esc(s.name))); });
-  if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
+  if (bounds.length && fit) map.fitBounds(bounds, { padding: [30, 30] });
 }
 
 /** Draw one stop-to-stop part by hand: its inner points can be dragged, added (click the map) or removed (right-click). */

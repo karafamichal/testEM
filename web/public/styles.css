@@ -394,3 +394,18 @@ html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
 .pin-actions .btn, .pin-actions .text-btn { flex: 1; }
 .pin-actions .text-btn { border: 1.5px solid var(--line); border-radius: 12px; }
 .pin-forgot { align-self: center; font-size: 14px; font-weight: 500; color: var(--muted); }
+
+/* EM-0049: the colour picker */
+.color-dialog { padding: 20px 18px 14px; display: grid; gap: 12px; }
+.color-dialog h2 { margin: 0; }
+.cp-ready { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-ready .swatch-btn { width: 30px; height: 30px; }
+.cp-sv, .cp-hue { position: relative; border-radius: 10px; touch-action: none; cursor: pointer; }
+.cp-sv { height: 150px; }
+.cp-hue { height: 26px; background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.cp-dot { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); pointer-events: none; }
+.cp-hue .cp-dot { top: 50%; }
+.cp-row { display: flex; gap: 10px; align-items: flex-end; }
+.cp-row .field { flex: 1; }
+.cp-preview { width: 52px; height: 48px; border-radius: 12px; border: 1px solid var(--line); flex: none; }
+.swatch-btn.custom i { display: block; width: 14px; height: 14px; margin: auto; border-radius: 50%; border: 2px solid #fff; }

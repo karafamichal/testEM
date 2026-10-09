@@ -49,7 +49,13 @@ export async function idsLogin(email, password) {
   jar.store(res.headers.getSetCookie?.());
   const json = await res.json().catch(() => null);
   if (!json) throw new HttpError(502, 'IDS BBSK login answer not understood');
-  if (json.loginSuccess !== true) throw new HttpError(401, 'eshop.idsbbsk.sk did not accept this email or password');
+  if (json.loginSuccess !== true) {
+    // EM-0050: the shop sometimes asks to confirm "not a robot" (a CAPTCHA we can't and don't answer); that isn't a
+    // wrong password, so say what it is.
+    const said = (json.errors || []).map((e) => text(String(e))).join(' ');
+    if (/robot|captcha/i.test(said)) throw new HttpError(403, 'robot');
+    throw new HttpError(401, 'eshop.idsbbsk.sk did not accept this email or password');
+  }
   return jar;
 }
 
