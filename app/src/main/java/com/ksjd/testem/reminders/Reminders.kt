@@ -33,6 +33,11 @@ import kotlin.math.ceil
 /** Low-credit and expiry notifications. */
 object Reminders {
     private const val CHANNEL_ID = "account_alerts"
+    /** MainActivity extra from the low-credit alert's button: open the top-up. */
+    const val EXTRA_TOP_UP = "top_up"
+
+    /** "Add credit" tapped (the low-credit notice or alert): Account opens the top-up once the card is shown. */
+    val topUpRequested = kotlinx.coroutines.flow.MutableStateFlow(false)
     private const val WORK_NAME = "account_check"
     private const val DAY_MS = 24L * 60 * 60 * 1000
 
@@ -75,7 +80,8 @@ object Reminders {
                                 R.string.alert_low_credit_body,
                                 String.format(Locale.getDefault(), "%.2f", credit),
                                 card.currencySymbol.ifBlank { "€" }
-                            )
+                            ),
+                            topUp = true
                         )
                     }
                 } else if (credit != null) {
@@ -115,7 +121,7 @@ object Reminders {
         "discount" to card.discountValidTo
     ).filter { it.second > 0 }
 
-    private fun notify(context: Context, id: Int, title: String, body: String) {
+    private fun notify(context: Context, id: Int, title: String, body: String, topUp: Boolean = false) {
         if (!canNotify(context)) return
         val manager = context.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -133,14 +139,21 @@ object Reminders {
             Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_bus)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(intent)
             .setAutoCancel(true)
-            .build()
+        if (topUp) {
+            val add = PendingIntent.getActivity(
+                context, 1, Intent(context, MainActivity::class.java).putExtra(EXTRA_TOP_UP, true).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            builder.addAction(0, context.getString(R.string.topup_button), add)
+        }
+        val notification = builder.build()
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
     }
 }

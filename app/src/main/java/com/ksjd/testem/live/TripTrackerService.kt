@@ -99,7 +99,10 @@ object TripTracking {
     }
     private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     /** The watch settings changed on the phone: send the followed bus again with them. */
-    fun refreshWatch(context: Context) = refreshWidget(context)
+    fun refreshWatch(context: Context) {
+        refreshWidget(context)
+        context.applicationContext.let { app -> widgetScope.launch { WatchSync.sendTheme(app) } }
+    }
 
     /** The home-screen widget (EM-0017) and the watch app (EM-0041) show the followed bus too. */
     private fun refreshWidget(context: Context) {
@@ -438,7 +441,10 @@ class TripTrackerService : Service() {
         }
         if (riderListener != null) return
         val manager = getSystemService(android.location.LocationManager::class.java) ?: return
-        val listener = android.location.LocationListener { fix -> onRiderFix(fix) }
+        val listener = android.location.LocationListener { fix ->
+            Shares.publish(this@TripTrackerService, fix) // to whoever this bus is shared with by a code
+            onRiderFix(fix)
+        }
         runCatching {
             @Suppress("MissingPermission")
             manager.requestLocationUpdates(android.location.LocationManager.GPS_PROVIDER, 5_000L, 0f, listener, android.os.Looper.getMainLooper())
@@ -758,6 +764,7 @@ class TripTrackerService : Service() {
                 }
                 updateLocation(current, progress)
                 updateRiderTracking(current, fetched ?: detail, progress)
+                shareLocation()
                 val estimate = updateCatch(detail, progress)
                 show(current, detail, progress, catchLine(detail, progress))
                 sendAlerts(current, progress)
@@ -1014,8 +1021,9 @@ class TripTrackerService : Service() {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setContentIntent(contentIntent())
             .setAutoCancel(true)
-            // Account → Watch: alerts on the phone only. "Get off next" the watch app announces itself, with its own vibration.
-            .setLocalOnly(!prefs.getWatchAlerts() || (key == "alight" && WatchSync.watchApp && prefs.getWatchEnabled()))
+            // Account → Watch: alerts on the phone only. "Get off next" and "Leave now" the watch app announces itself,
+            // each with its own vibration.
+            .setLocalOnly(!prefs.getWatchAlerts() || (key in WATCH_OWN_ALERTS && WatchSync.watchApp && prefs.getWatchEnabled()))
             .build()
         NotificationManagerCompat.from(this).notifySafely(ALERT_ID_BASE + key.hashCode() % 1000, notification)
     }
@@ -1038,7 +1046,22 @@ class TripTrackerService : Service() {
         )
     }
 
+    /**
+     * Shared by a code: the people it's shared with see where the phone is. Live GPS covers it on the bus; before
+     * that (GPS off while walking) a location now and then, once a minute.
+     */
+    private suspend fun shareLocation() {
+        Shares.load(this)
+        if (Shares.outgoing.value.isEmpty()) return
+        val fix = lastFix?.takeIf { System.currentTimeMillis() - it.time < 60_000L }
+            ?: Locations.current(this, maxAgeMs = 60_000L)?.also { lastFix = it } ?: return
+        Shares.publish(this, fix)
+    }
+
     private fun finish() {
+        // Sharing by code ends with following.
+        val app = applicationContext
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { Shares.stopOutgoing(app) }
         stopRiderTracking()
         loop?.cancel()
         trip = null
@@ -1070,6 +1093,8 @@ class TripTrackerService : Service() {
         private const val STOP_RADIUS_M = 60
         /** Slower than this (m/s, about 9 km/h) the bus counts as stopped. */
         private const val MOVING_MPS = 2.5f
+        /** Alerts the watch app announces itself (the phone's copy stays off the watch). */
+        private val WATCH_OWN_ALERTS = setOf("alight", "catch_leave")
         /** Standing this long at a stop on the way, the rider got off there (no bus waits that long at a stop on the way). */
         private const val GOT_OFF_STANDING_MS = 4 * 60_000L
         /** Live GPS at the stop starts this long before the bus can come. */

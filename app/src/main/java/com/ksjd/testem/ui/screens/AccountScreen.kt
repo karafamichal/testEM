@@ -85,6 +85,10 @@ import com.ksjd.testem.ui.Format
 import com.ksjd.testem.ui.components.GroupDivider
 import com.ksjd.testem.ui.components.ListGroup
 import com.ksjd.testem.ui.components.ListRow
+import com.ksjd.testem.ui.components.ColorPickDialog
+import com.ksjd.testem.ui.components.ColorSwatch
+import com.ksjd.testem.ui.components.CustomColorSwatch
+import com.ksjd.testem.ui.components.hexOf
 import com.ksjd.testem.ui.components.Notice
 import com.ksjd.testem.ui.components.ScreenHeader
 import com.ksjd.testem.ui.components.SectionLabel
@@ -137,6 +141,11 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
     if (showSupport) SupportDialog { showSupport = false }
     var topUp by remember { mutableStateOf(false) }
     if (topUp && card != null) TopUpSheet(viewModel, card) { topUp = false }
+    // "Add credit" on the low-credit notice or alert: the top-up, once the card is shown (after unlocking).
+    val topUpRequested by com.ksjd.testem.reminders.Reminders.topUpRequested.collectAsState()
+    LaunchedEffect(topUpRequested, card != null) {
+        if (topUpRequested && card != null) { topUp = true; com.ksjd.testem.reminders.Reminders.topUpRequested.value = false }
+    }
 
     if (confirmRemove) {
         AlertDialog(
@@ -770,8 +779,25 @@ private val BackgroundChoices = listOf(0xFFF3EEE4, 0xFFE8F0E6, 0xFFE6EEF7, 0xFFF
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun AppearanceSettings(app: AppState, viewModel: AppViewModel) {
-    var background by rememberSaveable { mutableStateOf("") }
-    val bg = parseColorHex(background)
+    // Which colour the picker is choosing: "bg", or the new theme's "p", "s", "t".
+    var picking by rememberSaveable { mutableStateOf<String?>(null) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var primary by rememberSaveable { mutableStateOf<Long?>(null) }
+    var secondary by rememberSaveable { mutableStateOf<Long?>(null) }
+    var accent by rememberSaveable { mutableStateOf<Long?>(null) }
+    picking?.let { which ->
+        ColorPickDialog(
+            initial = when (which) { "bg" -> app.backgroundColor; "p" -> primary; "s" -> secondary; else -> accent },
+            title = stringResource(when (which) {
+                "bg" -> R.string.background_title; "p" -> R.string.primary_hex_label; "s" -> R.string.secondary_hex_label; else -> R.string.tertiary_hex_label
+            }),
+            onPick = { c ->
+                when (which) { "bg" -> viewModel.setBackgroundColor(c); "p" -> primary = c; "s" -> secondary = c; else -> accent = c }
+                picking = null
+            },
+            onDismiss = { picking = null }
+        )
+    }
 
     // EM-0042: light, dark or as the phone; and the app's own background colour.
     SectionLabel(stringResource(R.string.theme_mode_title))
@@ -789,36 +815,16 @@ private fun AppearanceSettings(app: AppState, viewModel: AppViewModel) {
     }
     SectionLabel(stringResource(R.string.background_title))
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // The ready colours, then any other one through the colour picker.
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            BackgroundChoices.forEach { color ->
-                Box(
-                    Modifier.size(30.dp)
-                        .background(if (app.backgroundColor == color) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, CircleShape)
-                        .padding(if (app.backgroundColor == color) 3.dp else 1.dp)
-                        .background(Color(color), CircleShape)
-                        .clickable { viewModel.setBackgroundColor(color) }
-                )
-            }
+            BackgroundChoices.forEach { color -> ColorSwatch(Color(color), selected = app.backgroundColor == color) { viewModel.setBackgroundColor(color) } }
+            CustomColorSwatch(app.backgroundColor?.takeIf { it !in BackgroundChoices }?.let { Color(it) }) { picking = "bg" }
         }
-        HexField(background, stringResource(R.string.background_hex_label), bg) { background = it }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { viewModel.setBackgroundColor(bg); background = "" }, enabled = bg != null, shape = RoundedCornerShape(12.dp)) {
-                Text(stringResource(R.string.background_use))
-            }
-            TextButton(onClick = { viewModel.setBackgroundColor(null) }, enabled = app.backgroundColor != null) {
-                Text(stringResource(R.string.background_reset))
-            }
+        TextButton(onClick = { viewModel.setBackgroundColor(null) }, enabled = app.backgroundColor != null) {
+            Text(stringResource(R.string.background_reset))
         }
         Text(stringResource(R.string.background_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-
-    var name by rememberSaveable { mutableStateOf("") }
-    var primary by rememberSaveable { mutableStateOf("") }
-    var secondary by rememberSaveable { mutableStateOf("") }
-    var accent by rememberSaveable { mutableStateOf("") }
-    val p = parseColorHex(primary)
-    val s = parseColorHex(secondary)
-    val t = parseColorHex(accent)
 
     SectionLabel(stringResource(R.string.theme_presets_title))
     ListGroup {
@@ -844,13 +850,14 @@ private fun AppearanceSettings(app: AppState, viewModel: AppViewModel) {
     SectionLabel(stringResource(R.string.create_preset_title))
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.preset_name_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        HexField(primary, stringResource(R.string.primary_hex_label), p) { primary = it }
-        HexField(secondary, stringResource(R.string.secondary_hex_label), s) { secondary = it }
-        HexField(accent, stringResource(R.string.tertiary_hex_label), t) { accent = it }
+        ColorRow(stringResource(R.string.primary_hex_label), primary) { picking = "p" }
+        ColorRow(stringResource(R.string.secondary_hex_label), secondary) { picking = "s" }
+        ColorRow(stringResource(R.string.tertiary_hex_label), accent) { picking = "t" }
+        val p = primary; val s = secondary; val t = accent
         Button(
             onClick = {
-                viewModel.addThemePreset(name.trim(), p!!, s!!, t!!)
-                name = ""; primary = ""; secondary = ""; accent = ""
+                if (p != null && s != null && t != null) viewModel.addThemePreset(name.trim(), p, s, t)
+                name = ""; primary = null; secondary = null; accent = null
             },
             enabled = name.isNotBlank() && p != null && s != null && t != null,
             modifier = Modifier.fillMaxWidth(),
@@ -859,18 +866,20 @@ private fun AppearanceSettings(app: AppState, viewModel: AppViewModel) {
     }
 }
 
+/** One colour of a new theme: its name and swatch; a tap opens the colour picker. */
 @Composable
-private fun HexField(value: String, label: String, parsed: Long?, onChange: (String) -> Unit) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = { if (it.length <= 9) onChange(it) },
-        label = { Text(label) },
-        singleLine = true,
-        placeholder = { Text("#1D4FB8") },
-        trailingIcon = { if (parsed != null) Swatch(Color(parsed)) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-        modifier = Modifier.fillMaxWidth()
-    )
+private fun ColorRow(label: String, color: Long?, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (color != null) ColorSwatch(Color(color), size = 32, onClick = onClick) else CustomColorSwatch(null, size = 32, onClick = onClick)
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(color?.let { hexOf(Color(it)) } ?: stringResource(R.string.color_choose), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 @Composable
@@ -882,17 +891,6 @@ private fun Swatch(color: Color) {
             .padding(2.dp)
             .background(color, CircleShape)
     )
-}
-
-private fun parseColorHex(raw: String): Long? {
-    val cleaned = raw.trim().removePrefix("#")
-    val normalized = when (cleaned.length) {
-        6 -> "FF$cleaned"
-        8 -> cleaned
-        else -> return null
-    }
-    if (!normalized.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
-    return normalized.toLongOrNull(16)
 }
 
 @Composable

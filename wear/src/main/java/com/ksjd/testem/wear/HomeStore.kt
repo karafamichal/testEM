@@ -25,7 +25,9 @@ data class WatchHome(
     val favourites: List<Board>,
     val nearby: List<Board>,
     /** The phone could tell where it is (nearby departures need it). */
-    val nearbyLocated: Boolean
+    val nearbyLocated: Boolean,
+    /** The next connection on the route home set on the phone (Account → Watch), null without one. */
+    val homeTrip: Trip? = null
 ) {
     /** A starred journey ("j:…") or a regular ride ("r:…") that can be started from the watch. */
     data class Trip(val id: String, val title: String, val sub: String, val lines: String, val atMs: Long)
@@ -35,15 +37,16 @@ data class WatchHome(
     companion object {
         fun from(map: DataMap) = WatchHome(
             updatedMs = map.getLong("updated", 0L),
-            trips = map.getDataMapArrayList("trips").orEmpty().map {
-                Trip(it.getString("id", ""), it.getString("title", ""), it.getString("sub", ""), it.getString("lines", ""), it.getLong("at", 0L))
-            },
+            trips = map.getDataMapArrayList("trips").orEmpty().map(::trip),
             creditSadzv = if (map.containsKey("creditSadzv")) map.getDouble("creditSadzv") else null,
             creditIds = if (map.containsKey("creditIds")) map.getDouble("creditIds") else null,
             favourites = boards(map.getDataMapArrayList("favourites")),
             nearby = boards(map.getDataMapArrayList("nearby")),
-            nearbyLocated = map.getBoolean("nearbyLocated", false)
+            nearbyLocated = map.getBoolean("nearbyLocated", false),
+            homeTrip = map.getDataMap("home")?.let { trip(it) }
         )
+
+        private fun trip(it: DataMap) = Trip(it.getString("id", ""), it.getString("title", ""), it.getString("sub", ""), it.getString("lines", ""), it.getLong("at", 0L))
 
         private fun boards(list: List<DataMap>?) = list.orEmpty().map { b ->
             Board(b.getString("name", ""), b.getInt("meters", -1), b.getDataMapArrayList("deps").orEmpty().map {
@@ -74,10 +77,7 @@ object HomeStore {
         context.prefs().edit().putString("home", Base64.encodeToString(map.toByteArray(), Base64.NO_WRAP)).apply()
         _state.value = WatchHome.from(map)
         applyLanguage(context, map.getString("lang", ""))
-        TileService.getUpdater(context).apply {
-            requestUpdate(FavouritesTile::class.java)
-            requestUpdate(CreditTile::class.java)
-        }
+        refreshTiles(context)
     }
 
     private fun Context.prefs() = getSharedPreferences("home", Context.MODE_PRIVATE)

@@ -1,6 +1,6 @@
 // Departures, stop boards, trip sheet and "follow this bus" for the web client.
 import { t, lang } from './i18n.js';
-import { $, $$, esc, api, apiJson, store, config, clock, countdown, delayChip, delayInfo, plate, toast, openSheet, closeOverlay, log } from './core.js';
+import { $, $$, esc, api, apiJson, store, config, clock, countdown, delayChip, delayInfo, plate, toast, openSheet, openPage, closeOverlay, log } from './core.js';
 import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, referenceAt, delayAt, nextCheckMs, stopPassDetector, earliestBoardingMs, LIVE_GPS_BEFORE_MS, RIDER_GPS_MAX_M, plannerLeg } from './logic.js';
 
 /** Helping with bus positions: 'off' | 'buttons' | 'auto' (earlier versions had an on/off switch). */
@@ -46,13 +46,14 @@ export function renderDepartures(el) {
   root = el;
   if (live.board) return renderBoard();
   el.innerHTML = `
-    <header class="screen-head"><h1>${t('departures_title')}</h1></header>
+    <header class="screen-head"><h1>${t('departures_title')}</h1><button class="text-btn" data-share-code>${t('share_enter_button')}</button></header>
     <div id="follow-slot-dep"></div>
     <div id="journey-bar-dep">${journeyBarHtml()}</div>
     <div class="search"><input type="search" id="stop-q" placeholder="${esc(t('search_stop'))}" value="${esc(live.query)}" autocomplete="off" aria-label="${esc(t('search_stop'))}"></div>
     <div id="dep-results"></div>`;
   const q = $('#stop-q', el);
   q.oninput = () => { live.query = q.value; renderResults(); };
+  $('[data-share-code]', el).onclick = enterShareCode;
   bindJourneyBar($('#journey-bar-dep', el));
   renderFollowSlot($('#follow-slot-dep', el));
   loadStops().then(renderResults);
@@ -296,6 +297,197 @@ const isLive = (d) => d?.positionSource === 'busGps' || d?.positionSource === 'r
 
 const sameRef = (a, b) => a && b && JSON.stringify(a) === JSON.stringify(b);
 
+const MAP_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="m15 5.1-6-2.1-6 2.3v15.6l6-2.3 6 2.1 6-2.3V2.8l-6 2.3Zm-1 13.5-4-1.4V5.4l4 1.4v11.8Z"/></svg>';
+const SHARE_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M18 16.1c-.8 0-1.4.3-2 .8l-7.1-4.2c.1-.2.1-.5.1-.7s0-.5-.1-.7l7-4.1c.5.5 1.2.8 2.1.8 1.7 0 3-1.3 3-3s-1.3-3-3-3-3 1.3-3 3c0 .2 0 .5.1.7l-7 4.1c-.5-.5-1.2-.8-2.1-.8-1.7 0-3 1.3-3 3s1.3 3 3 3c.8 0 1.6-.3 2.1-.8l7.1 4.2c-.1.2-.1.4-.1.6 0 1.6 1.3 2.9 2.9 2.9s2.9-1.3 2.9-2.9-1.3-2.9-2.9-2.9Z"/></svg>';
+
+/** The bus as the share payload (the same as the Android app's): only the bus and where it's ridden, nothing about the sharer. */
+const sharePayload = (trip) => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(
+  { ref: trip.ref, board: trip.boardingPlatformIds || [], alight: trip.alightOrder ?? null })))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+/**
+ * One side of a share over a WebSocket to emhub: status news and the other side's positions as they happen.
+ * Reconnects (2 s … 30 s) until closed.
+ */
+function shareSocket(side, id, token, onMessage) {
+  let ws = null, closed = false, wait = 2000;
+  const open = () => {
+    ws = new WebSocket(`${config.hubWs}/api/v1/shares/live?side=${side}&id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}`);
+    ws.onopen = () => { wait = 2000; };
+    ws.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch { /* not ours */ } };
+    ws.onclose = () => { if (!closed) { setTimeout(open, wait); wait = Math.min(wait * 2, 30000); } };
+  };
+  open();
+  return {
+    send: (obj) => { if (ws?.readyState === 1) ws.send(JSON.stringify(obj)); },
+    close: () => { closed = true; ws?.close(); },
+  };
+}
+const outSockets = {}; // share id -> socket, while following
+
+/** Who enters a share code: the name from the signed-in account (app.js sets it), editable. */
+export const shareName = { get: () => '' };
+
+/** Share a bus: a link anyone can open, or a one-time code; whoever enters it sends their name and the sharer accepts or declines. */
+function shareTrip(trip, destination) {
+  const body = openPage(t('share_trip'));
+  let made = null, timer = null;
+  const stop = () => clearInterval(timer);
+  const render = (state) => {
+    if (!made) {
+      body.innerHTML = `<p class="hint">${t('share_how')}</p><button class="btn wide" data-link>${t('share_link')}</button>
+        <button class="btn outline wide" data-code ${config.hub ? '' : 'disabled'}>${t('share_code')}</button><p class="error-text" hidden></p>`;
+      return;
+    }
+    const st = state?.status || 'waiting';
+    body.innerHTML = st === 'asked'
+      ? `<h3>${esc(t('share_asked', state.name))}</h3><p class="hint small">${t('share_asked_hint')}</p>
+         <button class="btn wide" data-answer="accept">${t('share_accept')}</button><button class="btn outline wide" data-answer="decline">${t('share_decline')}</button>`
+      : st === 'accepted' ? `<p>${esc(t('share_accepted', state.name))}</p>`
+      : st === 'declined' ? `<p>${t('share_declined_self')}</p>`
+      : st === 'expired' ? `<p>${t('share_expired')}</p>`
+      : `<p class="hint">${t('share_code_tell')}</p><p class="share-code">${esc(made.code.slice(0, 3) + ' ' + made.code.slice(3))}</p><p class="hint small">${t('share_code_valid')}</p>`;
+  };
+  render();
+  body.onclick = async (e) => {
+    if (e.target.closest('[data-link]')) {
+      const text = t('share_trip_text', trip.ref.line, destination, 'https://par.karafa.net/f?t=' + sharePayload(trip));
+      if (navigator.share) return navigator.share({ text }).catch(() => {});
+      await navigator.clipboard?.writeText(text).catch(() => {});
+      return toast(t('share_copied'));
+    }
+    if (e.target.closest('[data-code]')) {
+      const r = await api('/api/hub/shares', { trip: sharePayload(trip), label: `${trip.ref.line} → ${destination}` });
+      if (!r.ok) { const err = $('.error-text', body); err.textContent = t('share_code_failed'); err.hidden = false; return; }
+      made = r.json;
+      render();
+      const sock = shareSocket('owner', made.id, made.token, (m) => {
+        if (m.type !== 'status' || m.status === 'waiting') return;
+        if (!body.querySelector('[data-answer]') || m.status !== 'asked') render(m);
+      });
+      // Closed without an answer: the code is taken back.
+      timer = setInterval(() => {
+        if (document.body.contains(body)) return;
+        stop(); sock.close();
+        if (made && !body.dataset.answered) api(`/api/hub/shares/${made.id}/cancel`, { token: made.token });
+      }, 1000);
+    }
+    const a = e.target.closest('[data-answer]');
+    if (a && made) {
+      await api(`/api/hub/shares/${made.id}/${a.dataset.answer}`, { token: made.token });
+      body.dataset.answered = '1';
+      if (a.dataset.answer === 'accept') store.set('sharesOut', [...store.get('sharesOut', []), { id: made.id, token: made.token, name: $('h3', body)?.textContent || '' }]);
+      stop();
+      render({ status: a.dataset.answer === 'accept' ? 'accepted' : 'declined', name: $('h3', body)?.textContent || '' });
+      if (a.dataset.answer === 'decline') made = null;
+    }
+  };
+}
+
+/** A code someone told you: sent with your name; their bus opens once they accept. */
+function enterShareCode() {
+  const body = openPage(t('share_enter_title'));
+  body.innerHTML = `<label class="field"><span>${t('share_enter_code')}</span><input id="share-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label>
+    <label class="field"><span>${t('share_your_name')}</span><input id="share-name" maxlength="80" value="${esc(shareName.get())}"></label>
+    <p class="hint small">${t('share_enter_hint')}</p><button class="btn wide" id="share-send">${t('share_send')}</button><p class="error-text" hidden></p>`;
+  $('#share-send', body).onclick = async () => {
+    const code = $('#share-code', body).value.replace(/\D/g, ''), name = $('#share-name', body).value.trim();
+    const err = $('.error-text', body);
+    if (code.length !== 6 || !name) { err.textContent = t('share_code_wrong'); err.hidden = false; return; }
+    const r = await api('/api/hub/shares/claim', { code, name });
+    if (!r.ok) { err.textContent = t('share_code_wrong'); err.hidden = false; return; }
+    const claim = r.json;
+    body.innerHTML = `<p>${esc(t('share_waiting', claim.label))}</p><p class="hint"><span class="spinner"></span></p>`;
+    const sock = shareSocket('claim', claim.claimId, claim.token, (s) => {
+      if (s.type !== 'status' || s.status === 'asked') return;
+      sock.close();
+      if (s.status !== 'accepted') { body.innerHTML = `<p>${t('share_declined')}</p>`; return; }
+      try {
+        const p = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s.trip.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))));
+        closeOverlay('page');
+        store.set('sharesIn', [...store.get('sharesIn', []), { claimId: claim.claimId, token: claim.token, label: claim.label, line: p.ref.line, trip: p.ref.tripNumber }]);
+        openTrip(p.ref, { boardingPlatformIds: p.board || [], alightOrder: p.alight ?? null });
+      } catch { body.innerHTML = `<p>${t('share_bad_link')}</p>`; }
+    });
+  };
+}
+
+/**
+ * Where the bus is, on OpenStreetMap: the map's tiles around the route, its stops joined in order (passed ones dim), and
+ * the bus between the two stops it's between by its expected times. A plain picture (no map library): drag to move.
+ */
+async function openBusMap(ref, detail, alightOrder) {
+  const body = openPage(`${ref.line} → ${detail.destination || ref.destination}`);
+  body.innerHTML = '<p class="hint"><span class="spinner"></span></p>';
+  const full = detail.stops.every((x) => x.lat != null) ? detail : await loadTrip(ref, { withCoordinates: true }).catch(() => null);
+  const stops = (full?.stops || []).filter((x) => x.lat != null);
+  if (stops.length < 2) { body.innerHTML = `<div class="empty"><p>${t('map_unavailable')}</p></div>`; return; }
+  const incoming = store.get('sharesIn', []).findLast?.((x) => x.line === ref.line && x.trip === ref.tripNumber);
+  body.innerHTML = (incoming ? `<label class="row"><span class="row-title">${t('share_back')}</span><input type="checkbox" id="share-back"></label>` : '') +
+    '<div class="busmap"><div class="busmap-tiles"></div><svg class="busmap-route"></svg><p class="busmap-credit">© OpenStreetMap</p></div>';
+  const box = $('.busmap', body), tiles = $('.busmap-tiles', box), svg = $('.busmap-route', box);
+  const W = box.clientWidth, H = box.clientHeight;
+  const px = (lat, lon, z) => {
+    const n = 256 * 2 ** z, r = (lat * Math.PI) / 180;
+    return [((lon + 180) / 360) * n, ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n];
+  };
+  const lats = stops.map((x) => x.lat), lons = stops.map((x) => x.lon);
+  let z = 17;
+  while (z > 8) {
+    const [x1, y1] = px(Math.max(...lats), Math.min(...lons), z), [x2, y2] = px(Math.min(...lats), Math.max(...lons), z);
+    if (x2 - x1 < W * 0.85 && y2 - y1 < H * 0.85) break;
+    z--;
+  }
+  const [cx, cy] = px((Math.max(...lats) + Math.min(...lats)) / 2, (Math.max(...lons) + Math.min(...lons)) / 2, z);
+  let ox = cx - W / 2, oy = cy - H / 2; // the map's top-left corner, in world pixels
+  const draw = () => {
+    const tx0 = Math.floor(ox / 256), ty0 = Math.floor(oy / 256), tx1 = Math.floor((ox + W) / 256), ty1 = Math.floor((oy + H) / 256);
+    let html = '';
+    for (let x = tx0; x <= tx1; x++) for (let y = ty0; y <= ty1; y++) {
+      // referrerpolicy: OpenStreetMap's tile servers refuse requests without a Referer (the page's policy sends none).
+      html += `<img src="https://tile.openstreetmap.org/${z}/${x}/${y}.png" referrerpolicy="strict-origin-when-cross-origin" style="left:${x * 256 - ox}px;top:${y * 256 - oy}px" alt="">`;
+    }
+    tiles.innerHTML = html;
+    const p = tripProgress(full, { boardingPlatformIds: [], alightOrder });
+    const at = stops.map((x) => px(x.lat, x.lon, z)).map(([x, y]) => [x - ox, y - oy]);
+    const pos = Math.min(p.position, stops.length - 1), i = Math.floor(pos), f = pos - i, j = Math.min(i + 1, stops.length - 1);
+    const bus = [at[i][0] + (at[j][0] - at[i][0]) * f, at[i][1] + (at[j][1] - at[i][1]) * f];
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.innerHTML = `<polyline points="${at.map((q) => q.join(',')).join(' ')}" />
+      ${at.map((q, k) => `<circle class="${k <= pos ? 'passed' : ''} ${stops[k].order === alightOrder ? 'alight' : ''}" cx="${q[0]}" cy="${q[1]}" r="${stops[k].order === alightOrder ? 8 : 5}"><title>${esc(stops[k].name)}</title></circle>`).join('')}
+      <g class="bus" transform="translate(${bus[0]},${bus[1]})"><circle r="14"/><text y="5">${esc(ref.line)}</text></g>
+      ${people().map(([name, q]) => { const [x, y] = px(q.lat, q.lon, z); return `<g class="person" transform="translate(${x - ox},${y - oy})"><circle r="9"/><text y="-14">${esc(name)}</text></g>`; }).join('')}`;
+  };
+  // People sharing by a code: the sharer (here as the receiver), or those this phone shares its followed bus with.
+  const people = () => {
+    const fresh = (q) => q && Date.now() - q.at * 1000 < 5 * 60000;
+    const list = [];
+    if (incoming && fresh(sharePositions[incoming.claimId])) list.push([incoming.label.split(' · ')[0], sharePositions[incoming.claimId]]);
+    if (sameRef(follow?.ref, ref)) for (const sh of store.get('sharesOut', [])) if (fresh(sharePositions[sh.id])) list.push([sh.name, sharePositions[sh.id]]);
+    return list;
+  };
+  // The sharer's position live over a WebSocket while the map is open; ours back only with the switch on.
+  const sock = incoming && shareSocket('claim', incoming.claimId, incoming.token, (m) => {
+    if (m.type === 'position') { sharePositions[incoming.claimId] = m.position; draw(); }
+  });
+  const pollShare = () => {
+    if (!sock) return;
+    if (!document.body.contains(box)) return sock.close();
+    if ($('#share-back', body)?.checked) {
+      navigator.geolocation?.getCurrentPosition((pos) => sock.send({ type: 'position', lat: pos.coords.latitude, lon: pos.coords.longitude,
+        accuracy: Math.round(pos.coords.accuracy || 0) }), () => {}, { maximumAge: 20000 });
+    }
+    setTimeout(pollShare, 20000);
+  };
+  draw();
+  pollShare();
+  // Drag to look around; the bus moves on by the clock.
+  let drag = null;
+  box.onpointerdown = (e) => { drag = [e.clientX, e.clientY]; box.setPointerCapture(e.pointerId); };
+  box.onpointermove = (e) => { if (!drag) return; ox -= e.clientX - drag[0]; oy -= e.clientY - drag[1]; drag = [e.clientX, e.clientY]; draw(); };
+  box.onpointerup = () => { drag = null; };
+  const timer = setInterval(() => (document.body.contains(box) ? draw() : clearInterval(timer)), 15000);
+}
+
 function renderTripSheet(body = $('#sheet .sheet-body')) {
   if (!body || !sheetTrip) return;
   const s = sheetTrip;
@@ -322,7 +514,9 @@ function renderTripSheet(body = $('#sheet .sheet-body')) {
     }).join('')}</ol>`;
   }
   body.innerHTML = `
-    <div class="trip-head">${plate(s.ref.line, 'big')}<div><h3>${esc(detail?.destination || s.ref.destination)}</h3><div>${statusLine}</div></div></div>
+    <div class="trip-head">${plate(s.ref.line, 'big')}<div class="trip-title"><h3>${esc(detail?.destination || s.ref.destination)}</h3><div>${statusLine}</div></div>
+      ${detail?.stops?.length ? `<button class="icon-btn" data-map aria-label="${esc(t('map_open'))}">${MAP_SVG}</button>` : ''}
+      <button class="icon-btn" data-share aria-label="${esc(t('share_trip'))}">${SHARE_SVG}</button></div>
     ${following
       ? `<p class="hint">${t('following_hint')}</p><button class="btn outline wide" data-unfollow>${t('unfollow')}</button>`
       : `<button class="btn wide" data-follow ${detail?.stops?.length ? '' : 'disabled'}>${BUS_SVG}${t('follow')}</button>
@@ -336,6 +530,8 @@ function renderTripSheet(body = $('#sheet .sheet-body')) {
       startFollow({ ref: s.ref, boardingPlatformIds: s.boardingPlatformIds, alightOrder: s.alightOrder, detail: s.detail });
     }
     if (e.target.closest('[data-unfollow]')) stopFollow();
+    if (e.target.closest('[data-map]')) return openBusMap(s.ref, detail, alight);
+    if (e.target.closest('[data-share]')) return shareTrip({ ref: s.ref, boardingPlatformIds: following ? follow.boardingPlatformIds : s.boardingPlatformIds, alightOrder: alight }, detail?.destination || s.ref.destination);
     if (e.target.closest('[data-add-journey]')) addToDraft({ ref: s.ref, boardingPlatformIds: s.boardingPlatformIds, alightOrder: s.alightOrder });
     const a = e.target.closest('[data-alight]');
     if (a && following) setAlight(Number(a.dataset.alight));
@@ -418,6 +614,9 @@ export const followedLine = () => follow?.ref?.line || '';
 
 export function stopFollow() {
   if (follow?.pushId) api('/api/unfollow', { id: follow.pushId });
+  // Sharing by a code ends with following.
+  for (const sh of store.get('sharesOut', [])) { outSockets[sh.id]?.close(); delete outSockets[sh.id]; api(`/api/hub/shares/${sh.id}/cancel`, { token: sh.token }); }
+  store.set('sharesOut', []);
   follow = null;
   saveFollow();
   clearTimeout(followTimer);
@@ -498,7 +697,31 @@ setInterval(() => { if (follow && !document.hidden) renderAllFollowSlots(); }, 5
  */
 const NEAR_STOP_M = 150;
 let nextFixAt = 0;
+/** Those this bus is shared with by a code see where this phone is (at most every 20 s, only while the app is open). */
+let lastShareAt = 0;
+const sharePositions = {}; // the other side's last position, by share id / claim id
+function publishShare(c) {
+  const out = store.get('sharesOut', []);
+  if (!out.length || Date.now() - lastShareAt < 20000 || c?.latitude == null) return;
+  lastShareAt = Date.now();
+  for (const sh of out) {
+    outSockets[sh.id] ??= shareSocket('owner', sh.id, sh.token, (m) => {
+      if (m.type === 'position') sharePositions[sh.id] = m.position;
+      if (m.type === 'status' && ['cancelled', 'declined'].includes(m.status)) {
+        outSockets[sh.id]?.close(); delete outSockets[sh.id];
+        store.set('sharesOut', store.get('sharesOut', []).filter((x) => x.id !== sh.id));
+      }
+    });
+    outSockets[sh.id].send({ type: 'position', lat: c.latitude, lon: c.longitude, accuracy: Math.round(c.accuracy || 0) });
+  }
+}
+function shareTick() {
+  if (!store.get('sharesOut', []).length || Date.now() - lastShareAt < 60000 || !('geolocation' in navigator)) return;
+  navigator.geolocation.getCurrentPosition((pos) => publishShare(pos.coords), () => {}, { maximumAge: 30000, timeout: 20000 });
+}
+
 function updateLocation(p) {
+  shareTick();
   const auto = communityMode() === 'auto' && config.hub && follow?.detail?.communityKey;
   if ((!auto && !catchOn()) || !('geolocation' in navigator)) return stopGeo();
   if (!p.onBoard) findStopCoords(p);
@@ -511,6 +734,7 @@ function updateLocation(p) {
   nextFixAt = Date.now() + 60000; // until this check answers
   navigator.geolocation.getCurrentPosition((pos) => {
     fix = pos.coords;
+    publishShare(pos.coords);
     const m = toStop();
     nextFixAt = Date.now() + (m == null ? 60000 : nextCheckMs(m));
     renderAllFollowSlots();
@@ -560,6 +784,7 @@ function startRiderWatch() {
 /** It says where the bus is only once the rider is on it: on the route, past their stop, moving. */
 function onRiderFix(pos) {
   fix = pos.coords;
+  publishShare(pos.coords);
   const d = follow?.detail;
   if (!d?.stops?.length || d.stops.every((s) => s.lat == null)) return; // coordinates not loaded yet
   if (pos.coords.accuracy > 50) return;

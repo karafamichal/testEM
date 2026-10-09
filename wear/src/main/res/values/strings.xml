@@ -36,4 +36,13 @@
     <string name="line_countdown">Line %1$s</string>
     <string name="channel_get_off">Get off next</string>
     <string name="complication_label">Followed bus</string>
+    <string name="channel_leave">Leave now</string>
+    <string name="home_title">Next bus home</string>
+    <string name="home_not_set">Choose your route home on your phone: Plan&amp;Ride → Account → Watch.</string>
+    <string name="tap_to_follow">Tap to follow</string>
+    <string name="home_chip">Home: %1$s at %2$s</string>
+    <string name="next_at">Line %1$s at %2$s</string>
+    <string name="preview_here">Bus is here</string>
+    <string name="complication_next">Next bus at a favourite stop</string>
+    <string name="complication_report">Bus is here (report)</string>
 </resources>

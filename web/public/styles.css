@@ -359,3 +359,38 @@ details summary { color: var(--accent-text); font-weight: 600; cursor: pointer; 
 .lip.ids::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 2px; background: #ED1C24; }
 .ids-qr { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
 .qr-full-code .ids-qr { width: min(90vw, 420px); height: auto; }
+
+/* 2.14: own background colour, bus map, month lines */
+.bg-choices { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 16px 8px; }
+.swatch-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); padding: 0; cursor: pointer; position: relative; }
+.swatch-btn.on { outline: 3px solid var(--accent); outline-offset: 2px; }
+.swatch-btn.custom { background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); overflow: hidden; }
+.swatch-btn.custom input { opacity: 0; position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+.trip-title { flex: 1; min-width: 0; }
+.trip-head .icon-btn { background: var(--surface-2); border: 0; color: var(--text); border-radius: 50%; width: 40px; height: 40px; display: grid; place-items: center; }
+.busmap { position: relative; height: calc(100dvh - 120px); overflow: hidden; border-radius: 14px; touch-action: none; background: var(--surface-2); }
+.busmap-tiles img { position: absolute; width: 256px; height: 256px; user-select: none; -webkit-user-drag: none; }
+.busmap-route { position: absolute; inset: 0; width: 100%; height: 100%; }
+.busmap-route polyline { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linejoin: round; }
+.busmap-route circle { fill: var(--accent); stroke: #fff; stroke-width: 2; }
+.busmap-route circle.passed { fill: #8a94a6; }
+.busmap-route circle.alight { fill: var(--amber); }
+.busmap-route .bus circle { fill: var(--accent); stroke: #fff; stroke-width: 3; }
+.busmap-route .bus text { fill: #fff; font: 700 12px var(--body); text-anchor: middle; }
+.busmap-credit { position: absolute; right: 6px; bottom: 4px; margin: 0; font-size: 11px; background: rgba(255,255,255,.8); color: #333; padding: 0 4px; border-radius: 4px; }
+.month-line { margin: -4px 16px 6px; }
+.share-code { font: 700 44px/1.1 var(--display); letter-spacing: 6px; text-align: center; margin: 12px 0; }
+.busmap-route .person circle { fill: var(--amber); stroke: #fff; stroke-width: 3; }
+.busmap-route .person text { fill: var(--text); font: 600 12px var(--body); text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 3; }
+
+/* EM-0048: the PIN dialog with room inside, the buttons on one row, the field centred; no double-tap zoom */
+html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
+.dialog.pin-dialog { padding: 22px 20px 14px; gap: 12px; }
+.pin-dialog h2 { margin: 0; }
+.pin-dialog .hint { margin: 0; width: auto; }
+.pin-dialog .pin-input { text-align: center; font-size: 26px; letter-spacing: 10px; padding: 12px 14px; }
+.pin-dialog .pin-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+.pin-actions { display: flex; gap: 10px; }
+.pin-actions .btn, .pin-actions .text-btn { flex: 1; }
+.pin-actions .text-btn { border: 1.5px solid var(--line); border-radius: 12px; }
+.pin-forgot { align-self: center; font-size: 14px; font-weight: 500; color: var(--muted); }

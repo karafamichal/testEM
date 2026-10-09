@@ -1,7 +1,7 @@
 // Shared helpers for the web client: DOM, storage, API, formatting, sheets, logs.
 import { t, lang } from './i18n.js';
 
-export const VERSION = '2.13.0';
+export const VERSION = '2.14.0';
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -52,7 +52,7 @@ export async function apiJson(path, body, opts) {
   return r.json;
 }
 
-export const config = { hub: false, vapidPublicKey: '' };
+export const config = { hub: false, hubWs: '', vapidPublicKey: '' };
 export async function loadConfig() {
   const r = await api('/api/config');
   if (r.ok) Object.assign(config, r.json);

@@ -19,6 +19,9 @@ const BASE_URL = process.env.QRBUS_BASE_URL || 'https://sadzv.qrbus.me';
 const PORT = process.env.PORT || 3000;
 // emhub (bug reports + community delays). The key stays on this server, never in the browser.
 const HUB_URL = (process.env.HUB_URL || '').replace(/\/$/, '');
+// Shares run over a WebSocket straight to emhub (the share's own token is the key, no app key needed).
+// HUB_URL may be emhub's LAN address; browsers need its public one.
+const HUB_WS = (process.env.HUB_PUBLIC_URL || 'https://par.karafa.net').replace(/\/$/, '').replace(/^http/, 'ws');
 const HUB_APP_KEY = process.env.HUB_APP_KEY || '';
 const USER_AGENT =
   'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36';
@@ -536,7 +539,7 @@ app.use((req, res, next) => (req.path === '/api/hub/bugs' ? bugJson : smallJson)
 app.use((req, res, next) => {
   res.set({
     'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-      "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; " +
+      `font-src https://fonts.gstatic.com; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self'${HUB_WS ? ' ' + HUB_WS : ''}; frame-ancestors 'none'; base-uri 'none'; ` +
       // Credit top-up posts the carrier's signed order form to its payment gateway (GP webpay).
       "form-action 'self' https://3dsecure.gpwebpay.com https://*.gpwebpay.com; object-src 'none'",
     'X-Content-Type-Options': 'nosniff',
@@ -840,8 +843,29 @@ app.post('/api/hub/report', wrap((req) =>
 app.get('/api/hub/delay', wrap((req) =>
   hubRequest('community/delay?trip=' + encodeURIComponent(String(req.query.trip || '')), { clientIp: clientIp(req) })));
 
+// One-time share codes (emhub's Shares): ids and tokens are the hub's random strings, passed through as they are.
+const shareId = (v) => { const x = String(v || ''); if (!/^[A-Za-z0-9_-]{1,64}$/.test(x)) throw Object.assign(new Error('Bad id'), { status: 400 }); return x; };
+app.post('/api/hub/shares', wrap((req) =>
+  hubRequest('shares', { method: 'POST', body: { trip: req.body?.trip, label: req.body?.label }, clientIp: clientIp(req) })));
+app.post('/api/hub/shares/claim', wrap((req) =>
+  hubRequest('shares/claim', { method: 'POST', body: { code: req.body?.code, name: req.body?.name }, clientIp: clientIp(req) })));
+app.get('/api/hub/shares/claim/:id', wrap((req) =>
+  hubRequest(`shares/claim/${shareId(req.params.id)}?token=${encodeURIComponent(shareId(req.query.token))}`, { clientIp: clientIp(req) })));
+app.get('/api/hub/shares/:id', wrap((req) =>
+  hubRequest(`shares/${shareId(req.params.id)}?token=${encodeURIComponent(shareId(req.query.token))}`, { clientIp: clientIp(req) })));
+const positionBody = (b) => ({ token: shareId(b?.token), lat: Number(b?.lat), lon: Number(b?.lon), accuracy: Number(b?.accuracy) || 0 });
+app.post('/api/hub/shares/claim/:id/position', wrap((req) =>
+  hubRequest(`shares/claim/${shareId(req.params.id)}/position`, { method: 'POST', body: positionBody(req.body), clientIp: clientIp(req) })));
+app.post('/api/hub/shares/:id/:action', wrap((req) => {
+  if (req.params.action === 'position') {
+    return hubRequest(`shares/${shareId(req.params.id)}/position`, { method: 'POST', body: positionBody(req.body), clientIp: clientIp(req) });
+  }
+  if (!['accept', 'decline', 'cancel'].includes(req.params.action)) throw Object.assign(new Error('Bad action'), { status: 400 });
+  return hubRequest(`shares/${shareId(req.params.id)}/${req.params.action}`, { method: 'POST', body: { token: shareId(req.body?.token) }, clientIp: clientIp(req) });
+}));
+
 app.get('/api/config', (req, res) => {
-  res.json({ hub: !!(HUB_URL && HUB_APP_KEY), vapidPublicKey: vapidPublicKey() });
+  res.json({ hub: !!(HUB_URL && HUB_APP_KEY), hubWs: HUB_WS, vapidPublicKey: vapidPublicKey() });
 });
 
 app.post('/api/logout', (req, res) => {

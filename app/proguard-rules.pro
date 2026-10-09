@@ -43,3 +43,6 @@
 -keep class com.ksjd.testem.IdsTicket { *; }
 -keep class com.ksjd.testem.IdsTopUp { *; }
 -keep class com.ksjd.testem.CredentialsManager$ReportDraft { *; }
+-keep class com.ksjd.testem.live.ShareTrip$Payload { *; }
+-keep class com.ksjd.testem.live.Shares$Outgoing { *; }
+-keep class com.ksjd.testem.live.Shares$Incoming { *; }

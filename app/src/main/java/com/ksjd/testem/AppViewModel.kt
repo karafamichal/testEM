@@ -589,6 +589,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun selectThemePreset(presetId: String) {
         prefs.saveSelectedThemeId(presetId)
         _appState.update { it.copy(selectedThemeId = presetId) }
+        com.ksjd.testem.live.TripTracking.refreshWatch(app) // the watch app and the widget take the new colours
     }
 
     fun addThemePreset(name: String, primary: Long, secondary: Long, tertiary: Long) {
@@ -597,6 +598,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         prefs.saveThemePresets(updated.filter { p -> DefaultThemePresets.all.none { it.id == p.id } })
         prefs.saveSelectedThemeId(preset.id)
         _appState.update { it.copy(themePresets = updated, selectedThemeId = preset.id) }
+        com.ksjd.testem.live.TripTracking.refreshWatch(app)
     }
 
     fun setLanguageCode(languageCode: String) {
@@ -663,12 +665,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 .takeLast(20)
         }
         prefs.saveSavedJourneys(updated)
+        com.ksjd.testem.reminders.LeaveBy.reschedule(app)
         _timetableState.update { it.copy(savedJourneys = updated) }
     }
 
     fun removeSavedJourney(id: String) {
         val updated = _timetableState.value.savedJourneys.filterNot { it.id == id }
         prefs.saveSavedJourneys(updated)
+        com.ksjd.testem.reminders.LeaveBy.reschedule(app)
         _timetableState.update { it.copy(savedJourneys = updated) }
     }
 

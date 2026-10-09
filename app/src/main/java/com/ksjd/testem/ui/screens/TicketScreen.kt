@@ -209,11 +209,28 @@ fun TicketScreen(
                     onAction = { onSignIn(Wallet.SADZV) }
                 )
             }
+            // Low credit, with a way to add some right away (SAD Zvolen's top-up; IDS BBSK's in its e-shop).
             val credit = card?.creditLastBalance
             if (credit != null && credit < app.lowCreditWarningThreshold) {
                 Notice(
                     stringResource(R.string.low_credit_message, Format.money(credit, card.currencySymbol)),
-                    tone = NoticeTone.Warning
+                    tone = NoticeTone.Warning,
+                    actionLabel = stringResource(R.string.topup_button),
+                    onAction = { com.ksjd.testem.reminders.Reminders.topUpRequested.value = true }
+                )
+            }
+            val idsCredit = ids.account?.credit
+            if (unlocked && shown == Wallet.IDS && idsCredit != null && idsCredit < app.lowCreditWarningThreshold) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                Notice(
+                    stringResource(R.string.low_credit_message, Format.money(idsCredit, "€")),
+                    tone = NoticeTone.Warning,
+                    actionLabel = stringResource(R.string.ids_open_shop),
+                    onAction = {
+                        runCatching {
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://eshop.idsbbsk.sk/praca-s-kreditom")))
+                        }
+                    }
                 )
             }
         }

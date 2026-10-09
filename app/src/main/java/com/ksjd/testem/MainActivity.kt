@@ -120,6 +120,11 @@ private fun handleIntent(intent: android.content.Intent?) {
         intent.removeExtra(com.ksjd.testem.live.TripTracking.EXTRA_SHOW_FOLLOWED) // not again after rotation
         com.ksjd.testem.live.TripTracking.requestShow()
     }
+    // "Add credit" on the low-credit alert: Account, with the top-up open.
+    if (intent?.getBooleanExtra(com.ksjd.testem.reminders.Reminders.EXTRA_TOP_UP, false) == true) {
+        intent.removeExtra(com.ksjd.testem.reminders.Reminders.EXTRA_TOP_UP)
+        com.ksjd.testem.reminders.Reminders.topUpRequested.value = true
+    }
     // Logs arrived from the watch: straight to the bug report form.
     if (intent?.getBooleanExtra(com.ksjd.testem.live.WatchSync.EXTRA_REPORT, false) == true) {
         intent.removeExtra(com.ksjd.testem.live.WatchSync.EXTRA_REPORT)
@@ -209,6 +214,8 @@ private fun MainScaffold(
     BackHandler(enabled = selected != AppTab.Home) { selected = AppTab.Home }
     val reportRequested by com.ksjd.testem.hub.AppLogs.reportRequested.collectAsState()
     LaunchedEffect(reportRequested) { if (reportRequested) selected = AppTab.Account }
+    val topUpRequested by com.ksjd.testem.reminders.Reminders.topUpRequested.collectAsState()
+    LaunchedEffect(topUpRequested) { if (topUpRequested) selected = AppTab.Account }
 
     // Follow notification tapped: home tab (the ticket is one swipe away) with the bus's stops on top.
     val showFollowed by com.ksjd.testem.live.TripTracking.showRequested.collectAsState()

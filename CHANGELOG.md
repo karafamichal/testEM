@@ -3,11 +3,19 @@
 ## 2.14.0
 
 ### New
-- **Light or dark mode and your own background colour** (EM-0042): in *Account → Appearance* choose light, dark or as the phone, and a background colour (ready ones or any hex code); text turns light or dark to suit it.
+- **Light or dark mode and your own background colour** (EM-0042): in *Account → Appearance* choose light, dark or as the phone, and a background colour: ready ones, or any other in the colour picker (drag, or type its hex or R, G, B code). New theme colours are picked the same way. Text turns light or dark to suit the background.
+- **Where the bus is, on a map**: the map button on a bus's stops shows its route on OpenStreetMap, the stops passed so far, the bus between its two stops, and you.
+- **Share a bus**: as a link anyone can open in the web version (the bus only), or with a one-time code made by the server. The other person enters the code in *Departures → Code* with their name; you see the name and accept or decline. After you accept they get the bus and, until you stop following, see where you are on its map; they can show you where they are too (a switch on their map). A code works once, for 10 minutes; positions go only through Plan&Ride's server, which keeps just the last one for a few minutes.
+- **Leave by for starred journeys**: from 40 minutes before a starred journey, a quiet note says when to leave for the stop (walking time from where you are, and as late as the bus is), then *Leave now* when it's time, with *Follow* right on it. Can be turned off in *Account → Reminders*.
+- **Departures widget**: the next buses from a favourite stop on the home screen; tap the stop's name for your next favourite.
+- **Low credit**: the warning on the home tab and the low-credit alert have an *Add credit* button (IDS BBSK: its e-shop).
+- **Each month in History**: rides, what they cost and the credit added, under each month.
+- **Watch**: the app's colour theme; the line in blue (city buses) or orange (regional buses); the countdown and ring in green, orange or red by how late the bus is; an always-on view with just the countdown in grey; a *Next bus home* tile and chip (the route chosen in *Account → Watch*; a tap follows it); complications for credit, the next bus at a favourite stop, and *Bus is here* (a tap reports it); and *Leave now* with its own vibration.
 - **The Watch settings show only with a watch**: *Account → Watch* appears once the Plan&Ride watch app is on a paired watch.
 
 ### Fixed
 - **Following didn't stop after getting off** (EM-0046): the phone standing at your stop (or a few minutes at any stop) counts as getting off. Before, a standing phone made the bus look later and later, so following never ended.
+- **Web version on iPhone: the PIN dialog's layout, and no more zooming** (EM-0048): the PIN field and buttons have room inside the dialog and sit on one row, the page no longer zooms into fields or by pinching, and it's no longer left shifted after the keyboard closes.
 - **IDS BBSK said the password was wrong right after unlocking** (EM-0047): two sign-ins at once no longer clash, and one refused sign-in is tried again before the app asks you to re-add the account.
 
 ## 2.13.1

@@ -34,4 +34,13 @@
     <string name="line_countdown">Linka %1$s</string>
     <string name="channel_get_off">Vystupujete</string>
     <string name="complication_label">Sledovaný autobus</string>
+    <string name="channel_leave">Vyraziť</string>
+    <string name="home_title">Najbližší spoj domov</string>
+    <string name="home_not_set">Cestu domov si vyberte v telefóne: Plan&amp;Ride → Účet → Hodinky.</string>
+    <string name="tap_to_follow">Ťuknutím sledovať</string>
+    <string name="home_chip">Domov: %1$s o %2$s</string>
+    <string name="next_at">Linka %1$s, %2$s</string>
+    <string name="preview_here">Autobus je tu</string>
+    <string name="complication_next">Najbližší spoj na obľúbenej zastávke</string>
+    <string name="complication_report">Autobus je tu (hlásenie)</string>
 </resources>

@@ -96,6 +96,8 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.glance:glance-appwidget:1.1.1")
+    // Where the bus is, on OpenStreetMap (no API key; tiles from openstreetmap.org)
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     // The followed bus on the Plan&Ride watch app (EM-0041).

@@ -187,7 +187,24 @@
   .viewer .v-prev { left: 14px; top: 50%; margin-top: -22px; }
   .viewer .v-next { right: 14px; top: 50%; margin-top: -22px; }
   .viewer .v-count { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: #cfd6dd; font-size: 13px; }
+  /* the map */
+  .map-wrap { display: grid; grid-template-columns: 1fr 340px; height: calc(100dvh - 76px); border-top: 1px solid var(--line); }
+  #map { height: 100%; }
+  .map-side { border-left: 1px solid var(--line); overflow-y: auto; padding: 14px 16px; background: var(--surface); font-size: 14px; }
+  .map-side h2 { font-size: 20px; margin: 0 0 6px; }
+  .map-side .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .map-side button { border: 1px solid var(--line); background: var(--surface); border-radius: 3px; padding: 5px 10px; cursor: pointer; }
+  .map-side button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .bus-icon { background: #5f6b7a; color: #fff; font: 700 11px/20px var(--display, sans-serif); border-radius: 10px; text-align: center; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); white-space: nowrap; padding: 0 5px; }
+  .bus-icon.live { background: #1E8A4C; }
+  .bus-icon.late { background: #C77700; }
+  .bus-icon.very { background: #C0392B; }
+  .vertex { background: #fff; border: 2px solid #1D4FB8; border-radius: 50%; }
 </style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 </head>
 <body>
 <aside class="rail">
@@ -197,6 +214,7 @@
     <a href="#ideas" data-nav="ideas">Suggestions <span class="count" id="count-ideas" hidden></span></a>
     <a href="#community" data-nav="community">Community</a>
     <a href="#timetable" data-nav="timetable">Timetable</a>
+    <a href="#map" data-nav="map">Map</a>
     <a href="#site" data-nav="site">Website</a>
     <a href="#settings" data-nav="settings">Settings</a>
   </nav>
@@ -267,6 +285,7 @@ async function route() {
   try {
     if (page === "community") return await renderCommunity(arg);
     if (page === "timetable") return await renderTimetable();
+    if (page === "map") return renderMap();
     if (page === "settings") return await renderSettings(arg);
     if (page === "templates") return await renderTemplates(arg);
     if (page === "site") return await renderSite(arg);
@@ -520,6 +539,166 @@ const localInput = (d = new Date()) => new Date(d - d.getTimezoneOffset() * 6000
 const kb = (n) => n == null ? "–" : n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " kB";
 const epochOf = (v) => Math.floor(new Date(v || Date.now()).getTime() / 1000);
 let ttPoll = null;
+
+// ------------------------------------------------------------------ map: stops, buses now, editing stops and road traces
+
+let mapState = null;
+
+function renderMap() {
+  clearInterval(mapState?.timer);
+  view.innerHTML = `
+    <div class="page-head"><h1>Map</h1><span class="muted small legend">
+      <span><i class="dot" style="background:#1E8A4C"></i>live (riders' phones or reports)</span>
+      <span><i class="dot" style="background:#5f6b7a"></i>by the timetable</span>
+      <span><i class="dot" style="background:#C77700"></i>late</span>
+      <span><i class="dot" style="background:#1D4FB8"></i>stop (amber: moved by hand)</span></span></div>
+    <div class="map-wrap"><div id="map"></div><aside class="map-side" id="map-side"></aside></div>`;
+  const map = L.map("map", { preferCanvas: true }).setView([48.736, 19.146], 13);
+  // OpenStreetMap's tile servers refuse requests without a Referer (403): send our origin with them.
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors",
+    referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
+  mapState = { map, stops: L.layerGroup().addTo(map), buses: L.layerGroup().addTo(map), trip: L.layerGroup().addTo(map), tripId: null, edit: null };
+  sideHelp();
+  const load = () => { loadStops(); loadBuses(); };
+  map.on("moveend", load);
+  load();
+  // Buses move: refresh while the map is the page shown.
+  mapState.timer = setInterval(() => { if (location.hash.startsWith("#map")) loadBuses(); else clearInterval(mapState.timer); }, 10000);
+}
+
+function bbox() {
+  const b = mapState.map.getBounds();
+  return [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map((x) => x.toFixed(5)).join(",");
+}
+
+function sideHelp() {
+  $("#map-side").innerHTML = `<h2>Map</h2>
+    <p class="muted">Buses on the road now: green ones are where riders' phones or reports put them, grey ones where the timetable does. Stops show from zoom 14.</p>
+    <p class="muted"><b>Move a stop:</b> click it, then drag it where it really is. The place is kept through every timetable update (by its id, or its name nearby if renamed).</p>
+    <p class="muted"><b>Road traces:</b> click a bus to see its trip. Snap it to the roads (OpenStreetMap routing), or click a part between two stops to draw it by hand: drag the points, click the map to add one, right-click a point to remove it.</p>`;
+}
+
+async function loadStops() {
+  const { map, stops } = mapState;
+  stops.clearLayers();
+  if (map.getZoom() < 14) return;
+  const r = await api("map/stations?bbox=" + bbox());
+  for (const s of r.stations) {
+    const m = L.circleMarker([s.lat, s.lon], { radius: 6, color: "#fff", weight: 2, fillColor: s.moved ? "#FFB21E" : "#1D4FB8", fillOpacity: 1 });
+    m.bindTooltip(esc(s.name));
+    m.on("click", () => editStop(s));
+    stops.addLayer(m);
+  }
+}
+
+async function loadBuses() {
+  const r = await api("map/vehicles?bbox=" + bbox());
+  const { buses } = mapState;
+  buses.clearLayers();
+  for (const v of r.vehicles) {
+    const late = v.delay != null && v.delay >= 600 ? "very" : v.delay != null && v.delay >= 180 ? "late" : "";
+    const icon = L.divIcon({ className: "", html: `<div class="bus-icon ${v.live ? "live" : ""} ${late}">${esc(v.line)}</div>`, iconSize: null });
+    const m = L.marker([v.lat, v.lon], { icon });
+    const d = delayText(v.delay);
+    m.bindTooltip(`${esc(v.line)} → ${esc(v.headsign)}<br>next: ${esc(v.next)}<br>${v.live ? `${d.text} (${v.source === "gps" ? "riders' phones" : "reports"})` : "timetable"}`);
+    m.on("click", () => showTripOnMap(v.tripId));
+    buses.addLayer(m);
+  }
+}
+
+function editStop(s) {
+  const { map } = mapState;
+  const side = $("#map-side");
+  side.innerHTML = `<h2>${esc(s.name)}</h2><p class="muted small">${esc(s.id)}${s.moved ? " · moved by hand" : ""}</p>
+    <p class="muted">Drag the marker to where the stop really is, then save.</p>
+    <div class="row"><button class="primary" id="stop-save" disabled>Save place</button>${s.moved ? '<button id="stop-reset">Back to the timetable\'s place</button>' : ""}<button id="stop-close">Close</button></div>`;
+  const marker = L.marker([s.lat, s.lon], { draggable: true }).addTo(map);
+  marker.on("dragend", () => { $("#stop-save").disabled = false; });
+  const done = () => { map.removeLayer(marker); sideHelp(); loadStops(); };
+  $("#stop-close").onclick = done;
+  $("#stop-save").onclick = async () => {
+    const p = marker.getLatLng();
+    await api("map/stop", { id: s.id, lat: p.lat, lon: p.lng });
+    toast("Saved: " + s.name);
+    done();
+  };
+  if (s.moved) $("#stop-reset").onclick = async () => { await api("map/stop/reset", { id: s.id }); toast("Back where the timetable has it"); done(); };
+}
+
+async function showTripOnMap(tripId) {
+  const t = await api("map/trip?id=" + encodeURIComponent(tripId));
+  mapState.tripId = tripId;
+  drawTrip(t);
+  const side = $("#map-side");
+  side.innerHTML = `<h2>${esc(t.line)} → ${esc(t.headsign)}</h2><p class="muted small">${esc(t.operator)} · ${esc(tripId)}</p>
+    <p class="muted">${t.segments.filter((s) => s.traced).length} of ${t.segments.length} parts follow the roads. Click a part to draw it by hand.</p>
+    <div class="row"><button class="primary" id="snap">Snap to roads</button><button id="snap-missing">Snap only the straight parts</button><button id="trip-close">Close</button></div>
+    <ol class="small">${t.stops.map((s) => `<li>${esc(s.name)} <span class="muted">${new Date(s.departure).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></li>`).join("")}</ol>`;
+  const snap = async (keep) => {
+    $("#snap").disabled = $("#snap-missing").disabled = true;
+    toast("Snapping to roads: about a second a part…");
+    const r = await api("map/snap", { id: tripId, keep });
+    toast(`Snapped ${r.snapped} part(s)` + (r.failed ? `, ${r.failed} couldn't be routed` : ""));
+    showTripOnMap(tripId);
+  };
+  $("#snap").onclick = () => snap(false);
+  $("#snap-missing").onclick = () => snap(true);
+  $("#trip-close").onclick = () => { mapState.trip.clearLayers(); mapState.tripId = null; sideHelp(); };
+}
+
+function drawTrip(t) {
+  const { map, trip } = mapState;
+  trip.clearLayers();
+  const bounds = [];
+  t.segments.forEach((seg) => {
+    if (seg.points.length < 2) return;
+    const line = L.polyline(seg.points, { color: seg.traced ? "#1D4FB8" : "#8A94A6", weight: 6, opacity: 0.85, dashArray: seg.traced ? null : "8 8" });
+    line.on("click", () => editSegment(t, seg));
+    trip.addLayer(line);
+    bounds.push(...seg.points);
+  });
+  t.stops.forEach((s) => { if (s.lat != null) trip.addLayer(L.circleMarker([s.lat, s.lon], { radius: 5, color: "#fff", weight: 2, fillColor: "#14213D", fillOpacity: 1 }).bindTooltip(esc(s.name))); });
+  if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
+}
+
+/** Draw one stop-to-stop part by hand: its inner points can be dragged, added (click the map) or removed (right-click). */
+function editSegment(t, seg) {
+  const { map, trip } = mapState;
+  const ends = [seg.points[0], seg.points.at(-1)];
+  let inner = seg.points.slice(1, -1).map((p) => L.latLng(p[0], p[1]));
+  const layer = L.layerGroup().addTo(map);
+  const redraw = () => {
+    layer.clearLayers();
+    layer.addLayer(L.polyline([ends[0], ...inner, ends[1]], { color: "#FFB21E", weight: 5 }));
+    inner.forEach((p, i) => {
+      const v = L.marker(p, { draggable: true, icon: L.divIcon({ className: "vertex", iconSize: [12, 12] }) });
+      v.on("drag", (e) => { inner[i] = e.target.getLatLng(); layer.getLayers()[0].setLatLngs([ends[0], ...inner, ends[1]]); });
+      v.on("contextmenu", () => { inner.splice(i, 1); redraw(); });
+      layer.addLayer(v);
+    });
+  };
+  // A click on the map adds a point where it fits best (between the two nearest neighbours along the line).
+  const add = (e) => {
+    const all = [L.latLng(...ends[0]), ...inner, L.latLng(...ends[1])];
+    let best = 0, bestCost = Infinity;
+    for (let i = 0; i < all.length - 1; i++) {
+      const cost = map.distance(all[i], e.latlng) + map.distance(e.latlng, all[i + 1]) - map.distance(all[i], all[i + 1]);
+      if (cost < bestCost) { bestCost = cost; best = i; }
+    }
+    inner.splice(best, 0, e.latlng);
+    redraw();
+  };
+  map.on("click", add);
+  trip.eachLayer((l) => l.setStyle && l.setStyle({ opacity: 0.3 }));
+  redraw();
+  const side = $("#map-side");
+  side.innerHTML = `<h2>Drawing a part by hand</h2><p class="muted">Drag the points along the road; click the map to add one; right-click a point to remove it.</p>
+    <div class="row"><button class="primary" id="seg-save">Save</button><button id="seg-reset">Straight line again</button><button id="seg-cancel">Cancel</button></div>`;
+  const end = () => { map.off("click", add); map.removeLayer(layer); showTripOnMap(mapState.tripId); };
+  $("#seg-cancel").onclick = end;
+  $("#seg-save").onclick = async () => { await api("map/segment", { from: seg.from, to: seg.to, points: inner.map((p) => [p.lat, p.lng]) }); toast("Saved"); end(); };
+  $("#seg-reset").onclick = async () => { await api("map/segment/reset", { from: seg.from, to: seg.to }); toast("Straight again"); end(); };
+}
 
 async function renderTimetable() {
   clearTimeout(ttPoll);

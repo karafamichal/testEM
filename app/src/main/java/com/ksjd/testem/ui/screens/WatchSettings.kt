@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -25,6 +26,7 @@ import com.ksjd.testem.ui.components.ListGroup
 import com.ksjd.testem.ui.components.ListRow
 import com.ksjd.testem.ui.components.SectionLabel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** What the Plan&Ride watch app shows (EM-0041), set on the phone; changes reach the watch right away. */
@@ -38,6 +40,9 @@ fun WatchSettings() {
     var alerts by remember { mutableStateOf(prefs.getWatchAlerts()) }
     var nextStops by remember { mutableStateOf(prefs.getWatchNextStops()) }
     var credit by remember { mutableStateOf(prefs.getWatchCredit()) }
+    var homeRoute by remember { mutableStateOf(prefs.getWatchHomeRoute()) }
+    val routes = remember { prefs.getSavedRoutes() }
+    val scope = rememberCoroutineScope()
     val changed = { TripTracking.refreshWatch(context) }
 
     Text(
@@ -85,6 +90,26 @@ fun WatchSettings() {
                 trailing = { RadioButton(selected = nextStops == n, onClick = null) }
             )
         }
+    }
+    // "Next bus home" on the watch (its tile and main screen): one of the routes saved in the planner.
+    SectionLabel(stringResource(R.string.watch_home_route))
+    ListGroup {
+        (listOf(null) + routes).forEachIndexed { index, route ->
+            if (index > 0) GroupDivider()
+            ListRow(
+                route?.let { "${it.fromText} → ${it.toText}" } ?: stringResource(R.string.watch_home_none),
+                onClick = {
+                    homeRoute = route
+                    prefs.saveWatchHomeRoute(route)
+                    scope.launch(Dispatchers.IO) { WatchSync.sendHome(context, nearby = false) }
+                },
+                trailing = { RadioButton(selected = homeRoute?.let { h -> route != null && h.sameAs(route) } ?: (route == null), onClick = null) }
+            )
+        }
+    }
+    if (routes.isEmpty()) {
+        Text(stringResource(R.string.watch_home_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
     }
     Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(stringResource(R.string.watch_report_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -28,13 +28,34 @@ const PRESETS = [
   { id: 'ocean', name: 'Ocean', color: '#136F63' },
   { id: 'sunset', name: 'Sunset', color: '#E85D04' },
 ];
+/** Relative brightness of "#rrggbb", 0 (black) to 1 (white). */
+function luminance(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+/** Ready background colours, as in the Android app. */
+const BACKGROUNDS = ['#F3EEE4', '#E8F0E6', '#E6EEF7', '#F6E8EC', '#1C2433', '#1E2A22', '#2B1F2E', '#000000'];
+
 function applyTheme() {
   const preset = store.get('themeId', 'stop');
   const color = preset === 'custom' ? store.get('themeColor', '#1D4FB8') : (PRESETS.find((x) => x.id === preset) || PRESETS[0]).color;
   const root = document.documentElement;
   root.style.setProperty('--accent', color);
   const mode = store.get('themeMode', 'auto');
-  if (mode === 'auto') delete root.dataset.theme; else root.dataset.theme = mode;
+  // EM-0042: an own background colour; light or dark text then follows its brightness.
+  const bg = store.get('bgColor', null);
+  for (const v of ['--bg', '--surface', '--surface-2', '--line', '--text', '--muted']) root.style.removeProperty(v);
+  if (bg) {
+    const dark = luminance(bg) < 0.5;
+    root.dataset.theme = dark ? 'dark' : 'light';
+    const mix = (to, pct) => `color-mix(in srgb, ${bg} ${100 - pct}%, ${to})`;
+    root.style.setProperty('--bg', bg);
+    root.style.setProperty('--surface', mix('#fff', dark ? 7 : 50));
+    root.style.setProperty('--surface-2', mix(dark ? '#fff' : '#000', 8));
+    root.style.setProperty('--line', mix(dark ? '#fff' : '#000', 18));
+    root.style.setProperty('--text', dark ? '#F2F4F8' : '#14213D');
+    root.style.setProperty('--muted', mix(dark ? '#F2F4F8' : '#14213D', 70));
+  } else if (mode === 'auto') delete root.dataset.theme; else root.dataset.theme = mode;
   root.dataset.amoled = store.get('amoled', false) ? '1' : '';
   $('meta[name="theme-color"]').content = getComputedStyle(root).getPropertyValue('--bg').trim() || '#0F1A30';
 }
@@ -89,6 +110,8 @@ function isStandalone() {
 }
 function enforceInstallGate() {
   if (isStandalone()) return false;
+  // A shared bus opens right in the browser: the person it was sent to needn't install anything to see it.
+  if (new URLSearchParams(location.search).has('follow')) return false;
   const ua = navigator.userAgent;
   const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const android = /android/i.test(ua);
@@ -141,13 +164,13 @@ function unlockDialog() {
   const d = document.createElement('div');
   d.id = 'unlock';
   d.className = 'dialog-backdrop';
-  d.innerHTML = `<form class="dialog stack" role="dialog" aria-modal="true" aria-labelledby="unlock-title">
+  d.innerHTML = `<form class="dialog pin-dialog stack" role="dialog" aria-modal="true" aria-labelledby="unlock-title">
     <h2 id="unlock-title">${t('lock_title')}</h2>
     <p class="hint small">${t('unlock_hint')}</p>
     <input name="pin" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" aria-labelledby="unlock-title" required>
     <p class="error-text" role="alert" hidden></p>
-    <div class="dialog-actions"><button type="button" class="text-btn" data-forgot>${t('lock_forgot')}</button>
-      <button type="button" class="text-btn" data-cancel>${t('cancel')}</button><button class="btn" type="submit">${t('unlock')}</button></div></form>`;
+    <div class="pin-actions"><button type="button" class="text-btn" data-cancel>${t('cancel')}</button><button class="btn" type="submit">${t('unlock')}</button></div>
+    <button type="button" class="text-btn pin-forgot" data-forgot>${t('lock_forgot')}</button></form>`;
   document.body.appendChild(d);
   const input = $('input', d), err = $('.error-text', d);
   setTimeout(() => input.focus(), 50);
@@ -598,7 +621,7 @@ function renderBanners() {
   $('#validity').textContent = card.ticketValidTo ? t('ticket_valid_until', dateText(toMs(card.ticketValidTo))) : '';
   const out = [];
   const threshold = store.get('threshold', 1.0);
-  if (card.creditLastBalance != null && card.creditLastBalance < threshold) out.push(t('low_credit', money(card.creditLastBalance, card.currencySymbol)));
+  const low = card.creditLastBalance != null && card.creditLastBalance < threshold;
   if (store.get('expiryWarn', true)) {
     for (const [label, to] of [[t('ticket'), card.ticketValidTo], [t('card'), card.cardValidTo], [t('discount'), card.discountValidTo]]) {
       if (!to) continue;
@@ -607,7 +630,10 @@ function renderBanners() {
       else if (days <= 7) out.push(t('expires_soon', label, days === 0 ? t('today') : t('days_left', days)));
     }
   }
-  el.innerHTML = out.map((m) => `<div class="notice warn">${esc(m)}</div>`).join('');
+  el.innerHTML = (low ? `<div class="notice warn">${esc(t('low_credit', money(card.creditLastBalance, card.currencySymbol)))}
+      <button class="text-btn" data-topup-now>${t('topup')}</button></div>` : '') +
+    out.map((m) => `<div class="notice warn">${esc(m)}</div>`).join('');
+  el.onclick = (e) => { if (e.target.closest('[data-topup-now]')) openTopUp(); };
 }
 
 function renderQR(text) {
@@ -773,7 +799,8 @@ async function renderHistory(el) {
       ${ins.topStops.length ? `<h2 class="section-label">${t('top_stops')}</h2><ol class="top-stops">${ins.topStops.map(([name, n]) => `<li><span>${esc(name)}</span><b>${n}×</b></li>`).join('')}</ol>` : ''}
       ${ins.oldestRecordMs ? `<p class="hint small">${t('insights_basis', dateText(ins.oldestRecordMs))}</p>` : ''}
     </section>
-    <ul class="list history">${items.map((it) => {
+    ${monthGroups(items).map(([key, list]) => `<h2 class="section-label">${esc(monthLabel(key))}</h2>${monthLine(list)}
+    <ul class="list history">${list.map((it) => {
       const amt = (it.amountText || '').trim();
       const cls = amt.startsWith('+') ? 'pos' : amt.startsWith('-') ? 'neg' : '';
       // Real UTC timestamps, shown in Slovak time like the Android app.
@@ -781,7 +808,32 @@ async function renderHistory(el) {
       // Merged: which account each line is from.
       const tag = which === null && both() ? ` · ${it.wallet === 'ids' ? 'IDS BBSK' : 'SAD Zvolen'}` : '';
       return `<li class="row"><span class="row-text"><span class="row-title">${esc(it.title)}</span><span class="row-sub">${esc(when)}${it.subtitle ? ' · ' + esc(it.subtitle) : ''}${esc(tag)}</span></span>${amt ? `<b class="amount ${cls}">${esc(amt)}</b>` : ''}</li>`;
-    }).join('')}</ul>`;
+    }).join('')}</ul>`).join('')}`;
+}
+
+/** History split by month (Slovak time), newest first: [["2026-10", items], …]. */
+function monthGroups(items) {
+  const groups = new Map();
+  for (const it of items) {
+    const key = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Bratislava', year: 'numeric', month: '2-digit' }).format(new Date(it.timestampMs)).slice(0, 7);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
+  return [...groups];
+}
+function monthLabel(key) {
+  const [y, m] = key.split('-').map(Number);
+  const name = new Date(y, m - 1, 1).toLocaleDateString(lang() === 'en' ? 'en-GB' : 'sk-SK', { month: 'long' });
+  return (name.charAt(0).toUpperCase() + name.slice(1)) + (y === new Date().getFullYear() ? '' : ` ${y}`);
+}
+/** "12 rides · spent 18,40 € · added 20,00 €" for a month. */
+function monthLine(list) {
+  const rides = list.filter((x) => x.sourceType === 'TICKET' && !x.isTopUp && (x.amountCents ?? 0) < 0).length;
+  const spent = list.filter((x) => !x.isTopUp && (x.amountCents ?? 0) < 0).reduce((a, x) => a - x.amountCents, 0);
+  const added = list.filter((x) => x.isTopUp && (x.amountCents ?? 0) > 0).reduce((a, x) => a + x.amountCents, 0);
+  const parts = [rides ? (rides === 1 ? t('trip_count_1') : t('trips_count', rides)) : '', spent ? t('month_spent', money(spent / 100)) : '',
+    added ? t('month_added', money(added / 100)) : ''].filter(Boolean);
+  return parts.length ? `<p class="hint small month-line">${esc(parts.join(' · '))}</p>` : '';
 }
 
 function exportCsv() {
@@ -1015,18 +1067,30 @@ function security(body) {
 
 function appearance(body) {
   const id = store.get('themeId', 'stop');
+  const bgNow = store.get('bgColor', null);
   body.innerHTML = `<h2 class="section-label">${t('theme_colours')}</h2>
     <ul class="list">${PRESETS.map((p) => `<li><label class="row"><span class="swatch" style="background:${p.color}"></span><span class="row-title">${esc(p.name)}</span><input type="radio" name="theme" value="${p.id}" ${id === p.id ? 'checked' : ''}></label></li>`).join('')}
       <li><label class="row"><input type="color" id="custom-color" value="${esc(store.get('themeColor', '#1D4FB8'))}" aria-label="${esc(t('theme_custom'))}"><span class="row-title">${t('theme_custom')}</span><input type="radio" name="theme" value="custom" ${id === 'custom' ? 'checked' : ''}></label></li></ul>
     <h2 class="section-label">${t('theme_mode')}</h2>
-    <ul class="list">${['auto', 'light', 'dark'].map((m) => `<li><label class="row"><span class="row-title">${t('mode_' + m)}</span><input type="radio" name="mode" value="${m}" ${store.get('themeMode', 'auto') === m ? 'checked' : ''}></label></li>`).join('')}</ul>
+    <ul class="list">${['auto', 'light', 'dark'].map((m) => `<li><label class="row"><span class="row-title">${t('mode_' + m)}</span><input type="radio" name="mode" value="${m}" ${store.get('themeMode', 'auto') === m ? 'checked' : ''} ${bgNow ? 'disabled' : ''}></label></li>`).join('')}</ul>
+    <h2 class="section-label">${t('background_title')}</h2>
+    <div class="bg-choices">${BACKGROUNDS.map((c) => `<button class="swatch-btn ${bgNow === c ? 'on' : ''}" data-bg="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}
+      <label class="swatch-btn custom ${bgNow && !BACKGROUNDS.includes(bgNow) ? 'on' : ''}" aria-label="${esc(t('theme_custom'))}"><input type="color" id="bg-color" value="${esc(bgNow || '#1C2433')}"></label></div>
+    <p class="hint small">${t('background_hint')} ${bgNow ? `<button class="text-btn" data-bg-reset>${t('background_reset')}</button>` : ''}</p>
     <ul class="list">${switchRow('amoled', t('amoled'), t('amoled_hint'), store.get('amoled', false))}</ul>`;
   body.onchange = (e) => {
     if (e.target.name === 'theme') store.set('themeId', e.target.value);
     if (e.target.id === 'custom-color') { store.set('themeColor', e.target.value); store.set('themeId', 'custom'); $('input[value="custom"]', body).checked = true; }
     if (e.target.name === 'mode') store.set('themeMode', e.target.value);
     if (e.target.id === 'amoled') store.set('amoled', e.target.checked);
+    if (e.target.id === 'bg-color') { store.set('bgColor', e.target.value); applyTheme(); return appearance(body); }
     applyTheme();
+  };
+  body.onclick = (e) => {
+    const b = e.target.closest('[data-bg]');
+    if (b) store.set('bgColor', b.dataset.bg);
+    if (e.target.closest('[data-bg-reset]')) store.set('bgColor', null);
+    if (b || e.target.closest('[data-bg-reset]')) { applyTheme(); appearance(body); }
   };
 }
 
@@ -1204,6 +1268,15 @@ $('#install-btn').onclick = async () => { if (installPrompt) { installPrompt.pro
  * "?ride=<id>&dep=<ms>" starts following that day's bus of a regular ride here too.
  */
 async function handleLaunch(params) {
+  // A bus shared from Plan&Ride (par.karafa.net/f?t=… sends it here): show it, following is the opener's choice.
+  const shared = params.get('follow');
+  if (shared) {
+    try {
+      const p = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(shared.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))));
+      if (p?.ref?.line) { selectTab('departures'); live.openTrip(p.ref, { boardingPlatformIds: p.board || [], alightOrder: p.alight ?? null }); }
+    } catch { toast(t('share_bad_link')); }
+    return;
+  }
   const ride = rides().find((r) => r.id === params.get('ride'));
   if (params.get('show') === 'follow' || ride) { selectTab('ticket'); live.openFollowed(); }
   if (!ride) return;
@@ -1222,6 +1295,13 @@ navigator.serviceWorker?.addEventListener('message', (e) => {
   if (e.data?.type === 'open') handleLaunch(new URL(e.data.url, location.origin).searchParams);
 });
 
+live.shareName.get = () => (unlocked() ? s.account?.userName || s.ids.account?.name || '' : '');
+
+// EM-0048: iOS still pinch-zooms a home-screen app despite the viewport; and after the keyboard closes it can leave the
+// page shifted up (a black band under the tab bar). Neither, here.
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('focusout', () => setTimeout(() => { if (!document.activeElement?.matches('input, textarea, select')) window.scrollTo(0, window.scrollY); }, 50));
+
 (async function boot() {
   if (enforceInstallGate()) return;
   await loadConfig();
@@ -1236,7 +1316,7 @@ navigator.serviceWorker?.addEventListener('message', (e) => {
     if (!(await signIn(plain))) showPinSetup();
     return;
   }
-  if (!hasAccount() && !store.get('onboarded', false)) return showLogin({ welcome: true });
+  if (!hasAccount() && !store.get('onboarded', false) && !params.has('follow')) return showLogin({ welcome: true });
   showApp(); // with an account: locked until the PIN, the rest works right away
   handleLaunch(params);
 })();

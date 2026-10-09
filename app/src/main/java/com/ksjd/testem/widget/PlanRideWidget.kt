@@ -111,12 +111,13 @@ class PlanRideWidget : GlanceAppWidget() {
         private const val MAX_STOPS = 2
         val JOURNEY_ID = ActionParameters.Key<String>("journey")
 
-        private val version = kotlinx.coroutines.flow.MutableStateFlow(0)
+        internal val version = kotlinx.coroutines.flow.MutableStateFlow(0)
 
         /** Reload and redraw every placed widget (after a follow update, when following stops, when the app shows its boards). */
         suspend fun refresh(context: Context) {
             version.value++
             runCatching { PlanRideWidget().updateAll(context) }
+            runCatching { StopWidget().updateAll(context) }
         }
     }
 }

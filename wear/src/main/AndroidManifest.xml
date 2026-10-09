@@ -3,6 +3,9 @@
 
     <uses-feature android:name="android.hardware.type.watch" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Always-on display: the app stays on screen, dimmed, with only the countdown (AmbientLifecycleObserver). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:name=".WearApp"
@@ -32,6 +35,11 @@
                 <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
                 <data android:scheme="wear" android:host="*" android:path="/plan-ride/follow" />
                 <data android:scheme="wear" android:host="*" android:path="/plan-ride/home" />
+                <data android:scheme="wear" android:host="*" android:path="/plan-ride/theme" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:path="/plan-ride/leave" />
             </intent-filter>
         </service>
 
@@ -67,6 +75,56 @@
             </intent-filter>
             <meta-data android:name="androidx.wear.tiles.PREVIEW" android:resource="@mipmap/ic_launcher" />
         </service>
+
+        <service
+            android:name=".HomeTile"
+            android:exported="true"
+            android:label="@string/home_title"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data android:name="androidx.wear.tiles.PREVIEW" android:resource="@mipmap/ic_launcher" />
+        </service>
+
+        <!-- Credit, the next bus at a favourite stop, and "Bus is here" from the watch face. -->
+        <service
+            android:name=".CreditComplication"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_bus"
+            android:label="@string/credit"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data android:name="android.support.wearable.complications.SUPPORTED_TYPES" android:value="SHORT_TEXT" />
+            <meta-data android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS" android:value="0" />
+        </service>
+        <service
+            android:name=".NextDepartureComplication"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_bus"
+            android:label="@string/complication_next"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data android:name="android.support.wearable.complications.SUPPORTED_TYPES" android:value="SHORT_TEXT" />
+            <meta-data android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS" android:value="300" />
+        </service>
+        <service
+            android:name=".ReportComplication"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_bus"
+            android:label="@string/complication_report"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data android:name="android.support.wearable.complications.SUPPORTED_TYPES" android:value="SHORT_TEXT,LONG_TEXT" />
+            <meta-data android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS" android:value="0" />
+        </service>
+        <receiver android:name=".ReportPressReceiver" android:exported="false" />
 
         <!-- The followed bus's countdown on any watch face. -->
         <service

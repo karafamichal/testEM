@@ -179,6 +179,7 @@ class Timetable:
         except Exception:  # noqa: BLE001 - the regional timetable still works without city buses
             traceback.print_exc()
             log("city buses: could not add them")
+        self.apply_stop_edits()
         self._footpaths()
 
     def _add_city(self, collections):
@@ -365,6 +366,104 @@ class Timetable:
                         d = meters(self.lat[s], self.lon[s], self.lat[t], self.lon[t])
                         if d <= WALK_M:
                             self.foot[s].append((t, int(d / WALK_SPEED) + 60))
+
+    # ---- the map (dashboard): stop positions moved by hand, road traces, buses running now
+
+    def apply_stop_edits(self):
+        """
+        Stops moved in the dashboard's map keep their place through every rebuild: found by station id, or (renamed in
+        a new GTFS) by the same name near where it was. Returns how many were placed.
+        """
+        placed = 0
+        for sid, e in edits["stops"].items():
+            s = self.by_id.get(sid)
+            if s is None:
+                s = next((i for i, n in enumerate(self.names) if n == e["name"] and self.lat[i] is not None
+                          and meters(self.lat[i], self.lon[i], e["origLat"], e["origLon"]) <= 500), None)
+            if s is not None:
+                self.lat[s], self.lon[s] = e["lat"], e["lon"]
+                placed += 1
+        return placed
+
+    def stations_in(self, south, west, north, east, limit=4000):
+        """Stations in a box, with whether they were moved by hand."""
+        moved = set(edits["stops"])
+        out = [dict(self.station_json(s), weight=self.weight[s], moved=self.station_ids[s] in moved)
+               for s in range(len(self.names))
+               if self.lat[s] is not None and south <= self.lat[s] <= north and west <= self.lon[s] <= east]
+        out.sort(key=lambda x: -x["weight"])
+        return out[:limit]
+
+    def segment_points(self, a, b):
+        """The way between two stations: the road trace drawn or snapped in the dashboard, else a straight line."""
+        traced = edits["segments"].get(f"{self.station_ids[a]}>{self.station_ids[b]}")
+        ends = [(self.lat[a], self.lon[a]), (self.lat[b], self.lon[b])]
+        return [ends[0], *[tuple(p) for p in traced], ends[1]] if traced else ends
+
+    def community_keys(self, index, service_day):
+        """The keys riders' reports for this trip go under (as the apps make them, LiveRepository.communityKey)."""
+        trip = self.trips[index]
+        base = base_epoch(service_day)
+        keys = [f"{trip[2]}|{self.names[trip[7][0]]}|{(base + trip[9][0]) * 1000}"]
+        city = self.city.get(index)
+        if city:
+            keys.append(f"sadzv|{city[0]}|{city[2]}|{service_day.isoformat()}|{city[3]}")
+        return keys
+
+    def vehicles(self, when, box, delay_of=lambda keys: None):
+        """
+        Buses on the road at `when` (epoch s) in box (south, west, north, east): where the timetable puts them, or, with
+        riders' reports (delay_of(keys) -> {"delaySeconds", "source"}), as late as they are ("live"). Along the road
+        traces where there are some.
+        """
+        south, west, north, east = box
+        d = datetime.fromtimestamp(when, ZONE).date()
+        out, seen = [], set()
+        for day in (self.day(d - timedelta(days=1)), self.day(d)):
+            t0 = when - day.base
+            lo = bisect.bisect_left(day.deps, t0 - 3 * 3600)
+            hi = bisect.bisect_right(day.deps, t0 + 3600)
+            for c in range(lo, hi):
+                run = day.conns[c][4]
+                index, shift = divmod(run, 3)
+                service_day = day.date + timedelta(days=shift - 1)
+                # Yesterday's connections hold today's trips too (after midnight): each trip once.
+                if (index, service_day) in seen:
+                    continue
+                seen.add((index, service_day))
+                trip = self.trips[index]
+                offset = base_epoch(service_day) - day.base
+                live = delay_of(self.community_keys(index, service_day))
+                t = t0 - (live["delaySeconds"] if live else 0) - offset
+                st, arr, dep = trip[7], trip[8], trip[9]
+                if t < dep[0] or t > arr[-1]:
+                    continue
+                k = next((k for k in range(len(st) - 1) if t <= arr[k + 1]), len(st) - 2)
+                a, b = st[k], st[k + 1]
+                if self.lat[a] is None or self.lat[b] is None:
+                    continue
+                f = 0.0 if t <= dep[k] else min(1.0, (t - dep[k]) / max(1, arr[k + 1] - dep[k]))
+                lat, lon = along(self.segment_points(a, b), f)
+                if not (south <= lat <= north and west <= lon <= east):
+                    continue
+                out.append({"tripId": f"{trip[0]}:{trip[1]}:{service_day:%Y%m%d}", "line": trip[2], "headsign": trip[3] or self.names[st[-1]],
+                            "mode": trip[5], "operator": trip[4], "lat": round(lat, 6), "lon": round(lon, 6),
+                            "next": self.names[b], "live": bool(live), "delay": live["delaySeconds"] if live else None,
+                            "source": live.get("source") if live else None})
+        return out
+
+    def trip_shape(self, trip_id):
+        """A trip's stops and the way between each two, for drawing and editing its road traces."""
+        trip = self.trip(trip_id)
+        if not trip:
+            return None
+        index = self.trip_index[(trip_id.split(":", 1)[0], trip_id.split(":", 1)[1].rsplit(":", 1)[0])]
+        st = self.trips[index][7]
+        trip["segments"] = [{"from": self.station_ids[a], "to": self.station_ids[b],
+                             "points": self.segment_points(a, b) if self.lat[a] is not None and self.lat[b] is not None else [],
+                             "traced": f"{self.station_ids[a]}>{self.station_ids[b]}" in edits["segments"]}
+                            for a, b in zip(st, st[1:])]
+        return trip
 
     # ---- per-day connections
 
@@ -723,6 +822,25 @@ class Day:
         for i, c in enumerate(conns):
             self.from_station.setdefault(c[2], []).append(i)
             self.to_station.setdefault(c[3], []).append(i)
+
+
+def along(points, f):
+    """The point a fraction f of the way along a polyline [(lat, lon), …]."""
+    if len(points) < 2:
+        return points[0]
+    lengths = [meters(*p, *q) for p, q in zip(points, points[1:])]
+    goal, total = f * sum(lengths), 0.0
+    for (p, q), l in zip(zip(points, points[1:]), lengths):
+        if total + l >= goal and l > 0:
+            g = (goal - total) / l
+            return p[0] + (q[0] - p[0]) * g, p[1] + (q[1] - p[1]) * g
+        total += l
+    return points[-1]
+
+
+# Map edits from the dashboard (the hub loads them from its database): moved stops by station id
+# {"name", "lat", "lon", "origLat", "origLon"}, and road traces between two stations "from>to" -> [[lat, lon], …].
+edits = {"stops": {}, "segments": {}}
 
 
 # ------------------------------------------------------------------ downloads, the daily refresh, the log

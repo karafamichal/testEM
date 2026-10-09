@@ -17,6 +17,7 @@ os.environ["HUB_DB"] = os.path.join(tempfile.mkdtemp(), "test.db")
 os.environ["HUB_BOOTSTRAP_PASSWORD"] = "bootstrap-pass-1"
 os.environ["HUB_SMTP_HOST"] = "127.0.0.1"
 os.environ["HUB_SMTP_PORT"] = "1"  # nothing listens: sending fails fast
+os.environ["HUB_WEB_URL"] = "https://web.example/"
 sys.path.insert(0, HERE)
 import hub  # noqa: E402
 
@@ -337,6 +338,94 @@ status, headers, body = call("/")
 assert status == 200 and b'lang="sk"' in body and b"Plan&amp;Ride" in body and "frame-ancestors" in headers["Content-Security-Policy"]
 assert call("/en/privacy")[0] == 200 and b"privacy policy" in call("/en/privacy")[2]
 assert call("/support/")[0] == 200 and call("/nope")[0] == 404 and call("/mark.png")[0] == 200
+# A shared bus goes on to the web version; anything but a plain token doesn't.
+assert call("/f?t=eyJyZWYi_-")[1]["Location"] == "https://web.example/?follow=eyJyZWYi_-"
+assert call("/f?t=a%22%3E")[0] == 404 and call("/f")[0] == 404
+
+
+def api(path, data=None):
+    req = urllib.request.Request(base + "/api/v1/" + path, data=None if data is None else json.dumps(data).encode(),
+                                 headers={"Content-Type": "application/json", **key})
+    try:
+        res = opener.open(req)
+    except urllib.error.HTTPError as err:
+        res = err
+    return res.status, json.loads(res.read() or b"{}")
+
+
+# One-time share codes: the code is spent once entered, and the bus goes over only after the sharer accepts.
+st, made = api("shares", {"trip": "eyJyZWYi", "label": "36"})
+assert st == 201 and len(made["code"]) == 6, made
+assert api("shares/claim", {"code": made["code"]})[0] == 400, "a name is required"
+st, claim = api("shares/claim", {"code": made["code"], "name": "Jana Nováková"})
+assert st == 200 and claim["label"] == "36"
+assert api("shares/claim", {"code": made["code"], "name": "Someone else"})[0] == 404, "one use only"
+assert api(f"shares/{made['id']}?token=wrong")[0] == 404
+assert api(f"shares/{made['id']}?token={made['token']}")[1] == {"status": "asked", "name": "Jana Nováková", "code": made["code"],
+                                                               "expiresAt": made["expiresAt"], "position": None}
+assert "trip" not in api(f"shares/claim/{claim['claimId']}?token={claim['token']}")[1], "nothing before the answer"
+assert api(f"shares/{made['id']}/accept", {"token": made["token"]})[1]["status"] == "accepted"
+assert api(f"shares/claim/{claim['claimId']}?token={claim['token']}")[1]["trip"] == "eyJyZWYi"
+# After accepting, each side sends where it is and sees the other's.
+assert api(f"shares/{made['id']}/position", {"token": made["token"], "lat": 48.73, "lon": 19.15, "accuracy": 12})[0] == 200
+assert api(f"shares/claim/{claim['claimId']}?token={claim['token']}")[1]["position"]["lat"] == 48.73
+st, back = api(f"shares/claim/{claim['claimId']}/position", {"token": claim["token"], "lat": 48.58, "lon": 19.12})
+assert st == 200 and back["position"]["lon"] == 19.15
+assert api(f"shares/{made['id']}?token={made['token']}")[1]["position"]["lat"] == 48.58
+assert api(f"shares/claim/{claim['claimId']}/position", {"token": "wrong", "lat": 1, "lon": 1})[0] == 404
+
+
+# The same over WebSockets: the sharer hears about the code being entered, the other side gets the bus and positions.
+import socket as _socket
+import struct as _struct
+
+
+def ws_open(query):
+    host, port = base.split("//")[1].split(":")
+    sock = _socket.create_connection((host, int(port)), timeout=5)
+    crlf = "\r\n"
+    sock.sendall((f"GET /api/v1/shares/live?{query} HTTP/1.1{crlf}Host: {host}{crlf}Upgrade: websocket{crlf}Connection: Upgrade{crlf}"
+                  f"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=={crlf}Sec-WebSocket-Version: 13{crlf}{crlf}").encode())
+    head = b""
+    while (crlf + crlf).encode() not in head:
+        head += sock.recv(1)
+    assert b" 101 " in head and b"s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" in head, head
+    return sock
+
+
+def ws_read(sock):
+    b1, b2 = sock.recv(1)[0], sock.recv(1)[0]
+    n = b2 & 0x7F
+    if n == 126:
+        n = _struct.unpack(">H", sock.recv(2))[0]
+    data = b""
+    while len(data) < n:
+        data += sock.recv(n - len(data))
+    return json.loads(data)
+
+
+def ws_send(sock, obj):
+    payload, mask = json.dumps(obj).encode(), b"abcd"
+    sock.sendall(bytes([0x81, 0x80 | len(payload)]) + mask + bytes(c ^ mask[i % 4] for i, c in enumerate(payload)))
+
+
+st, made = api("shares", {"trip": "eyJyZWYi", "label": "Michal · 36"})
+owner = ws_open(f"side=owner&id={made['id']}&token={made['token']}")
+assert ws_read(owner)["status"] == "waiting"
+st, claim = api("shares/claim", {"code": made["code"], "name": "Jana"})
+assert ws_read(owner) == {"type": "status", "status": "asked", "name": "Jana"}
+other = ws_open(f"side=claim&id={claim['claimId']}&token={claim['token']}")
+assert ws_read(other)["status"] == "asked"
+api(f"shares/{made['id']}/accept", {"token": made["token"]})
+assert ws_read(owner)["status"] == "accepted"
+got = ws_read(other)
+assert got["status"] == "accepted" and got["trip"] == "eyJyZWYi", got
+ws_send(owner, {"type": "position", "lat": 48.7, "lon": 19.1, "accuracy": 5})
+assert ws_read(other)["position"]["lat"] == 48.7
+ws_send(other, {"type": "position", "lat": 48.6, "lon": 19.2})
+assert ws_read(owner)["position"]["lon"] == 19.2
+assert ws_open.__name__ and call("/api/v1/shares/live?side=owner&id=x&token=y")[0] in (401, 404)
+owner.close(); other.close()
 assert call("/admin/api/site")[0] == 401, "editing needs a signed-in admin"
 pages = json.loads(call("/admin/api/site", cookie=cookie)[2])
 assert len(pages) == 8 and not any(p["custom"] for p in pages)
@@ -453,6 +542,32 @@ st = json.loads(call("/admin/api/timetable/status", cookie=cookie)[2])
 assert st["ready"] and st["trips"] == 3 and "gtfs_feeds" not in st, st
 assert call("/admin/api/timetable/feeds", {"feeds": "a,b; rm -rf"}, cookie)[0] == 400
 assert json.loads(call("/admin/api/timetable/stops?q=city", cookie=cookie)[2])["stops"][0]["name"] == "City, Station"
+
+# ---- the map: buses now (timetable, or as late as riders say), stops moved by hand kept through a rebuild, road traces
+box = (48.0, 18.0, 49.5, 20.5)
+now_bus = [v for v in tt.vehicles(at("06:25"), box) if v["line"] == "101"]
+assert len(now_bus) == 1 and not now_bus[0]["live"] and now_bus[0]["next"] == "Town, Park", now_bus
+assert abs(now_bus[0]["lat"] - 48.705) < 0.002, "halfway between Town, AS (06:20) and Town, Park (06:30)"
+late = [v for v in tt.vehicles(at("06:25"), box, lambda keys: {"delaySeconds": 600, "source": "gps"}) if v["line"] == "101"]
+assert late and late[0]["live"] and late[0]["next"] == "Town, AS" and late[0]["delay"] == 600, "10 min late: still before Town, AS"
+assert tt.vehicles(at("05:00"), box) == [] and tt.vehicles(at("06:25"), (0, 0, 1, 1)) == []
+assert any(k.startswith("101|Village, Zlatý Potok, konečná|") for k in tt.community_keys(tt.trip_index[("a", "a1")], datetime.date(2026, 9, 30)))
+status, body_ = call("/admin/api/map/stations?bbox=48.6,19.0,48.8,19.2", cookie=cookie)[0], None
+assert status == 200
+assert call("/admin/api/map/stop", {"id": "town park", "lat": 48.7111, "lon": 19.1222}, cookie)[0] == 200
+assert call("/admin/api/map/stop", {"id": "town park", "lat": 10, "lon": 10}, cookie)[0] == 400, "only in Slovakia"
+assert tt.lat[tt.by_id["town park"]] == 48.7111, "in use right away"
+rebuilt = timetable.Timetable({"a": os.path.join(folder, "a.zip"), "b": os.path.join(folder, "b.zip")}, today=datetime.date(2026, 9, 29))
+assert rebuilt.lat[rebuilt.by_id["town park"]] == 48.7111, "a timetable update keeps the moved stop"
+moved = json.loads(call("/admin/api/map/stations?bbox=48.6,19.0,48.8,19.2", cookie=cookie)[2])["stations"]
+assert next(x for x in moved if x["id"] == "town park")["moved"]
+assert call("/admin/api/map/segment", {"from": "town as", "to": "town park", "points": [[48.72, 19.11]]}, cookie)[0] == 200
+shape = json.loads(call("/admin/api/map/trip?id=" + urllib.parse.quote(now_bus[0]["tripId"]), cookie=cookie)[2])
+traced = next(x for x in shape["segments"] if x["from"] == "town as")
+assert traced["traced"] and len(traced["points"]) == 3 and traced["points"][1] == [48.72, 19.11], traced
+assert call("/admin/api/map/segment/reset", {"from": "town as", "to": "town park"}, cookie)[0] == 200
+assert call("/admin/api/map/stop/reset", {"id": "town park"}, cookie)[0] == 200 and tt.lat[tt.by_id["town park"]] == 48.71
+assert call("/admin/api/map/vehicles?bbox=48,18,49.5,20.5", cookie=cookie)[0] == 200
 
 # ---- city buses from sadzv live data: direct buses between stops the timetable doesn't serve
 import sadzv  # noqa: E402

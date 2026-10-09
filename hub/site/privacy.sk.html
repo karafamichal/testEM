@@ -1,9 +1,9 @@
 <h1>Zásady ochrany súkromia Plan&amp;Ride</h1>
-<p><em>Platné od 28. septembra 2026. Doplnené v ten istý deň: webová verzia (bod 8). Doplnené 29. septembra 2026: poloha na pozadí (bod 3), cestovné poriadky z nášho servera (bod 2).</em></p>
+<p><em>Platné od 28. septembra 2026. Doplnené v ten istý deň: webová verzia (bod 8). Doplnené 29. septembra 2026: poloha na pozadí (bod 3), cestovné poriadky z nášho servera (bod 2). Doplnené 9. októbra 2026: zdieľanie spoja kódom (bod 3a), mapa spoja (bod 2).</em></p>
 <p>Plan&amp;Ride je bezplatná aplikácia s otvoreným kódom pre verejnú dopravu na Slovensku, pre Android. Vyvíjajú ju Michal Karafa a Michal Jablonský (ksjd), ktorí spoločne zodpovedajú za údaje opísané nižšie. Kontakt: <strong>ksjd.apps@gmail.com</strong>.</p>
 <p>Plan&amp;Ride je neoficiálna aplikácia. Nevytvoril ju žiadny dopravca a nie je s dopravcami spojená.</p>
 <p>Tieto zásady sa týkajú aplikácie pre Android aj webovej verzie pre iPhone (rozdiely webovej verzie sú v bode 8). Stručne:</p>
-<ul><li>Heslo k účtu sa ukladá len vo vašom zariadení a poloha ho nikdy neopustí. (Webová verzia heslo pri prihlásení posiela cez náš server, ale neukladá ho.)</li>
+<ul><li>Heslo k účtu sa ukladá len vo vašom zariadení a poloha ho opustí len vtedy, keď spoj zdieľate kódom s niekým, koho prijmete (bod 3a). (Webová verzia heslo pri prihlásení posiela cez náš server, ale neukladá ho.)</li>
 <li>Plan&amp;Ride nezobrazuje reklamy a vaše údaje nikto nedostane na predaj ani reklamu.</li>
 <li>Čokoľvek nám príde (hlásenia chýb, návrhy, pomoc s polohou autobusov), pošle sa len vtedy, keď sa tak rozhodnete.
 </li></ul>
@@ -20,14 +20,21 @@
 <p>sadzv.qrbus.me s týmito údajmi narába podľa vlastných zásad.</p>
 <h3>2. Cestovné poriadky a odchody naživo</h3>
 <p>Odchody a polohy autobusov naživo načítava aplikácia priamo zo <strong>sadzv.qrbus.me</strong>. Spojenia, vyhľadávanie zastávok, odchody ďalších dopravcov a zoznamy zastávok autobusov sú z <strong>nášho servera (emhub)</strong>, ktorý ich zostavuje z cestovných poriadkov zverejnených dopravcami. Oba dostanú to, čo hľadáte (názvy zastávok, odkiaľ a kam, dátum a čas), a vašu IP adresu, ako pri každej webovej stránke. Náš server si vaše vyhľadávania neukladá, okrem krátkodobých záznamov o prístupe (pozri <em>Kde beží náš server</em>). Účet sa pritom nepoužíva.</p>
+<p><strong>Mapa spoja</strong> zobrazuje mapové podklady z <strong>OpenStreetMap</strong> (tile.openstreetmap.org), ktorý dostane vašu IP adresu a zobrazenú časť mapy, podľa zásad ochrany súkromia OpenStreetMap Foundation. Vaša poloha sa na mape zobrazuje len v telefóne.</p>
 <h3>3. Vaša poloha</h3>
 <p>Poloha je nepovinná a používa sa len v telefóne, na:</p>
 <ul><li>zastávky v okolí, keď ťuknete <em>Nájsť zastávky v okolí</em>;</li>
 <li><em>Stihnem to?</em>: chôdzu z miesta, kde ste, na zastávku autobusu, ktorý sledujete;</li>
 <li><em>Automatickú</em> pomoc s polohou autobusov (pozri bod 4): určenie, kde na trase je autobus, ktorým idete.
 </li></ul>
-<p><strong>Vaša poloha sa nikdy neposiela</strong> nám ani nikomu inému. Pri sledovaní autobusu sa poloha cestou na zastávku overí len každé 1 až 3 minúty. Nepretržité GPS beží len na zastávke, od pár minút pred príchodom autobusu, alebo počas jazdy.</p>
-<p><strong>Poloha na pozadí.</strong> Plan&amp;Ride zbiera údaje o polohe na funkciu <em>Stihnem to?</em> a na označovanie polohy autobusu v <em>Automatickom</em> režime, <strong>aj keď je aplikácia zatvorená alebo sa nepoužíva</strong>, no len kým sledujete autobus. Celý čas je zobrazená notifikácia. Keď sledovanie skončí, skončí aj prístup k polohe. S povolením Androidu <em>Povoliť vždy</em> to funguje aj pri pravidelných jazdách, ktoré sa začnú sledovať samy. Bez neho funguje poloha na pozadí len pri autobusoch, ktoré začnete sledovať sami. Povolenie môžete kedykoľvek zmeniť v nastaveniach Androidu. Tieto údaje o polohe zostávajú v telefóne a nikdy sa neposielajú ani nezdieľajú.</p>
+<p><strong>Vaša poloha sa nikdy neposiela</strong> nám ani nikomu inému, okrem zdieľania spoja kódom (bod 3a). Pri sledovaní autobusu sa poloha cestou na zastávku overí len každé 1 až 3 minúty. Nepretržité GPS beží len na zastávke, od pár minút pred príchodom autobusu, alebo počas jazdy.</p>
+<p><strong>Poloha na pozadí.</strong> Plan&amp;Ride zbiera údaje o polohe na funkciu <em>Stihnem to?</em> a na označovanie polohy autobusu v <em>Automatickom</em> režime, <strong>aj keď je aplikácia zatvorená alebo sa nepoužíva</strong>, no len kým sledujete autobus. Celý čas je zobrazená notifikácia. Keď sledovanie skončí, skončí aj prístup k polohe. S povolením Androidu <em>Povoliť vždy</em> to funguje aj pri pravidelných jazdách, ktoré sa začnú sledovať samy. Bez neho funguje poloha na pozadí len pri autobusoch, ktoré začnete sledovať sami. Povolenie môžete kedykoľvek zmeniť v nastaveniach Androidu. Tieto údaje o polohe zostávajú v telefóne a nikdy sa neposielajú ani nezdieľajú, okrem zdieľania spoja kódom (bod 3a).</p>
+<h3>3a. Zdieľanie spoja kódom (nepovinné)</h3>
+<p>Spoj, ktorý sledujete, môžete zdieľať s niekým, napríklad s rodinou. Náš server (emhub) vytvorí jednorazový 6-miestny kód (platí 10 minút, dá sa použiť raz), ktorý tej osobe poviete. Zadá ho so svojím menom, ktoré aplikácia vyplní z jej účtu SAD Zvolen alebo IDS BBSK (môže ho zmeniť). Meno uvidíte a vyberiete, či prijmete alebo odmietnete. <strong>Až keď prijmete</strong>:</p>
+<ul><li>dostane spoj (linku, spoj, deň a zastávky, kde nastupujete a vystupujete);</li>
+<li>kým ho sledujete, váš telefón jej cez náš server posiela vašu polohu (zemepisnú šírku, dĺžku a presnosť), najviac každých 20 sekúnd, aby videla, kde ste, na mape spoja;</li>
+<li>rovnako vám môže posielať svoju (prepínač na jej mape).</li></ul>
+<p>Server drží každé zdieľanie len v pamäti: kód, meno, spoj a <strong>poslednú</strong> polohu každej strany, ktorú nahradí ďalšia a ukazuje sa len 5 minút. Nič z toho sa neukladá na disk. Zdieľanie skončí, keď prestanete sledovať (alebo odmietnete, alebo druhá strana odíde), a najneskôr 6 hodín po vytvorení sa zmaže. Zdieľanie spoja odkazom posiela len spoj, nikdy vašu polohu ani meno.</p>
 <h3>4. Pomoc s polohou autobusov (nepovinná, predvolene vypnutá)</h3>
 <p>Mnohé autobusy nehlásia, kde sú, a cestujúci môžu pomôcť. V <em>Nastavenia → Komunita a poloha</em> si môžete vybrať <em>Tlačidlá</em> (ťuknete <em>Autobus je tu</em>) alebo <em>Automaticky</em>. Plan&amp;Ride potom posiela nášmu serveru (emhub):</p>
 <ul><li>ktorý autobus: linku, číslo spoja a dátum, alebo linku, prvú zastávku a čas odchodu;</li>
@@ -73,7 +80,7 @@
 <li><strong>Pravidelné jazdy:</strong> náš webový server uchováva vaše jazdy (zastávky, časy, dni a dátumy, ako skoro začať) spolu s adresou pre upozornenia vášho prehliadača, aby našiel váš autobus a upozornil vás, aj keď je aplikácia zatvorená. Zostanú, kým ich neodstránite; odstránením všetkých sa zmaže aj záznam.</li>
 <li>Hlásenia chýb a návrhy odovzdá náš webový server do emhubu, namiesto modelu zariadenia s údajmi o prehliadači.</li>
 <li>Webová verzia <strong>nezbiera štatistiky používania</strong> (bez Firebase Analytics).</li>
-<li>Poloha sa používa len v prehliadači a nikam sa neposiela, rovnako ako v aplikácii.</li>
+<li>Poloha sa používa len v prehliadači a nikam sa neposiela, rovnako ako v aplikácii, okrem zdieľania spoja kódom (bod 3a; len kým je webová verzia otvorená).</li>
 </ul>
 <h2>Kde beží náš server</h2>
 <p>Naše servery (emhub a webový server webovej verzie) bežia na serveroch, ktoré prevádzkujú vývojári. Pripája sa k nemu cez Cloudflare, ktorý prenáša spojenie (šifrované cez HTTPS) a pritom vidí IP adresy. Záznamy servera vrátane IP adries slúžia len na bezpečnosť a riešenie problémov a uchovávajú sa obmedzený čas.</p>

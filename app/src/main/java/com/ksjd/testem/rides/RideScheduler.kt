@@ -57,6 +57,8 @@ object RideScheduler {
             ride.id
         }
         prefs.saveScheduledRideIds(scheduled)
+        // Same moments (app start, boot, time change): the starred journeys' "leave by" alerts too.
+        com.ksjd.testem.reminders.LeaveBy.reschedule(context)
     }
 
     private fun pending(context: Context, rideId: String, departureMs: Long): PendingIntent = PendingIntent.getBroadcast(

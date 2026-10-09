@@ -79,10 +79,25 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/plan_ride_widget" />
         </receiver>
+        <receiver
+            android:name=".widget.StopWidgetReceiver"
+            android:exported="true"
+            android:label="@string/stop_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/stop_widget" />
+        </receiver>
         <!-- Starting to follow from the watch, through an exact alarm (EM-0041). -->
         <receiver android:name=".live.WatchStartReceiver" android:exported="false" />
         <receiver
             android:name=".rides.RideAlarmReceiver"
+            android:exported="false" />
+        <!-- "Leave by" for starred journeys. -->
+        <receiver
+            android:name=".reminders.LeaveByReceiver"
             android:exported="false" />
         <receiver
             android:name=".rides.RideRescheduleReceiver"

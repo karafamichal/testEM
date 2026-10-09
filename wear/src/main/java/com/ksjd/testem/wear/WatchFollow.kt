@@ -43,7 +43,9 @@ data class WatchFollow(
     val ongoing: Boolean = true,
     val nextStops: Int = 3,
     /** The phone notification's buttons right now ("Bus is here"…), pressed through ACTION_PATH by index. */
-    val buttons: List<String> = emptyList()
+    val buttons: List<String> = emptyList(),
+    /** How late the bus is in seconds (null: not known, timetable only): the countdown and ring take its colour. */
+    val delaySeconds: Int? = null
 ) {
     data class Stop(val name: String, val atMs: Long, val passed: Boolean, val platform: String)
     data class Leg(val line: String, val destination: String, val from: String, val atMs: Long)
@@ -77,7 +79,8 @@ data class WatchFollow(
             },
             ongoing = map.getBoolean("ongoing", true),
             nextStops = map.getInt("nextStops", 3),
-            buttons = map.getStringArray("buttons")?.toList().orEmpty()
+            buttons = map.getStringArray("buttons")?.toList().orEmpty(),
+            delaySeconds = if (map.containsKey("delaySec")) map.getInt("delaySec") else null
         )
     }
 }
@@ -121,16 +124,17 @@ object FollowStore {
         _state.value = follow
         map?.getString("lang", "")?.let { applyLanguage(context, it) }
         if (follow == null || !follow.ongoing) OngoingFollow.hide(context) else OngoingFollow.show(context, follow)
-        // "Get off next": announced here with its own vibration (the phone keeps that alert to itself).
-        follow?.alerts?.lastOrNull { it.key == "alight" }?.let { alight ->
-            val prefs = context.prefs()
-            if (prefs.getLong("alight_at", 0L) != alight.atMs) {
-                prefs.edit().putLong("alight_at", alight.atMs).apply()
-                OngoingFollow.alertGetOff(context, alight.title, alight.body)
+        // "Get off next" and "Leave now": announced here with their own vibrations (the phone keeps them to itself).
+        listOf("alight" to OngoingFollow.Buzz.GetOff, "catch_leave" to OngoingFollow.Buzz.Leave).forEach { (key, buzz) ->
+            follow?.alerts?.lastOrNull { it.key == key }?.let { alert ->
+                val prefs = context.prefs()
+                if (prefs.getLong("${key}_at", 0L) != alert.atMs) {
+                    prefs.edit().putLong("${key}_at", alert.atMs).apply()
+                    OngoingFollow.alert(context, buzz, alert.title, alert.body)
+                }
             }
         }
-        TileService.getUpdater(context).requestUpdate(FollowTile::class.java)
-        CountdownComplication.refresh(context)
+        refreshTiles(context)
     }
 
     private fun Context.prefs() = getSharedPreferences("follow", Context.MODE_PRIVATE)

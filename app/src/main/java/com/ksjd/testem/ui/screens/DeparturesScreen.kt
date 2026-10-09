@@ -30,6 +30,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.EventRepeat
 import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.NotificationsActive
@@ -136,7 +138,13 @@ private fun StopFinder(state: LiveState, vm: LiveViewModel) {
 
     LazyColumn(Modifier.fillMaxSize()) {
         item {
-            ScreenHeader(title = stringResource(R.string.departures_title))
+            // A code someone told you (they share their bus): it opens here once they accept.
+            var enteringCode by remember { mutableStateOf(false) }
+            if (enteringCode) EnterShareCodeDialog(onTrip = { enteringCode = false; vm.openFollowed(it) }) { enteringCode = false }
+            ScreenHeader(
+                title = stringResource(R.string.departures_title),
+                actions = { TextButton(onClick = { enteringCode = true }) { Text(stringResource(R.string.share_enter_button)) } }
+            )
             OutlinedTextField(
                 value = state.query,
                 onValueChange = vm::search,
@@ -473,6 +481,16 @@ private fun BoardRow(departure: LiveDeparture, now: Long, highlighted: Boolean, 
 fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit, onPickAlight: (Int?) -> Unit = {}) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val tracked by TripTracking.active.collectAsState()
+    val following = tracked?.ref == trip.ref
+    var showMap by remember { mutableStateOf(false) }
+    val alight = if (following) tracked?.alightOrder else trip.alightOrder
+    if (showMap && trip.detail != null) BusMapDialog(trip.ref, trip.detail, alight) { showMap = false }
+    var sharing by remember { mutableStateOf(false) }
+    if (sharing) {
+        val shared = if (following) tracked!! else com.ksjd.testem.live.TrackedTrip(trip.ref, trip.boardingPlatformIds, trip.alightOrder)
+        ShareTripDialog(shared, trip.detail?.destination.orEmpty()) { sharing = false }
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(horizontal = 20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -513,13 +531,16 @@ fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit, onPickAlight: (Int?) 
                         )
                     }
                 }
+                // Where the bus is on a map, and the bus as a link for someone else (the web version opens it).
+                if (trip.detail?.stops?.isNotEmpty() == true) {
+                    IconButton(onClick = { showMap = true }) { Icon(Icons.Outlined.Map, stringResource(R.string.busmap_open)) }
+                }
+                IconButton(onClick = { sharing = true }) { Icon(Icons.Outlined.Share, stringResource(R.string.share_trip)) }
             }
             Spacer(Modifier.height(12.dp))
             JourneyDraftBar(Modifier.padding(bottom = 8.dp))
             FollowControls(trip)
         }
-        val tracked by TripTracking.active.collectAsState()
-        val following = tracked?.ref == trip.ref
         when {
             trip.isLoading -> Box(
                 Modifier
@@ -534,7 +555,7 @@ fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit, onPickAlight: (Int?) 
             else -> TripTimeline(
                 stops = trip.detail.stops,
                 delaySeconds = trip.detail.delaySeconds,
-                alightOrder = if (following) tracked?.alightOrder else trip.alightOrder,
+                alightOrder = alight,
                 onStopClick = if (following) {
                     { order -> TripTracking.setAlightStop(context, order.takeIf { it != tracked?.alightOrder }) }
                 } else {

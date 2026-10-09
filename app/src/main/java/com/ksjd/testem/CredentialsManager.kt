@@ -130,6 +130,12 @@ class CredentialsManager(context: Context) {
     /** Next stops on the watch app's main screen (0, 3 or 5). */
     fun getWatchNextStops(): Int = prefs.getInt("watch_next_stops", 3)
     fun saveWatchNextStops(count: Int) = prefs.edit().putInt("watch_next_stops", count).apply()
+    /** "Next bus home" on the watch: one of the saved routes ("from|to"), "" for none. */
+    fun getWatchHomeRoute(): SavedRoute? = prefs.getString("watch_home_route", "").orEmpty().takeIf { it.isNotBlank() }?.let { key ->
+        getSavedRoutes().firstOrNull { "${it.fromText}|${it.toText}" == key }
+    }
+    fun saveWatchHomeRoute(route: SavedRoute?) =
+        prefs.edit().putString("watch_home_route", route?.let { "${it.fromText}|${it.toText}" }.orEmpty()).apply()
 
     // ------------------------------------------------------------- appearance
 
@@ -247,6 +253,12 @@ class CredentialsManager(context: Context) {
         prefs.getString("low_credit_warning_threshold", null)?.toDoubleOrNull()?.takeIf { it >= 0.0 } ?: 1.0
 
     fun getLowCreditAlertsEnabled(): Boolean = prefs.getBoolean("alerts_low_credit", false)
+
+    /** "Leave by" alerts for starred journeys (reminders/LeaveBy.kt), and the last journey already announced. */
+    fun getLeaveByEnabled(): Boolean = prefs.getBoolean("leave_by", true)
+    fun saveLeaveByEnabled(enabled: Boolean) = prefs.edit().putBoolean("leave_by", enabled).apply()
+    fun getLeaveByDone(): String = prefs.getString("leave_by_done", "").orEmpty()
+    fun saveLeaveByDone(id: String) = prefs.edit().putString("leave_by_done", id).apply()
     fun saveLowCreditAlertsEnabled(enabled: Boolean) = prefs.edit().putBoolean("alerts_low_credit", enabled).apply()
 
     fun getExpiryAlertsEnabled(): Boolean = prefs.getBoolean("alerts_expiry", false)

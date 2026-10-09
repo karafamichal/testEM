@@ -319,7 +319,19 @@ fun ArrivalAlertSetting() {
     var custom by rememberSaveable { mutableStateOf(minutes !in ARRIVAL_CHOICES) }
     var customText by rememberSaveable { mutableStateOf(minutes.toString()) }
     val set: (Int) -> Unit = { m -> minutes = m; prefs.saveArrivalAlertMinutes(m) }
+    var leaveBy by remember { mutableStateOf(prefs.getLeaveByEnabled()) }
 
+    // Starred journeys: when to leave for the stop, without following them.
+    Spacer(Modifier.height(12.dp))
+    ListGroup {
+        ListRow(
+            stringResource(R.string.leave_by_setting), subtitle = stringResource(R.string.leave_by_setting_hint),
+            onClick = { leaveBy = !leaveBy; prefs.saveLeaveByEnabled(leaveBy); com.ksjd.testem.reminders.LeaveBy.reschedule(context) },
+            trailing = {
+                androidx.compose.material3.Switch(leaveBy, { leaveBy = it; prefs.saveLeaveByEnabled(it); com.ksjd.testem.reminders.LeaveBy.reschedule(context) })
+            }
+        )
+    }
     SectionLabel(stringResource(R.string.arrival_alert_title))
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.arrival_alert_label), style = MaterialTheme.typography.bodyMedium)

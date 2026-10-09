@@ -168,7 +168,10 @@ fun HistoryScreen(viewModel: AppViewModel) {
             else -> {
                 item { InsightsPanel(insights, card?.currencySymbol ?: "€") { focus = it } }
                 grouped.forEach { (month, monthItems) ->
-                    item(key = "m-$month") { SectionLabel(monthTitle(month)) }
+                    item(key = "m-$month") {
+                        SectionLabel(monthTitle(month))
+                        MonthSummary(monthItems, card?.currencySymbol ?: "€")
+                    }
                     item(key = "g-$month") {
                         ListGroup {
                             monthItems.forEachIndexed { index, entry ->
@@ -182,6 +185,26 @@ fun HistoryScreen(viewModel: AppViewModel) {
             }
         }
     }
+}
+
+/** A month in numbers: rides, what they cost, and the credit added (EM: monthly spending). */
+@Composable
+private fun MonthSummary(items: List<CardHistoryItem>, currency: String) {
+    val rides = items.count { it.sourceType == com.ksjd.testem.HistorySourceType.TICKET && !it.isTopUp && (it.amountCents ?: 0L) < 0L }
+    val spent = items.filter { !it.isTopUp && (it.amountCents ?: 0L) < 0L }.sumOf { -(it.amountCents ?: 0L) }
+    val added = items.filter { it.isTopUp && (it.amountCents ?: 0L) > 0L }.sumOf { it.amountCents ?: 0L }
+    val parts = listOfNotNull(
+        pluralStringResource(R.plurals.insights_trips, rides, rides).takeIf { rides > 0 },
+        stringResource(R.string.month_spent, Format.cents(spent, currency)).takeIf { spent > 0 },
+        stringResource(R.string.month_added, Format.cents(added, currency)).takeIf { added > 0 }
+    )
+    if (parts.isEmpty()) return
+    Text(
+        parts.joinToString(" · "),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 6.dp)
+    )
 }
 
 private fun monthTitle(month: YearMonth): String {

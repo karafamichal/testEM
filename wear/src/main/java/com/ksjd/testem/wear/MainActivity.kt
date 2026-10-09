@@ -26,6 +26,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -35,7 +36,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.ambient.AmbientLifecycleObserver
 import androidx.wear.compose.material.Chip
+import androidx.wear.compose.material.Colors
 import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.CompactChip
@@ -48,14 +51,31 @@ import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import com.google.android.gms.wearable.DataMap
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.Wearable
+import android.content.Intent
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /** The followed bus on the wrist (EM-0041): countdown and ride as a ring, next stops, all stops, transfers, alerts. */
 class MainActivity : ComponentActivity() {
+    /** Always-on display: the app stays on screen, dimmed, showing only the countdown (updated once a minute). */
+    private val ambient = MutableStateFlow(false)
+    private val ambientTick = MutableStateFlow(System.currentTimeMillis())
+    private val ambientObserver = AmbientLifecycleObserver(this, object : AmbientLifecycleObserver.AmbientLifecycleCallback {
+        override fun onEnterAmbient(ambientDetails: AmbientLifecycleObserver.AmbientDetails) {
+            ambientTick.value = System.currentTimeMillis()
+            ambient.value = true
+        }
+        override fun onExitAmbient() { ambient.value = false }
+        override fun onUpdateAmbient() { ambientTick.value = System.currentTimeMillis() }
+    })
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lifecycle.addObserver(ambientObserver)
         FollowStore.current(this)
         HomeStore.current(this)
+        ThemeStore.current(this)
+        startFromTile(intent)
         if (!(BuildConfig.DEBUG && intent.getBooleanExtra("demo", false))) requestHome(this)
         // Debug builds only: `adb shell am start -n com.ksjd.testem/.wear.MainActivity --ez demo true` shows a sample bus
         // (no phone needed), to check the screens, the watch-face countdown and the tile.
@@ -74,14 +94,72 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
-        setContent { MaterialTheme { WatchApp() } }
+        setContent {
+            val theme by ThemeStore.state.collectAsState()
+            val dimmed by ambient.collectAsState()
+            val tick by ambientTick.collectAsState()
+            val nav = rememberSwipeDismissableNavController()
+            MaterialTheme(colors = colorsOf(theme)) {
+                if (dimmed) AmbientScreen(tick) else WatchApp(nav)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        startFromTile(intent)
+    }
+
+    /** "Next bus home" tile tapped: follow it on the phone. */
+    private fun startFromTile(intent: Intent?) {
+        val id = intent?.getStringExtra(EXTRA_START) ?: return
+        intent.removeExtra(EXTRA_START)
+        startOnPhone(this, id)
     }
 }
 
+/** The phone app's theme on the watch's black screen (EM-0042): buttons and highlights in its colours. */
+private fun colorsOf(t: WatchTheme): Colors {
+    val primary = Color(t.primary)
+    val accent = Color(t.tertiary)
+    val on = { c: Color -> if (c.luminance() > 0.45f) Color.Black else Color.White }
+    return Colors(
+        primary = primary, primaryVariant = Color(t.secondary), onPrimary = on(primary),
+        secondary = accent, secondaryVariant = accent, onSecondary = on(accent)
+    )
+}
+
+/** Start a trip on the phone ("h:", "j:", "r:"), saying whether the phone got it. */
+private fun startOnPhone(context: Context, id: String) = sendToPhone(context, START_PATH, id) { ok ->
+    Toast.makeText(context, if (ok) R.string.starting else R.string.report_no_phone, Toast.LENGTH_LONG).show()
+}
+
+/**
+ * The always-on view: only the line and the countdown, in grey on black (little lit, little burn-in), refreshed
+ * once a minute by the system.
+ */
 @Composable
-private fun WatchApp() {
+private fun AmbientScreen(now: Long) {
     val context = LocalContext.current
-    val nav = rememberSwipeDismissableNavController()
+    val follow by FollowStore.state.collectAsState()
+    Column(Modifier.fillMaxSize().background(Color.Black), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        val f = follow
+        if (f == null) {
+            Text(stringResource(R.string.app_name), color = AmbientGrey, style = MaterialTheme.typography.caption1)
+        } else {
+            Text(f.line, color = AmbientGrey, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text(countdown(context, f.targetMs, now), color = AmbientGrey, fontSize = 40.sp)
+            Text(f.destination, color = AmbientGrey.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.caption2, modifier = Modifier.padding(horizontal = 32.dp))
+        }
+    }
+}
+
+private val AmbientGrey = Color(0xFFB0B0B0)
+
+@Composable
+private fun WatchApp(nav: androidx.navigation.NavHostController) {
+    val context = LocalContext.current
     val follow by FollowStore.state.collectAsState()
     val home by HomeStore.state.collectAsState()
     val now by produceState(System.currentTimeMillis()) {
@@ -114,12 +192,13 @@ private fun MainScreen(f: WatchFollow?, home: WatchHome?, now: Long, onOpen: (St
     val context = LocalContext.current
     Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         // Your part of the line, as on the phone's card: the ring fills as the bus goes from your stop to where you get off.
+        // Green, orange or red by how late the bus is; the theme's colour while only the timetable is known.
         if (f != null && f.hops > 0) {
             CircularProgressIndicator(
                 progress = (f.position / f.hops).coerceIn(0f, 1f),
                 modifier = Modifier.fillMaxSize().padding(3.dp),
                 strokeWidth = 5.dp,
-                indicatorColor = MaterialTheme.colors.primary,
+                indicatorColor = delayColor(f.delaySeconds)?.color() ?: MaterialTheme.colors.primary,
                 trackColor = MaterialTheme.colors.onBackground.copy(alpha = 0.15f)
             )
         }
@@ -164,6 +243,18 @@ private fun MainScreen(f: WatchFollow?, home: WatchHome?, now: Long, onOpen: (St
             }
             // Always there: trips to start, departures, credit (from the phone).
             item { ListHeader { Text(stringResource(R.string.more)) } }
+            // "Next bus home" (the route set on the phone): one tap follows it.
+            home?.homeTrip?.takeIf { it.atMs > now - 60_000 }?.let { trip ->
+                item {
+                    Chip(
+                        onClick = { startOnPhone(context, trip.id) },
+                        label = { Text(stringResource(R.string.home_chip, trip.lines, clock(trip.atMs)), maxLines = 1) },
+                        secondaryLabel = { Text(countdown(context, trip.atMs, now) + " · " + trip.sub, maxLines = 1) },
+                        colors = ChipDefaults.secondaryChipColors(),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                    )
+                }
+            }
             item { NavChip(stringResource(R.string.my_trips)) { onOpen("trips") } }
             item { NavChip(stringResource(R.string.favourites)) { onOpen("favourites") } }
             item { NavChip(stringResource(R.string.nearby)) { onOpen("nearby") } }
@@ -192,17 +283,19 @@ private fun MainScreen(f: WatchFollow?, home: WatchHome?, now: Long, onOpen: (St
 private fun Header(f: WatchFollow, now: Long) {
     val context = LocalContext.current
     Column(Modifier.padding(horizontal = edge()), horizontalAlignment = Alignment.CenterHorizontally) {
+        // City buses blue, regional orange: which bus it is, at a glance.
         Text(
             f.line,
-            color = Color.Black,
+            color = Color.White,
             fontWeight = FontWeight.Bold,
             fontSize = 14.sp,
-            modifier = Modifier.background(Color.White, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 1.dp)
+            modifier = Modifier.background(lineColor(f.line).color(), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 1.dp)
         )
         // Two lines: on a round screen a long destination ("Banská Bystrica, Roosevelt.nem.") doesn't fit one (EM-0044).
         Text(f.destination, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
             style = MaterialTheme.typography.caption1, modifier = Modifier.padding(top = 4.dp))
-        Text(countdown(context, f.targetMs, now), fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text(countdown(context, f.targetMs, now), fontSize = 34.sp, fontWeight = FontWeight.Bold,
+            color = delayColor(f.delaySeconds)?.color() ?: MaterialTheme.colors.onBackground)
         Text(f.caption, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.caption2,
             color = MaterialTheme.colors.onSurfaceVariant)
         if (f.delay.isNotBlank()) {
@@ -317,11 +410,7 @@ private fun TripsScreen(home: WatchHome?) {
         trips.forEach { t ->
             item {
                 Chip(
-                    onClick = {
-                        sendToPhone(context, START_PATH, t.id) { ok ->
-                            Toast.makeText(context, if (ok) R.string.starting else R.string.report_no_phone, Toast.LENGTH_LONG).show()
-                        }
-                    },
+                    onClick = { startOnPhone(context, t.id) },
                     label = { Text(if (t.id.startsWith("r:")) clock(t.atMs) + "  " + t.title else t.title, maxLines = 2) },
                     secondaryLabel = { Text(listOf(t.sub, t.lines).filter { it.isNotBlank() }.joinToString("\n"), maxLines = 2) },
                     colors = ChipDefaults.secondaryChipColors(),

@@ -1,5 +1,23 @@
 // Slovak (default, like the Android app) and English. t('key', a, b) fills %1, %2.
 const en = {
+  share_back: 'Show them where I am', share_accepted_loc: 'They see your bus and where you are until you stop following.',
+
+  share_how: 'Send a link anyone can open, or show a one-time code to tell someone: you see their name and choose whether they get your bus.',
+  share_link: 'Send a link', share_code: 'Show a code', share_code_failed: 'Couldn\'t get a code. Check the connection and try again.',
+  share_code_tell: 'Tell this code to the person. They enter it in Plan&Ride (Departures → Code).', share_code_valid: 'Valid 10 minutes, once.',
+  share_asked: '%1 wants to see your bus', share_asked_hint: 'The name comes from their Plan&Ride account. If you accept, they see your bus and where you are until you stop following. Accept only if you know them.',
+  share_accepted: 'Shared with %1.', share_declined_self: 'Declined.', share_expired: 'The code expired. Show a new one.',
+  share_accept: 'Accept', share_decline: 'Decline', share_enter_button: 'Code', share_enter_title: 'Shared bus code',
+  share_enter_code: '6-digit code', share_your_name: 'Your name', share_enter_hint: 'Your name goes with the code, so they know who asks.',
+  share_send: 'Send', share_waiting: 'Waiting for them to accept (%1)…', share_declined: 'They declined, or took the code back.',
+  share_code_wrong: 'No such code, or it was already used or expired.',
+
+  background_title: 'Background colour', background_hint: 'With your own background, light or dark text follows from how bright it is.',
+  background_reset: 'Theme default', month_spent: 'spent %1', month_added: 'added %1',
+  map_open: 'Map', map_unavailable: 'There\'s no map for this bus: its stops\' positions aren\'t known.',
+  share_trip: 'Share this bus', share_trip_text: 'Line %1 to %2. Watch it live in Plan&Ride: %3', share_copied: 'Copied: paste it to whoever you want to send it.',
+  share_bad_link: 'This shared bus couldn\'t be opened.',
+
   wallet_both: 'Both', wallet_sadzv_covers: 'City buses in Banská Bystrica and Zvolen (sadzv.qrbus.me)',
   wallet_ids_covers: 'Regional buses in the Banská Bystrica region, city buses in Žiar nad Hronom, Brezno and Nová Baňa (eshop.idsbbsk.sk)',
   login_sub_ids: 'Use the email and password of your eshop.idsbbsk.sk account.',
@@ -164,6 +182,24 @@ const en = {
 };
 
 const sk = {
+  share_back: 'Ukázať im, kde som', share_accepted_loc: 'Vidí váš spoj a kde ste, kým sledovanie neukončíte.',
+
+  share_how: 'Pošlite odkaz, ktorý otvorí ktokoľvek, alebo ukážte jednorazový kód a povedzte ho niekomu: uvidíte jeho meno a vyberiete, či váš spoj dostane.',
+  share_link: 'Poslať odkaz', share_code: 'Ukázať kód', share_code_failed: 'Kód sa nepodarilo získať. Skontrolujte pripojenie a skúste znova.',
+  share_code_tell: 'Povedzte tento kód danej osobe. Zadá ho v Plan&Ride (Odchody → Kód).', share_code_valid: 'Platí 10 minút, raz.',
+  share_asked: '%1 chce vidieť váš spoj', share_asked_hint: 'Meno je z jeho účtu v Plan&Ride. Ak prijmete, uvidí váš spoj a kde ste, kým sledovanie neukončíte. Prijmite, len ak ho poznáte.',
+  share_accepted: 'Zdieľané s: %1.', share_declined_self: 'Odmietnuté.', share_expired: 'Kód vypršal. Ukážte nový.',
+  share_accept: 'Prijať', share_decline: 'Odmietnuť', share_enter_button: 'Kód', share_enter_title: 'Kód zdieľaného spoja',
+  share_enter_code: '6-miestny kód', share_your_name: 'Vaše meno', share_enter_hint: 'Vaše meno sa pošle s kódom, aby druhá strana vedela, kto žiada.',
+  share_send: 'Poslať', share_waiting: 'Čaká sa na prijatie (%1)…', share_declined: 'Druhá strana odmietla alebo kód zrušila.',
+  share_code_wrong: 'Taký kód nie je, alebo už bol použitý či vypršal.',
+
+  background_title: 'Farba pozadia', background_hint: 'S vlastným pozadím sa svetlý alebo tmavý text určí podľa jeho jasu.',
+  background_reset: 'Podľa témy', month_spent: 'minuté %1', month_added: 'dobité %1',
+  map_open: 'Mapa', map_unavailable: 'Pre tento spoj mapa nie je: polohy jeho zastávok nepoznáme.',
+  share_trip: 'Zdieľať spoj', share_trip_text: 'Linka %1 smer %2. Sledujte ju naživo v Plan&Ride: %3', share_copied: 'Skopírované: vložte to, komu to chcete poslať.',
+  share_bad_link: 'Zdieľaný spoj sa nepodarilo otvoriť.',
+
   wallet_both: 'Spolu', wallet_sadzv_covers: 'MHD v Banskej Bystrici a vo Zvolene (sadzv.qrbus.me)',
   wallet_ids_covers: 'Regionálne autobusy Banskobystrického kraja, MHD v Žiari nad Hronom, Brezne a Novej Bani (eshop.idsbbsk.sk)',
   login_sub_ids: 'Použite e-mail a heslo k účtu na eshop.idsbbsk.sk.',

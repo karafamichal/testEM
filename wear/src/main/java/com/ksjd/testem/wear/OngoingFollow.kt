@@ -34,6 +34,7 @@ object OngoingFollow {
             .setContentTitle(title)
             .setContentText(listOf(countdown(context, f.targetMs, System.currentTimeMillis()), f.caption).filter { it.isNotBlank() }.joinToString(" "))
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
+            .setColor(lineColor(f.line))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
@@ -56,35 +57,37 @@ object OngoingFollow {
 
     fun hide(context: Context) = NotificationManagerCompat.from(context).cancel(ID)
 
-    /**
-     * "Get off at the next stop", announced by the watch itself with its own vibration (three long pulses), so it's
-     * known without looking even on a crowded bus. The phone keeps this alert to itself, so it comes once.
-     */
-    fun alertGetOff(context: Context, title: String, body: String) {
+    /** The watch's own alerts, each with a vibration of its own so it's known without looking. */
+    enum class Buzz(val channel: String, val title: Int, val pattern: LongArray, val id: Int) {
+        /** "Get off at the next stop": three long pulses. */
+        GetOff("get_off", R.string.channel_get_off, longArrayOf(0, 700, 200, 700, 200, 700), ID + 1),
+        /** "Leave now" for the stop (following, or a starred journey): quick, quick, long. */
+        Leave("leave", R.string.channel_leave, longArrayOf(0, 150, 120, 150, 120, 900), ID + 2)
+    }
+
+    /** Announced by the watch itself (the phone keeps these alerts to itself, so each comes once). */
+    fun alert(context: Context, buzz: Buzz, title: String, body: String) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_GET_OFF, context.getString(R.string.channel_get_off), NotificationManager.IMPORTANCE_HIGH).apply {
+            NotificationChannel(buzz.channel, context.getString(buzz.title), NotificationManager.IMPORTANCE_HIGH).apply {
                 enableVibration(true)
-                vibrationPattern = GET_OFF_PATTERN
+                vibrationPattern = buzz.pattern
             }
         )
         val open = PendingIntent.getActivity(
-            context, 1, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            context, buzz.id, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_GET_OFF)
+        val notification = NotificationCompat.Builder(context, buzz.channel)
             .setSmallIcon(R.drawable.ic_stat_bus)
             .setContentTitle(title)
             .setContentText(body)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setVibrate(GET_OFF_PATTERN)
+            .setVibrate(buzz.pattern)
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
-        runCatching { NotificationManagerCompat.from(context).notify(ID + 1, notification) }
+        runCatching { NotificationManagerCompat.from(context).notify(buzz.id, notification) }
     }
-
-    private const val CHANNEL_GET_OFF = "get_off"
-    private val GET_OFF_PATTERN = longArrayOf(0, 700, 200, 700, 200, 700)
 }

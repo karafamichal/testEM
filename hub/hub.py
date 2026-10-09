@@ -24,7 +24,9 @@ import queue
 import re
 import secrets
 import smtplib
+import socket
 import sqlite3
+import struct
 import ssl
 import sys
 import threading
@@ -45,7 +47,7 @@ from pathlib import Path
 import sadzv
 import timetable
 
-VERSION = "1.15.1"
+VERSION = "1.16.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -70,6 +72,7 @@ SETTINGS = {  # key: (env var, default, is secret)
     "oidc_client_secret": ("HUB_OIDC_CLIENT_SECRET", "", True),
     "oidc_label": ("HUB_OIDC_LABEL", "Authentik", False),
     "gtfs_feeds": ("HUB_GTFS_FEEDS", timetable.DEFAULT_FEEDS, False),  # transiq feed names, comma-separated
+    "web_url": ("HUB_WEB_URL", "", False),  # the web version (iPhone PWA): shared trips open there
 }
 GTFS_DIR = Path(ENV("HUB_GTFS_DIR", str(Path(DB_PATH).parent / "gtfs")))
 INVITE_HOURS = 72
@@ -105,6 +108,23 @@ LOCAL_ZONE = ZoneInfo("Europe/Bratislava")
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS map_stops (
+  station_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  lat REAL NOT NULL,
+  lon REAL NOT NULL,
+  orig_lat REAL,
+  orig_lon REAL,
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS map_segments (
+  segment TEXT PRIMARY KEY,
+  points TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'manual',
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
@@ -235,6 +255,29 @@ def init_db():
             )
 
 
+def load_map_edits():
+    """The dashboard map's edits into the timetable (applied on every rebuild, so a GTFS update keeps them)."""
+    with db() as conn:
+        timetable.edits["stops"] = {r["station_id"]: {"name": r["name"], "lat": r["lat"], "lon": r["lon"],
+                                                      "origLat": r["orig_lat"] if r["orig_lat"] is not None else r["lat"],
+                                                      "origLon": r["orig_lon"] if r["orig_lon"] is not None else r["lon"]}
+                                    for r in conn.execute("SELECT * FROM map_stops")}
+        timetable.edits["segments"] = {r["segment"]: json.loads(r["points"]) for r in conn.execute("SELECT segment, points FROM map_segments")}
+
+
+OSRM_URL = ENV("HUB_OSRM_URL", "https://router.project-osrm.org")
+
+
+def snap_segment(a, b):
+    """The road between two points ([lat, lon] each) from OSRM, without its ends; None if it found none."""
+    url = f"{OSRM_URL}/route/v1/driving/{a[1]},{a[0]};{b[1]},{b[0]}?overview=full&geometries=geojson"
+    route = (http_json(url).get("routes") or [None])[0]
+    if not route:
+        return None
+    coords = [[round(lat, 6), round(lon, 6)] for lon, lat in route["geometry"]["coordinates"]]
+    return coords[1:-1]
+
+
 # ------------------------------------------------------------------ settings
 
 _settings = {}
@@ -343,6 +386,193 @@ bug_limiter = RateLimiter(10, 60 * 60)
 report_limiter = RateLimiter(1200, 60 * 60)  # per IP: phones on mobile data share addresses
 reporter_limiter = RateLimiter(300, 60 * 60)  # per rider: GPS every 15 s is 240 an hour
 timetable_limiter = RateLimiter(2000, 60 * 60)  # per IP: a planner search is a few requests
+share_limiter = RateLimiter(30, 60 * 60)  # per IP: new share codes
+claim_limiter = RateLimiter(12, 15 * 60)  # per IP: codes tried (6 digits: guessing one takes ~40 000 windows)
+
+
+class Shares:
+    """
+    Sharing a bus by a one-time code. The server makes a 6-digit code (valid CODE_S) the sharer tells someone; that
+    person enters it with their name; the sharer sees the name and accepts or declines; only then does the other side
+    get the bus, and from then on each side may send where it is and sees the other's last position (POSITION_S fresh).
+    Each side holds a random token for its half. ponytail: in memory (a restart ends shares), one process.
+    """
+    CODE_S = 10 * 60
+    POSITION_S = 5 * 60
+    KEEP_S = 6 * 3600  # answered shares are forgotten after this
+
+    def __init__(self):
+        self.items = {}  # id -> dict
+        self.lock = threading.Lock()
+        self.sockets = {}  # share id -> {"owner": set(WebSocket), "claim": set(WebSocket)}
+
+    def attach(self, share_id, side, ws):
+        with self.lock:
+            self.sockets.setdefault(share_id, {"owner": set(), "claim": set()})[side].add(ws)
+
+    def detach(self, share_id, side, ws):
+        with self.lock:
+            self.sockets.get(share_id, {}).get(side, set()).discard(ws)
+
+    def push(self, share, side, message):
+        """A message to every open connection of one side ("owner" / "claim") of a share."""
+        with self.lock:
+            targets = list(self.sockets.get(share["id"], {}).get(side, ()))
+        for ws in targets:
+            ws.send_json(message)
+
+    def changed(self, share):
+        """Status news to both sides: someone entered the code (the sharer gets the name), accepted, declined, ended."""
+        self.push(share, "owner", {"type": "status", "status": share["status"], "name": share["name"]})
+        body = {"type": "status", "status": share["status"], "label": share["label"]}
+        if share["status"] == "accepted":
+            body["trip"] = share["trip"]
+        self.push(share, "claim", body)
+
+    def _sweep(self, t):
+        for key in [k for k, v in self.items.items() if t - v["created"] > self.KEEP_S or (v["status"] == "waiting" and t > v["expires"])]:
+            del self.items[key]
+
+    def create(self, trip, label):
+        t = now()
+        with self.lock:
+            self._sweep(t)
+            active = {v["code"] for v in self.items.values() if v["status"] == "waiting"}
+            code = next(c for c in (f"{secrets.randbelow(1_000_000):06d}" for _ in range(100)) if c not in active)
+            # pos/claimPos: where each side last was (only after the sharer accepted; overwritten, never kept).
+            share = dict(id=secrets.token_urlsafe(12), code=code, owner=secrets.token_urlsafe(24), trip=trip, label=label,
+                         created=t, expires=t + self.CODE_S, status="waiting", name="", claim=None, claimToken=None,
+                         pos=None, claimPos=None)
+            self.items[share["id"]] = share
+            return share
+
+    def claim(self, code, name):
+        t = now()
+        with self.lock:
+            self._sweep(t)
+            share = next((v for v in self.items.values() if v["code"] == code and v["status"] == "waiting" and t <= v["expires"]), None)
+            if not share:
+                return None
+            # One use: the code is spent, whatever the sharer answers.
+            share.update(status="asked", name=name, claim=secrets.token_urlsafe(12), claimToken=secrets.token_urlsafe(24))
+        self.changed(share)
+        return share
+
+    def owned(self, share_id, token):
+        with self.lock:
+            share = self.items.get(share_id)
+            return share if share and hmac.compare_digest(share["owner"], token or "") else None
+
+    def claimed(self, claim_id, token):
+        with self.lock:
+            share = next((v for v in self.items.values() if v["claim"] == claim_id), None)
+            return share if share and hmac.compare_digest(share["claimToken"] or "", token or "") else None
+
+
+shares = Shares()
+
+
+class WebSocket:
+    """
+    A server-side WebSocket (RFC 6455) on a request's socket: text frames only, pings answered, our own pings when
+    quiet. ponytail: one thread per connection (ThreadingHTTPServer); fine for the few shares open at a time.
+    """
+    GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+    IDLE_S = 30
+
+    def __init__(self, sock):
+        self.sock, self.lock, self.open = sock, threading.Lock(), True
+
+    @classmethod
+    def accept(cls, handler):
+        key = handler.headers["Sec-WebSocket-Key"].strip()
+        accept = base64.b64encode(hashlib.sha1((key + cls.GUID).encode()).digest()).decode()
+        handler.send_response(101, "Switching Protocols")
+        handler.send_header("Upgrade", "websocket")
+        handler.send_header("Connection", "Upgrade")
+        handler.send_header("Sec-WebSocket-Accept", accept)
+        handler.end_headers()
+        handler.wfile.flush()
+        sock = handler.connection
+        sock.settimeout(cls.IDLE_S)
+        return cls(sock)
+
+    def _send(self, opcode, payload=b""):
+        header = bytes([0x80 | opcode])
+        n = len(payload)
+        header += bytes([n]) if n < 126 else bytes([126]) + struct.pack(">H", n) if n < 65536 else bytes([127]) + struct.pack(">Q", n)
+        with self.lock:
+            if not self.open:
+                return
+            try:
+                self.sock.sendall(header + payload)
+            except OSError:
+                self.open = False
+
+    def send_json(self, data):
+        self._send(1, json.dumps(data).encode())
+
+    def _read(self, n):
+        data = b""
+        while len(data) < n:
+            chunk = self.sock.recv(n - len(data))
+            if not chunk:
+                raise ConnectionError("closed")
+            data += chunk
+        return data
+
+    def messages(self):
+        """Text messages from the client as JSON objects, until it closes (or goes quiet past a ping)."""
+        waiting_pong = False
+        while self.open:
+            try:
+                b1, b2 = self._read(2)
+            except socket.timeout:
+                if waiting_pong:
+                    break
+                waiting_pong = True
+                self._send(9)  # ping: anyone still there?
+                continue
+            except (ConnectionError, OSError):
+                break
+            waiting_pong = False
+            opcode, n = b1 & 0x0F, b2 & 0x7F
+            try:
+                if n == 126:
+                    n = struct.unpack(">H", self._read(2))[0]
+                elif n == 127:
+                    n = struct.unpack(">Q", self._read(8))[0]
+                if n > 64_000:
+                    break
+                mask = self._read(4) if b2 & 0x80 else b"\0\0\0\0"
+                payload = bytes(c ^ mask[i % 4] for i, c in enumerate(self._read(n)))
+            except (ConnectionError, OSError):
+                break
+            if opcode == 8:
+                self._send(8)
+                break
+            if opcode == 9:
+                self._send(10, payload)
+            elif opcode == 1:
+                try:
+                    message = json.loads(payload.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if isinstance(message, dict):
+                    yield message
+        self.open = False
+
+
+def position_of(data):
+    """A position sent by one side of a share: checked numbers only."""
+    lat, lon = float(data.get("lat")), float(data.get("lon"))
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise ValueError("Bad position")
+    return {"lat": round(lat, 6), "lon": round(lon, 6), "accuracy": min(10_000, max(0, int(data.get("accuracy") or 0))), "at": now()}
+
+
+def fresh_position(pos):
+    return pos if pos and now() - pos["at"] <= Shares.POSITION_S else None
 
 
 # ------------------------------------------------------------------ email
@@ -812,6 +1042,10 @@ def one_line(value, limit):
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
        "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-src 'self'; "
        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'")
+# The dashboard also has the map: Leaflet from unpkg (pinned, with its hash) and OpenStreetMap's tiles.
+CSP_DASHBOARD = CSP.replace("script-src 'self' 'unsafe-inline'", "script-src 'self' 'unsafe-inline' https://unpkg.com") \
+    .replace("style-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline' https://unpkg.com") \
+    .replace("img-src 'self' data:", "img-src 'self' data: https://tile.openstreetmap.org https://unpkg.com")
 
 
 def trusted_proxy(address):
@@ -960,7 +1194,7 @@ class Handler(BaseHTTPRequestHandler):
         if content_type == "text/html":
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Security-Policy", CSP)
+            self.send_header("Content-Security-Policy", (headers or {}).pop("Content-Security-Policy", CSP))
         if SECURE_COOKIES:
             self.send_header("Strict-Transport-Security", "max-age=31536000")
         for key, value in (headers or {}).items():
@@ -1067,13 +1301,23 @@ class Handler(BaseHTTPRequestHandler):
         page = site_route(path)
         if method == "GET" and page:
             return self.send(200, render_site(*page), "text/html")
+        if method == "GET" and path == "/f":
+            # A followed bus shared from the app: the web version opens it (the app's link stays the same if it moves).
+            trip = query.get("t", "")
+            web = setting("web_url").rstrip("/")
+            if web and re.fullmatch(r"[A-Za-z0-9_-]{1,3000}", trip):
+                return self.redirect(web + "/?follow=" + trip)
+            return self.send(404, b"<!doctype html><meta charset=utf-8><title>Plan&amp;Ride</title>"
+                             b"<p>This shared bus can't be opened here. Open it in Plan&amp;Ride.</p>", "text/html")
         if method == "GET" and path == "/mark.png":
             return self.static("mark.png", "image/png")
         if method == "GET" and path == "/login":
             # Already signed in (e.g. from the website's Admin link): straight to the dashboard.
             return self.redirect("/dashboard") if self.current_user() else self.static("login.html")
         if method == "GET" and path == "/dashboard":
-            return self.static("dashboard.html") if self.current_user() else self.redirect("/login")
+            if not self.current_user():
+                return self.redirect("/login")
+            return self.send(200, (HERE / "static" / "dashboard.html").read_bytes(), "text/html", {"Content-Security-Policy": CSP_DASHBOARD})
         if method == "GET" and path == "/brand.css":
             return self.static("brand.css", "text/css")
         if method == "GET" and path == "/favicon.svg":
@@ -1239,6 +1483,8 @@ class Handler(BaseHTTPRequestHandler):
     def public_api(self, method, route, query):
         if route == "health":
             return self.send(200, {"ok": True, "version": VERSION}, headers=self.cors())
+        if method == "GET" and route == "shares/live":
+            return self.share_socket(query)
         given = self.headers.get("X-App-Key", "")
         if not any(hmac.compare_digest(given.encode(), k.encode()) for k in APP_KEYS):
             return self.error(401, "Missing or wrong app key", cors=True)
@@ -1247,6 +1493,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.error(429, "Too many requests", cors=True)
             status, body = timetable_query(route[len("timetable/"):], query)
             return self.send(status, body, headers=self.cors())
+        if route.startswith("shares"):
+            return self.share_api(method, route, query)
         if method == "POST" and route == "bugs":
             return self.submit_bug()
         if method == "POST" and route == "community/reports":
@@ -1259,6 +1507,104 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"trip": key, "delay": trip_delay(conn, key), "history": trip_history(conn, key)},
                                  headers=self.cors())
         self.error(404, "Not found", cors=True)
+
+    def share_socket(self, query):
+        """
+        A share over a WebSocket: GET /api/v1/shares/live?side=owner&id=<share id>&token=… (the sharer) or
+        side=claim&id=<claim id>&token=… (the one who entered the code). The server pushes status changes and the other
+        side's positions; the client sends {"type": "position", "lat", "lon", "accuracy"} once the share is accepted.
+        The share's own token is the key, so the web version connects straight here.
+        """
+        side = query.get("side")
+        share = shares.owned(query.get("id"), query.get("token")) if side == "owner" else \
+            shares.claimed(query.get("id"), query.get("token")) if side == "claim" else None
+        if not share or "websocket" not in (self.headers.get("Upgrade") or "").lower() or not self.headers.get("Sec-WebSocket-Key"):
+            return self.error(404, "No such share, or not a WebSocket request", cors=True)
+        ws = WebSocket.accept(self)
+        shares.attach(share["id"], side, ws)
+        try:
+            # What has happened so far, then the other side's last position.
+            ws.send_json({"type": "status", "status": share["status"], "name": share["name"],
+                                                             "label": share["label"], **({"trip": share["trip"]} if side == "claim" and share["status"] == "accepted" else {})})
+            other = fresh_position(share["claimPos"] if side == "owner" else share["pos"])
+            if other and share["status"] == "accepted":
+                ws.send_json({"type": "position", "position": other})
+            for message in ws.messages():
+                if message.get("type") != "position" or share["status"] != "accepted":
+                    continue
+                try:
+                    pos = position_of(message)
+                except (TypeError, ValueError):
+                    continue
+                share["pos" if side == "owner" else "claimPos"] = pos
+                shares.push(share, "claim" if side == "owner" else "owner", {"type": "position", "position": pos})
+        finally:
+            shares.detach(share["id"], side, ws)
+            self.close_connection = True
+
+    def share_api(self, method, route, query):
+        """One-time share codes (Shares): create, claim, the sharer's answer, and both sides asking how it went."""
+        parts = route.strip("/").split("/")
+        cors = self.cors()
+        if method == "POST" and route == "shares":
+            if not share_limiter.allow(self.client_ip()):
+                return self.error(429, "Too many shares, try again later", cors=True)
+            data = self.json_body(limit=8_000)
+            trip = str(data.get("trip") or "")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,3000}", trip):
+                return self.error(400, "trip is required", cors=True)
+            share = shares.create(trip, one_line(data.get("label"), 120))
+            return self.send(201, {"id": share["id"], "code": share["code"], "token": share["owner"], "expiresAt": share["expires"]}, headers=cors)
+        if method == "POST" and route == "shares/claim":
+            if not claim_limiter.allow(self.client_ip()):
+                return self.error(429, "Too many tries, wait a few minutes", cors=True)
+            data = self.json_body(limit=2_000)
+            code, name = str(data.get("code") or "").strip(), one_line(data.get("name"), 80)
+            if not re.fullmatch(r"\d{6}", code) or not name:
+                return self.error(400, "A 6-digit code and your name are needed", cors=True)
+            share = shares.claim(code, name)
+            if not share:
+                return self.error(404, "No such code, or it was already used or expired", cors=True)
+            return self.send(200, {"claimId": share["claim"], "token": share["claimToken"], "label": share["label"]}, headers=cors)
+        if method == "GET" and len(parts) == 3 and parts[1] == "claim":
+            share = shares.claimed(parts[2], query.get("token"))
+            if not share:
+                return self.error(404, "Not found", cors=True)
+            body = {"status": share["status"], "label": share["label"]}
+            if share["status"] == "accepted":
+                body["trip"] = share["trip"]
+                body["position"] = fresh_position(share["pos"])
+            return self.send(200, body, headers=cors)
+        if method == "POST" and len(parts) == 4 and parts[1] == "claim" and parts[3] == "position":
+            data = self.json_body(limit=2_000)
+            share = shares.claimed(parts[2], data.get("token"))
+            if not share or share["status"] != "accepted":
+                return self.error(404, "Not shared", cors=True)
+            share["claimPos"] = position_of(data)
+            shares.push(share, "owner", {"type": "position", "position": share["claimPos"]})
+            return self.send(200, {"ok": True, "position": fresh_position(share["pos"])}, headers=cors)
+        if len(parts) >= 2:
+            self._share_body = {} if method == "GET" else self.json_body(limit=2_000)
+            share = shares.owned(parts[1], query.get("token") if method == "GET" else self._share_body.get("token"))
+            if not share:
+                return self.error(404, "Not found", cors=True)
+            if method == "GET" and len(parts) == 2:
+                status = "expired" if share["status"] == "waiting" and now() > share["expires"] else share["status"]
+                return self.send(200, {"status": status, "name": share["name"], "code": share["code"], "expiresAt": share["expires"],
+                                       "position": fresh_position(share["claimPos"]) if status == "accepted" else None}, headers=cors)
+            if method == "POST" and len(parts) == 3 and parts[2] == "position":
+                if share["status"] != "accepted":
+                    return self.error(409, "Not accepted", cors=True)
+                share["pos"] = position_of(self._share_body)
+                shares.push(share, "claim", {"type": "position", "position": share["pos"]})
+                return self.send(200, {"ok": True, "position": fresh_position(share["claimPos"])}, headers=cors)
+            if method == "POST" and len(parts) == 3 and parts[2] in ("accept", "decline", "cancel"):
+                if parts[2] != "cancel" and share["status"] != "asked":
+                    return self.error(409, "Nobody has entered the code yet", cors=True)
+                share["status"] = {"accept": "accepted", "decline": "declined", "cancel": "cancelled"}[parts[2]]
+                shares.changed(share)
+                return self.send(200, {"status": share["status"]}, headers=cors)
+        return self.error(404, "Not found", cors=True)
 
     def submit_bug(self):
         if not bug_limiter.allow(self.client_ip()):
@@ -1403,6 +1749,8 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and route.startswith("timetable/"):
             status, body = timetable_query(route[len("timetable/"):], query)
             return self.send(status, body)
+        if route.startswith("map/"):
+            return self.map_api(user, method, route[len("map/"):], query)
         parts = route.strip("/").split("/")
         with db() as conn:
             if method == "GET" and route == "me":
@@ -1665,6 +2013,106 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"html": render_template("user_reply", values)})
         self.error(404, "Not found")
 
+    def map_api(self, user, method, route, query):
+        """The dashboard's map: stops, buses now, a trip's way; moving stops and drawing or snapping road traces."""
+        t = timetable.current
+        if t is None:
+            return self.error(503, "Timetable is loading, try again in a minute")
+
+        def box():
+            south, west, north, east = (float(x) for x in (query.get("bbox") or "").split(","))
+            return south, west, north, east
+        if method == "GET" and route == "stations":
+            return self.send(200, {"stations": t.stations_in(*box())})
+        if method == "GET" and route == "vehicles":
+            with db() as conn:
+                reported = {r[0] for r in conn.execute("SELECT DISTINCT trip_key FROM community_reports WHERE created_at>=?",
+                                                       (now() - COMMUNITY_WINDOW_S,))}
+                cache = {}
+
+                def delay_of(keys):
+                    for key in keys:
+                        if key in reported:
+                            if key not in cache:
+                                cache[key] = trip_delay(conn, key)
+                            if cache[key]:
+                                return cache[key]
+                    return None
+                return self.send(200, {"vehicles": t.vehicles(int(time.time()), box(), delay_of), "at": now()})
+        if method == "GET" and route == "trip":
+            shape = t.trip_shape(query.get("id") or "") if re.fullmatch(r"[^:]+:.+:\d{8}", query.get("id") or "") else None
+            return self.send(200, shape) if shape else self.error(404, "No such trip")
+        if method != "POST":
+            return self.error(404, "Not found")
+        data = self.json_body()
+        if route in ("stop", "stop/reset"):
+            s = t.by_id.get(str(data.get("id")))
+            if s is None:
+                return self.error(404, "No such stop")
+            sid = t.station_ids[s]
+            with db() as conn:
+                if route == "stop/reset":
+                    old = conn.execute("SELECT orig_lat, orig_lon FROM map_stops WHERE station_id=?", (sid,)).fetchone()
+                    conn.execute("DELETE FROM map_stops WHERE station_id=?", (sid,))
+                    if old and old["orig_lat"] is not None:
+                        t.lat[s], t.lon[s] = old["orig_lat"], old["orig_lon"]  # where the timetable had it
+                else:
+                    lat, lon = float(data["lat"]), float(data["lon"])
+                    if not (47 < lat < 51 and 16 < lon < 23.5):
+                        return self.error(400, "That's outside Slovakia")
+                    old = conn.execute("SELECT orig_lat, orig_lon FROM map_stops WHERE station_id=?", (sid,)).fetchone()
+                    orig = (old["orig_lat"], old["orig_lon"]) if old else (t.lat[s], t.lon[s])
+                    conn.execute("""INSERT INTO map_stops(station_id, name, lat, lon, orig_lat, orig_lon, updated_by, updated_at)
+                                    VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(station_id) DO UPDATE SET lat=excluded.lat, lon=excluded.lon,
+                                    updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+                                 (sid, t.names[s], lat, lon, orig[0], orig[1], user["username"], now()))
+                    t.lat[s], t.lon[s] = lat, lon  # in use right away; the rebuild keeps it
+            load_map_edits()
+            return self.send(200, t.station_json(s))
+        if route in ("segment", "segment/reset"):
+            key = f"{data.get('from')}>{data.get('to')}"
+            if data.get("from") not in t.by_id or data.get("to") not in t.by_id:
+                return self.error(404, "No such stop")
+            with db() as conn:
+                if route == "segment/reset":
+                    conn.execute("DELETE FROM map_segments WHERE segment=?", (key,))
+                else:
+                    points = [[float(p[0]), float(p[1])] for p in data.get("points") or []][:2000]
+                    conn.execute("""INSERT INTO map_segments(segment, points, source, updated_by, updated_at) VALUES (?,?,?,?,?)
+                                    ON CONFLICT(segment) DO UPDATE SET points=excluded.points, source=excluded.source,
+                                    updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+                                 (key, json.dumps(points), "manual", user["username"], now()))
+            load_map_edits()
+            return self.send(200, {"ok": True})
+        if route == "snap":
+            # Every stop-to-stop part of the trip along the roads (OSRM), except parts drawn by hand.
+            shape = t.trip_shape(str(data.get("id") or ""))
+            if not shape:
+                return self.error(404, "No such trip")
+            done, failed = 0, 0
+            with db() as conn:
+                manual = {r[0] for r in conn.execute("SELECT segment FROM map_segments WHERE source='manual'")}
+                for seg in shape["segments"]:
+                    key = f"{seg['from']}>{seg['to']}"
+                    if key in manual or len(seg["points"]) < 2 or (data.get("keep") and seg["traced"]):
+                        continue
+                    try:
+                        points = snap_segment(seg["points"][0], seg["points"][-1])
+                    except ProviderError:
+                        points = None
+                    if points is None:
+                        failed += 1
+                        continue
+                    conn.execute("""INSERT INTO map_segments(segment, points, source, updated_by, updated_at) VALUES (?,?,?,?,?)
+                                    ON CONFLICT(segment) DO UPDATE SET points=excluded.points, source=excluded.source,
+                                    updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+                                 (key, json.dumps(points), "osrm", user["username"], now()))
+                    done += 1
+                    time.sleep(1)  # the public OSRM server asks for at most one request a second
+            load_map_edits()
+            return self.send(200, {"snapped": done, "failed": failed, "trip": t.trip_shape(str(data.get("id")))})
+        return self.error(404, "Not found")
+
     def admin_bug(self, conn, user, method, bug_id, action):
         bug = conn.execute("SELECT * FROM bugs WHERE id=?", (bug_id,)).fetchone()
         if not bug:
@@ -1747,6 +2195,7 @@ def main():
         return
     threading.Thread(target=mail_worker, daemon=True).start()
     if ENV("HUB_TIMETABLE", "on") != "off":
+        load_map_edits()  # moved stops and road traces, kept through every timetable rebuild
         timetable.start(GTFS_DIR, gtfs_feeds, collect=sadzv.collect)
     host, port = ENV("HUB_HOST", "0.0.0.0"), int(ENV("HUB_PORT", "8080"))
     print(f"[emhub] listening on {host}:{port}, public URL {PUBLIC_URL}", flush=True)
