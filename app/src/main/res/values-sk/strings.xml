@@ -623,4 +623,13 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="watch_report_hint">Niečo nefunguje na hodinkách? V aplikácii na hodinkách ťuknite na Nahlásiť problém: záznamy prídu do telefónu a hlásenie ich priloží.</string>
     <string name="watch_credit">Kredit na hodinkách</string>
     <string name="watch_credit_hint">Kredit SAD Zvolen a IDS BBSK v aplikácii na hodinkách</string>
+    <string name="theme_mode_title">Režim</string>
+    <string name="theme_mode_system">Ako telefón</string>
+    <string name="theme_mode_light">Svetlý</string>
+    <string name="theme_mode_dark">Tmavý</string>
+    <string name="background_title">Farba pozadia</string>
+    <string name="background_hex_label">Vlastná farba (hex)</string>
+    <string name="background_use">Použiť</string>
+    <string name="background_reset">Podľa témy</string>
+    <string name="background_hint">S vlastným pozadím sa svetlý alebo tmavý text určí podľa jeho jasu.</string>
 </resources>

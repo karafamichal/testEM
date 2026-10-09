@@ -175,6 +175,14 @@ class CredentialsManager(context: Context) {
     fun saveAmoledEnabled(enabled: Boolean) = prefs.edit().putBoolean("theme_amoled", enabled).apply()
     fun getAmoledEnabled(): Boolean = prefs.getBoolean("theme_amoled", false)
 
+    /** EM-0042: "system", "light" or "dark". */
+    fun saveThemeMode(mode: String) = prefs.edit().putString("theme_mode", mode).apply()
+    fun getThemeMode(): String = prefs.getString("theme_mode", "system") ?: "system"
+
+    /** EM-0042: the app's own background colour (ARGB), null for the theme's. */
+    fun saveBackgroundColor(color: Long?) = prefs.edit().apply { if (color == null) remove("theme_background") else putLong("theme_background", color) }.apply()
+    fun getBackgroundColor(): Long? = if (prefs.contains("theme_background")) prefs.getLong("theme_background", 0L) else null
+
     fun saveLanguageCode(code: String) = prefs.edit().putString("language_code", code).apply()
     fun getLanguageCode(): String = prefs.getString("language_code", "sk") ?: "sk"
 

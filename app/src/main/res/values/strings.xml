@@ -610,4 +610,13 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="watch_report_hint">Something wrong on the watch? Tap Report a problem in the watch app: its logs come to the phone and the bug report attaches them.</string>
     <string name="watch_credit">Credit on the watch</string>
     <string name="watch_credit_hint">SAD Zvolen and IDS BBSK credit in the watch app</string>
+    <string name="theme_mode_title">Mode</string>
+    <string name="theme_mode_system">As phone</string>
+    <string name="theme_mode_light">Light</string>
+    <string name="theme_mode_dark">Dark</string>
+    <string name="background_title">Background colour</string>
+    <string name="background_hex_label">Own colour (hex)</string>
+    <string name="background_use">Use</string>
+    <string name="background_reset">Theme default</string>
+    <string name="background_hint">With your own background, light or dark text follows from how bright it is.</string>
 </resources>

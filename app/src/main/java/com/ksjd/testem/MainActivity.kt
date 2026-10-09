@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.ui.graphics.luminance
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.layout.Box
@@ -90,7 +91,17 @@ class MainActivity : AppCompatActivity() {
             val appState by viewModel.appState.collectAsState()
             val preset = appState.themePresets.firstOrNull { it.id == appState.selectedThemeId }
                 ?: appState.themePresets.firstOrNull()
-            TestEMTheme(themePreset = preset, amoledMode = appState.amoledEnabled) {
+            // EM-0042: light/dark chosen in Appearance; a custom background decides it by its own brightness.
+            val dark = appState.backgroundColor?.let { androidx.compose.ui.graphics.Color(it).luminance() < 0.5f }
+                ?: when (appState.themeMode) { "light" -> false; "dark" -> true; else -> androidx.compose.foundation.isSystemInDarkTheme() }
+            androidx.compose.runtime.LaunchedEffect(dark) {
+                val transparent = android.graphics.Color.TRANSPARENT
+                enableEdgeToEdge(
+                    androidx.activity.SystemBarStyle.auto(transparent, transparent) { dark },
+                    androidx.activity.SystemBarStyle.auto(transparent, transparent) { dark }
+                )
+            }
+            TestEMTheme(darkTheme = dark, themePreset = preset, amoledMode = appState.amoledEnabled, background = appState.backgroundColor) {
                 AppRoot(viewModel, liveViewModel, this)
             }
         }

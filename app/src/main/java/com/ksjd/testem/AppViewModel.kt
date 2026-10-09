@@ -48,6 +48,8 @@ data class AppState(
     val themePresets: List<ThemePreset> = emptyList(),
     val selectedThemeId: String = "",
     val amoledEnabled: Boolean = false,
+    val themeMode: String = "system",
+    val backgroundColor: Long? = null,
     val isPinSet: Boolean = false,
     /** Ticket and account details may be shown (PIN or biometrics given, or no PIN at all). */
     val isAppUnlocked: Boolean = false,
@@ -137,6 +139,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             themePresets = presets,
             selectedThemeId = prefs.getSelectedThemeId(presets.first().id),
             amoledEnabled = prefs.getAmoledEnabled(),
+            themeMode = prefs.getThemeMode(),
+            backgroundColor = prefs.getBackgroundColor(),
             isPinSet = pinSet,
             isAppUnlocked = !pinSet,
             biometricEnabled = prefs.getBiometricEnabled(),
@@ -284,10 +288,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshIds() {
         val state = _appState.value
         if (!state.hasIdsAccount || _idsState.value.isLoading) return
-        val current = idsSession ?: IdsSession(prefs.getIdsEmail(), prefs.getIdsPassword()).also { idsSession = it }
+        var current = idsSession ?: IdsSession(prefs.getIdsEmail(), prefs.getIdsPassword()).also { idsSession = it }
         _idsState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
-            runCatching { current.fetchAccount(_idsState.value.account?.name.orEmpty()) }.onSuccess { account ->
+            val name = _idsState.value.account?.name.orEmpty()
+            runCatching { current.fetchAccount(name) }.recoverCatching { error ->
+                // EM-0047: one refusal right after unlocking isn't a changed password. Try once more from scratch.
+                if (error !is LoginRejectedException) throw error
+                delay(2_000)
+                current = IdsSession(prefs.getIdsEmail(), prefs.getIdsPassword()).also { idsSession = it }
+                current.fetchAccount(name)
+            }.onSuccess { account ->
                 prefs.saveLastIdsAccount(account)
                 _idsState.update { it.copy(account = account, isLoading = false, offline = false, signedOut = false) }
                 if (_idsState.value.qr == null) loadIdsQr(current, account)
@@ -563,6 +574,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun setAmoledEnabled(enabled: Boolean) {
         prefs.saveAmoledEnabled(enabled)
         _appState.update { it.copy(amoledEnabled = enabled) }
+    }
+
+    fun setThemeMode(mode: String) {
+        prefs.saveThemeMode(mode)
+        _appState.update { it.copy(themeMode = mode) }
+    }
+
+    fun setBackgroundColor(color: Long?) {
+        prefs.saveBackgroundColor(color)
+        _appState.update { it.copy(backgroundColor = color) }
     }
 
     fun selectThemePreset(presetId: String) {

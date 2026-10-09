@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.14.0
+
+### New
+- **Light or dark mode and your own background colour** (EM-0042): in *Account → Appearance* choose light, dark or as the phone, and a background colour (ready ones or any hex code); text turns light or dark to suit it.
+- **The Watch settings show only with a watch**: *Account → Watch* appears once the Plan&Ride watch app is on a paired watch.
+
+### Fixed
+- **Following didn't stop after getting off** (EM-0046): the phone standing at your stop (or a few minutes at any stop) counts as getting off. Before, a standing phone made the bus look later and later, so following never ended.
+- **IDS BBSK said the password was wrong right after unlocking** (EM-0047): two sign-ins at once no longer clash, and one refused sign-in is tried again before the app asks you to re-add the account.
+
 ## 2.13.1
 
 ### Fixed

@@ -230,6 +230,10 @@ class TripTrackerService : Service() {
     private var lastRiderIndex = -1f
     /** The phone moves along the route past the boarding stop: the rider is on the bus. */
     private var ridingBus = false
+    /** EM-0046: the stop where the rider's phone got off the bus (stands there, or reached their stop); -1 still on. */
+    private var riderOffAt = -1
+    /** Since when the rider's phone stands still (0: moving). */
+    private var standingSince = 0L
     /** What the live notification shows right now; the widget shows the same. */
     private var shown = Shown("", "", "")
     /** The rider's phone stands at their stop after the bus was due: it hasn't come yet (EM-0033). */
@@ -343,6 +347,8 @@ class TripTrackerService : Service() {
         routeCoords = null
         lastRiderIndex = -1f
         ridingBus = false
+        riderOffAt = -1
+        standingSince = 0L
         waitingAtStop = false
         busGone = false
         lastRiderReportAt = 0L
@@ -520,6 +526,14 @@ class TripTrackerService : Service() {
         }
         // Stopped at a stop after the boarding one (so the rider is on the bus): it arrived there.
         // The hub counts an early arrival as on time: the bus waits for its departure.
+        standingSince = if (moving) 0L else standingSince.takeIf { it > 0L } ?: now
+        // EM-0046: standing at their own stop (or the last one), or long at any other: the rider got off. Without this the
+        // standing phone kept making the bus later (EM-0040) and following never ended.
+        val endIndex = p.alightIndex ?: detail.stops.lastIndex
+        if (ridingBus && riderOffAt < 0 && atStop && !moving && (nearest >= endIndex || now - standingSince > GOT_OFF_STANDING_MS)) {
+            riderOffAt = nearest
+            Log.i(GPS_TAG, "rider got off at stop $nearest (${detail.stops[nearest].name})")
+        }
         if (!moving && atStop && nearest > boarding.toInt() && nearest > lastArrivalStop) {
             lastArrivalStop = nearest
             Log.i(GPS_TAG, "arrived at stop $nearest (${detail.stops[nearest].name})")
@@ -530,7 +544,7 @@ class TripTrackerService : Service() {
             // EM-0040: standing (traffic, a long stop) the bus gets later by the minute, though the timetable moves on.
             // Only later, never earlier: a bus waiting at a stop for its departure isn't early.
             val standing = RoutePosition.delayAt(index, scheduled, now)
-            if (ridingBus && standing > (localDelay?.first ?: detail.delaySeconds ?: 0)) {
+            if (ridingBus && riderOffAt < 0 && standing > (localDelay?.first ?: detail.delaySeconds ?: 0)) {
                 localDelay = standing to now
                 localFromGps = true
                 redraw(current, detail)
@@ -732,7 +746,7 @@ class TripTrackerService : Service() {
                     detail = withLocalDelay(detail)
                     progress = TripProgress.from(detail, current)
                 }
-                if (progress.finished) {
+                if (progress.finished || riderOffAt >= (progress.alightIndex ?: detail.stops.lastIndex)) {
                     val next = current.nextLegs.firstOrNull()
                     if (next != null) {
                         changeTo(next, current.nextLegs.drop(1), progress.lastStopName)
@@ -758,7 +772,7 @@ class TripTrackerService : Service() {
     private fun stillOnBoard(p: TripProgress): Boolean {
         val alight = p.alightIndex ?: return false
         val fresh = lastFix?.let { System.currentTimeMillis() - it.time <= FRESH_FIX_MS } ?: false
-        return ridingBus && fresh && lastRiderIndex >= 0f && lastRiderIndex < alight - 0.3f
+        return ridingBus && riderOffAt < 0 && fresh && lastRiderIndex >= 0f && lastRiderIndex < alight - 0.3f
     }
 
     /**
@@ -1056,6 +1070,8 @@ class TripTrackerService : Service() {
         private const val STOP_RADIUS_M = 60
         /** Slower than this (m/s, about 9 km/h) the bus counts as stopped. */
         private const val MOVING_MPS = 2.5f
+        /** Standing this long at a stop on the way, the rider got off there (no bus waits that long at a stop on the way). */
+        private const val GOT_OFF_STANDING_MS = 4 * 60_000L
         /** Live GPS at the stop starts this long before the bus can come. */
         private const val LIVE_GPS_BEFORE_MS = 4 * 60_000L
         private const val MAX_FIX_ACCURACY_M = 300f

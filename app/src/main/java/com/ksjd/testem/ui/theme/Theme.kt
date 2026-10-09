@@ -91,15 +91,36 @@ private fun darkScheme(preset: ThemePreset, amoled: Boolean): ColorScheme {
     )
 }
 
+/**
+ * EM-0042: the rider's own background colour. Cards and fields are a shade off it, so they still stand out;
+ * text is dark or light by how bright it is (the caller picks [dark] from it too).
+ */
+private fun withBackground(scheme: ColorScheme, bg: Color, dark: Boolean): ColorScheme {
+    val toward = if (dark) Color.White else Color.Black
+    val raised = lerp(bg, Color.White, if (dark) 0.07f else 0.5f)
+    val sunken = lerp(bg, toward, 0.08f)
+    val ink = onColorFor(bg)
+    return scheme.copy(
+        background = bg, onBackground = ink,
+        surface = raised, onSurface = ink,
+        surfaceVariant = sunken, onSurfaceVariant = lerp(ink, bg, 0.3f),
+        surfaceContainerLowest = bg, surfaceContainerLow = raised, surfaceContainer = raised,
+        surfaceContainerHigh = if (dark) sunken else raised, surfaceContainerHighest = sunken,
+        outline = lerp(bg, toward, 0.18f), outlineVariant = sunken
+    )
+}
+
 @Composable
 fun TestEMTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     themePreset: ThemePreset? = null,
     amoledMode: Boolean = false,
+    background: Long? = null,
     content: @Composable () -> Unit
 ) {
     val preset = themePreset ?: DefaultThemePresets.all.first()
-    val colorScheme = if (darkTheme) darkScheme(preset, amoledMode) else lightScheme(preset)
+    val base = if (darkTheme) darkScheme(preset, amoledMode) else lightScheme(preset)
+    val colorScheme = background?.let { withBackground(base, Color(it), darkTheme) } ?: base
     val transit = if (darkTheme) {
         if (amoledMode) DarkTransitColors.copy(board = Color.Black, boardRow = Color(0xFF0E0E0E)) else DarkTransitColors
     } else {

@@ -93,6 +93,9 @@ class IdsSession(private val email: String, private val password: String) {
 
         @Synchronized
         override fun loadForRequest(url: HttpUrl): List<Cookie> = store.filter { it.matches(url) }
+
+        @Synchronized
+        fun clear() = store.clear()
     }
 
     private val client = OkHttpClient.Builder()
@@ -155,6 +158,10 @@ class IdsSession(private val email: String, private val password: String) {
     }
 
     private suspend fun login() = loginMutex.withLock {
+        // EM-0047: another request (refresh after unlocking, the QR) may have signed in while this one waited.
+        if (signedIn) return@withLock
+        // A fresh start: an expired session's cookies can make the shop refuse a correct password.
+        cookieJar.clear()
         // The landing page sets the shop's session cookie the login then uses.
         client.newCall(request(BASE).get().build()).execute().use { if (!it.isSuccessful) throw IOException("HTTP ${it.code}") }
         val body = FormBody.Builder()
@@ -166,7 +173,10 @@ class IdsSession(private val email: String, private val password: String) {
             if (!response.isSuccessful) throw IOException("Login HTTP ${response.code}")
             val json = runCatching { JsonParser.parseString(response.body?.string().orEmpty()).asJsonObject }.getOrNull()
                 ?: throw IOException("Login answer not understood")
-            if (json.get("loginSuccess")?.asBoolean != true) throw LoginRejectedException()
+            if (json.get("loginSuccess")?.asBoolean != true) {
+                android.util.Log.w("IdsSession", "login refused: ${json.keySet()} ${json.get("errors") ?: ""}")
+                throw LoginRejectedException()
+            }
         }
         signedIn = true
     }

@@ -20,6 +20,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +52,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -281,8 +285,15 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
             SettingsLink(stringResource(R.string.language_title), languageName(app.languageCode)) { onOpen(SettingsPage.Language) }
             GroupDivider()
             SettingsLink(stringResource(R.string.settings_community), stringResource(R.string.settings_community_hint)) { onOpen(SettingsPage.Community) }
-            GroupDivider()
-            SettingsLink(stringResource(R.string.settings_watch), stringResource(R.string.settings_watch_hint)) { onOpen(SettingsPage.Watch) }
+            // Only with the Plan&Ride watch app on a paired watch: without one the page has nothing to set.
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val hasWatch by androidx.compose.runtime.produceState(com.ksjd.testem.live.WatchSync.watchApp) {
+                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.ksjd.testem.live.WatchSync.checkWatch(context) }
+            }
+            if (hasWatch) {
+                GroupDivider()
+                SettingsLink(stringResource(R.string.settings_watch), stringResource(R.string.settings_watch_hint)) { onOpen(SettingsPage.Watch) }
+            }
             if (app.hasAccount) {
                 GroupDivider()
                 SettingsLink(stringResource(R.string.settings_developer), stringResource(R.string.settings_developer_hint)) {
@@ -753,8 +764,54 @@ private fun ChangePinDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
     )
 }
 
+/** EM-0042: ready background colours (light and dark ones); any other by its hex code. */
+private val BackgroundChoices = listOf(0xFFF3EEE4, 0xFFE8F0E6, 0xFFE6EEF7, 0xFFF6E8EC, 0xFF1C2433, 0xFF1E2A22, 0xFF2B1F2E, 0xFF000000)
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun AppearanceSettings(app: AppState, viewModel: AppViewModel) {
+    var background by rememberSaveable { mutableStateOf("") }
+    val bg = parseColorHex(background)
+
+    // EM-0042: light, dark or as the phone; and the app's own background colour.
+    SectionLabel(stringResource(R.string.theme_mode_title))
+    val modes = listOf("system" to R.string.theme_mode_system, "light" to R.string.theme_mode_light, "dark" to R.string.theme_mode_dark)
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        modes.forEachIndexed { index, (mode, label) ->
+            SegmentedButton(
+                selected = app.themeMode == mode,
+                onClick = { viewModel.setThemeMode(mode) },
+                enabled = app.backgroundColor == null,
+                shape = SegmentedButtonDefaults.itemShape(index, modes.size),
+                label = { Text(stringResource(label), maxLines = 1) }
+            )
+        }
+    }
+    SectionLabel(stringResource(R.string.background_title))
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            BackgroundChoices.forEach { color ->
+                Box(
+                    Modifier.size(30.dp)
+                        .background(if (app.backgroundColor == color) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, CircleShape)
+                        .padding(if (app.backgroundColor == color) 3.dp else 1.dp)
+                        .background(Color(color), CircleShape)
+                        .clickable { viewModel.setBackgroundColor(color) }
+                )
+            }
+        }
+        HexField(background, stringResource(R.string.background_hex_label), bg) { background = it }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { viewModel.setBackgroundColor(bg); background = "" }, enabled = bg != null, shape = RoundedCornerShape(12.dp)) {
+                Text(stringResource(R.string.background_use))
+            }
+            TextButton(onClick = { viewModel.setBackgroundColor(null) }, enabled = app.backgroundColor != null) {
+                Text(stringResource(R.string.background_reset))
+            }
+        }
+        Text(stringResource(R.string.background_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+
     var name by rememberSaveable { mutableStateOf("") }
     var primary by rememberSaveable { mutableStateOf("") }
     var secondary by rememberSaveable { mutableStateOf("") }
