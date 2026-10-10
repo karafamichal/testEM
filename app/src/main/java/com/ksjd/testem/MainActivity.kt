@@ -10,19 +10,25 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.foundation.clickable
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.AccountCircle
-import androidx.compose.material.icons.automirrored.outlined.AltRoute
 import androidx.compose.material.icons.outlined.DirectionsBus
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -91,8 +97,13 @@ class MainActivity : AppCompatActivity() {
             val appState by viewModel.appState.collectAsState()
             val preset = appState.themePresets.firstOrNull { it.id == appState.selectedThemeId }
                 ?: appState.themePresets.firstOrNull()
-            // EM-0042: light/dark chosen in Appearance; a custom background decides it by its own brightness.
-            val dark = appState.backgroundColor?.let { androidx.compose.ui.graphics.Color(it).luminance() < 0.5f }
+            // EM-0042: light/dark chosen in Appearance; a custom background (or a dark theme's own) decides it by its brightness.
+            // A dark theme's own background, or any background the rider picked for the theme.
+            val shipped = com.ksjd.testem.DefaultThemePresets.all.firstOrNull { it.id == preset?.id }
+                ?.roles?.get(com.ksjd.testem.ThemeRole.BACKGROUND)
+            val themeBackground = preset?.roles?.get(com.ksjd.testem.ThemeRole.BACKGROUND)
+                ?.takeIf { androidx.compose.ui.graphics.Color(it).luminance() < 0.5f || it != shipped }
+            val dark = (appState.backgroundColor ?: themeBackground)?.let { androidx.compose.ui.graphics.Color(it).luminance() < 0.5f }
                 ?: when (appState.themeMode) { "light" -> false; "dark" -> true; else -> androidx.compose.foundation.isSystemInDarkTheme() }
             androidx.compose.runtime.LaunchedEffect(dark) {
                 val transparent = android.graphics.Color.TRANSPARENT
@@ -228,36 +239,12 @@ private fun MainScaffold(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        bottomBar = {
-            val view = androidx.compose.ui.platform.LocalView.current
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                tabs.forEach { tab ->
-                    val icon = when (tab) {
-                        AppTab.Home -> if (appState.anyAccount) Icons.Outlined.QrCode2 else Icons.Outlined.Home
-                        AppTab.Departures -> Icons.Outlined.DirectionsBus
-                        AppTab.Planner -> Icons.AutoMirrored.Outlined.AltRoute
-                        AppTab.History -> Icons.AutoMirrored.Outlined.ReceiptLong
-                        AppTab.Account -> if (appState.anyAccount) Icons.Outlined.AccountCircle else Icons.Outlined.Settings
-                    }
-                    val label = if (tab == AppTab.Account && !appState.anyAccount) R.string.settings_title else tab.labelRes
-                    NavigationBarItem(
-                        selected = selected == tab,
-                        onClick = { if (selected != tab) com.ksjd.testem.ui.components.Haptics.perform(view); selected = tab },
-                        icon = { Icon(icon, contentDescription = null) },
-                        label = { Text(stringResource(label), maxLines = 1) },
-                        colors = NavigationBarItemDefaults.colors(
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
-                }
-            }
-        }
     ) { padding ->
+        // The bar floats over the content (which scrolls on under it), so only the top inset is padded here.
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(top = padding.calculateTopPadding())
         ) {
             val openStopFromPlanner: (String, String, String) -> Unit = { stopName, line, time ->
                 selected = AppTab.Departures
@@ -292,6 +279,13 @@ private fun MainScaffold(
             var privacyAsked by rememberSaveable { mutableStateOf(CredentialsManager(context).wasPrivacyAsked()) }
             if (!privacyAsked) com.ksjd.testem.ui.screens.PrivacyDialog(onDone = { privacyAsked = true })
             else com.ksjd.testem.ui.screens.WhatsNewDialog()
+            FloatingBar(
+                tabs = tabs,
+                selected = selected,
+                anyAccount = appState.anyAccount,
+                onSelect = { selected = it },
+                modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
+            )
             val liveState by liveViewModel.state.collectAsState()
             liveState.trip?.let { trip ->
                 com.ksjd.testem.ui.screens.TripSheet(
@@ -300,6 +294,82 @@ private fun MainScaffold(
                     // From a planner result: getting off elsewhere edits the connection too (EM-0039).
                     onPickAlight = { order -> liveViewModel.setTripAlight(order); order?.let(viewModel::getOffAt) }
                 )
+            }
+        }
+    }
+}
+
+/**
+ * The floating bottom bar: one pill in the theme's "bottom bar" colour (the rider can change it). The open tab
+ * grows into a labelled button and the others shrink to icons, with a short animation, so it is always clear
+ * where you are. Departures (times: a clock) and Planner (a bus) have clearly different icons.
+ */
+@Composable
+private fun FloatingBar(tabs: List<AppTab>, selected: AppTab, anyAccount: Boolean, onSelect: (AppTab) -> Unit, modifier: Modifier = Modifier) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    val colors = com.ksjd.testem.ui.theme.TransitTheme.colors
+    Box(
+        modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
+        contentAlignment = androidx.compose.ui.Alignment.Center
+    ) {
+        androidx.compose.material3.Surface(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+            color = colors.bar,
+            contentColor = colors.onBar,
+        ) {
+            androidx.compose.foundation.layout.Row(
+                Modifier
+                    .padding(4.dp)
+                    .animateContentSize(androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 500f)),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(2.dp)
+            ) {
+                tabs.forEach { tab ->
+                    val on = selected == tab
+                    val icon = when (tab) {
+                        AppTab.Home -> Icons.Outlined.Home
+                        AppTab.Departures -> Icons.Outlined.Schedule
+                        AppTab.Planner -> Icons.Outlined.DirectionsBus
+                        AppTab.History -> Icons.AutoMirrored.Outlined.ReceiptLong
+                        AppTab.Account -> if (anyAccount) Icons.Outlined.AccountCircle else Icons.Outlined.Settings
+                    }
+                    val label = stringResource(
+                        when {
+                            tab == AppTab.Account && !anyAccount -> R.string.settings_title
+                            else -> tab.labelRes
+                        }
+                    )
+                    val fill by androidx.compose.animation.animateColorAsState(
+                        if (on) colors.onBar.copy(alpha = 0.16f) else androidx.compose.ui.graphics.Color.Transparent, label = "tab"
+                    )
+                    androidx.compose.foundation.layout.Row(
+                        Modifier
+                            .height(52.dp)
+                            // Clipped first, so the tap ripple is a pill too (unclipped it flashed a square box).
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
+                            .background(fill)
+                            .semantics(mergeDescendants = true) { this.selected = on }
+                            .clickable(
+                                role = androidx.compose.ui.semantics.Role.Tab,
+                                onClickLabel = label
+                            ) { if (!on) com.ksjd.testem.ui.components.Haptics.perform(view); onSelect(tab) }
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Icon(icon, contentDescription = if (on) null else label,
+                            tint = if (on && tab == AppTab.Home && colors.onBar.luminance() > 0.5f) colors.live else colors.onBar)
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = on,
+                            enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandHorizontally(),
+                            exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkHorizontally()
+                        ) {
+                            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, modifier = Modifier.padding(start = 10.dp, end = 4.dp))
+                        }
+                    }
+                }
             }
         }
     }

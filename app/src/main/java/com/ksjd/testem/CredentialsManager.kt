@@ -145,7 +145,9 @@ class CredentialsManager(context: Context) {
             val primary = preset.primary.toString(16).padStart(8, '0')
             val secondary = preset.secondary.toString(16).padStart(8, '0')
             val tertiary = preset.tertiary.toString(16).padStart(8, '0')
-            "${preset.id}::${nameEncoded}::${primary}::${secondary}::${tertiary}"
+            // Sixth part: the single colours, "role=argb,role=argb" (missing in presets saved before 2.15).
+            val roles = preset.roles.entries.joinToString(",") { (role, c) -> "$role=${c.toString(16).padStart(8, '0')}" }
+            "${preset.id}::${nameEncoded}::${primary}::${secondary}::${tertiary}::${roles}"
         }
         prefs.edit().putString("theme_presets", encoded).apply()
     }
@@ -155,8 +157,12 @@ class CredentialsManager(context: Context) {
         if (stored.isBlank()) return defaultPresets
         val presets = stored.split("||").mapNotNull { entry ->
             val parts = entry.split("::")
-            if (parts.size != 5) return@mapNotNull null
+            if (parts.size != 5 && parts.size != 6) return@mapNotNull null
             val (id, nameEncoded, primaryHex, secondaryHex, tertiaryHex) = parts
+            val roles = parts.getOrNull(5).orEmpty().split(",").mapNotNull { pair ->
+                val (role, hex) = pair.split("=").takeIf { it.size == 2 } ?: return@mapNotNull null
+                hex.toLongOrNull(16)?.let { role to it }
+            }.toMap()
             val name = runCatching {
                 String(Base64.decode(nameEncoded, Base64.NO_WRAP), Charsets.UTF_8)
             }.getOrNull().orEmpty()
@@ -166,12 +172,15 @@ class CredentialsManager(context: Context) {
                 name = name,
                 primary = primaryHex.toLongOrNull(16) ?: return@mapNotNull null,
                 secondary = secondaryHex.toLongOrNull(16) ?: return@mapNotNull null,
-                tertiary = tertiaryHex.toLongOrNull(16) ?: return@mapNotNull null
+                tertiary = tertiaryHex.toLongOrNull(16) ?: return@mapNotNull null,
+                roles = roles
             )
         }
         // Built-in presets always come first; keep the user's own ones after them.
+        // A built-in preset the rider changed is stored under its own id and replaces the default one.
+        val builtIn = defaultPresets.map { d -> presets.firstOrNull { it.id == d.id } ?: d }
         val custom = presets.filter { p -> defaultPresets.none { it.id == p.id } && p.id !in LEGACY_PRESET_IDS }
-        return defaultPresets + custom
+        return builtIn + custom
     }
 
     fun saveSelectedThemeId(id: String) = prefs.edit().putString("selected_theme_id", id).apply()
@@ -405,6 +414,6 @@ class CredentialsManager(context: Context) {
         /** Wrong PINs allowed before entry locks for a while. */
         private const val PIN_FREE_TRIES = 5
         /** Built-in presets from before the redesign, replaced by the new defaults. */
-        private val LEGACY_PRESET_IDS = setOf("classic")
+        private val LEGACY_PRESET_IDS = setOf("classic", "sunset")
     }
 }

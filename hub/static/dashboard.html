@@ -3,27 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>emhub</title>
-<link rel="icon" href="/favicon.svg">
+<title>emHUB</title>
+<link rel="icon" href="/favicon.svg?v=1.18">
 <link rel="stylesheet" href="/brand.css">
 <style>
   body { display: grid; grid-template-columns: 220px 1fr; min-height: 100dvh; }
 
   /* ---- rail */
-  .rail { background: var(--rail); color: var(--rail-text); display: flex; flex-direction: column; padding: 20px 0 16px; position: sticky; top: 0; height: 100dvh; }
-  .rail-brand { padding: 0 20px 18px; }
+  .rail { background: var(--rail); color: var(--rail-text); display: flex; flex-direction: column; padding: 22px 12px 16px; position: sticky; top: 0; height: 100dvh; box-sizing: border-box; }
+  .rail-brand { padding: 0 10px 20px; display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: center; }
+  .rail-brand svg { grid-row: span 2; }
   .rail-brand strong { font-family: var(--display); font-size: 28px; color: #fff; display: block; line-height: 1; }
   .rail-brand span { font-size: 13px; }
   .rail nav { display: flex; flex-direction: column; }
   .rail nav a {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 10px 20px; color: inherit; text-decoration: none; font-weight: 500;
-    border-left: 4px solid transparent;
+    padding: 10px 14px; color: inherit; text-decoration: none; font-weight: 500; border-radius: 12px;
   }
   .rail nav a:hover { color: #fff; background: rgba(255,255,255,0.04); }
-  .rail nav a[aria-current="page"] { color: #fff; border-left-color: var(--amber); background: rgba(255,255,255,0.06); }
-  .rail .count { font-family: var(--display); font-weight: 700; font-size: 14px; background: var(--amber); color: #14213D; border-radius: 3px; padding: 0 7px; }
-  .rail-foot { margin-top: auto; padding: 0 20px; font-size: 13px; }
+  .rail nav a[aria-current="page"] { color: #fff; background: #1E4A2D; }
+  .rail .count { font-family: var(--display); font-weight: 700; font-size: 14px; background: var(--amber); color: #0B3D1C; border-radius: 6px; padding: 0 7px; }
+  .rail-foot { margin-top: auto; padding: 14px; font-size: 13px; background: var(--surface); border-radius: 14px; }
   .rail-foot button { background: none; border: 0; color: var(--rail-text); padding: 0; cursor: pointer; text-decoration: underline; }
 
   main { min-width: 0; }
@@ -34,7 +34,7 @@
   .split { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; border-top: 1px solid var(--line); min-height: calc(100dvh - 76px); }
   .list { border-right: 1px solid var(--line); overflow-y: auto; max-height: calc(100dvh - 76px); }
   .filters { display: flex; gap: 6px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; z-index: 1; }
-  .filters button { border: 1px solid var(--line); background: var(--surface); border-radius: 3px; padding: 4px 10px; font-size: 14px; cursor: pointer; }
+  .filters button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 12px; font-size: 14px; cursor: pointer; }
   .filters button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   .filters input { flex: 1 1 100%; }
   .bug-row { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); text-decoration: none; color: inherit; }
@@ -61,13 +61,13 @@
   .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--sign); }
   .desc { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 75ch; }
   .logs-tools { display: flex; gap: 8px; margin-bottom: 8px; }
-  .logs { background: #0B1426; color: #D6E2F5; font: 12.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 14px; border-radius: 4px; max-height: 480px; overflow: auto; white-space: pre; }
-  .logs mark { background: var(--amber); color: #14213D; }
+  .logs { background: #08130E; color: #D6E8DD; font: 12.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 14px; border-radius: 4px; max-height: 480px; overflow: auto; white-space: pre; }
+  .logs mark { background: var(--amber); color: #0B3D1C; }
   .logs .e { color: #FF9A8C; }
   .logs .w { color: #FFD27A; }
 
   .thread { list-style: none; margin: 24px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; max-width: 75ch; }
-  .msg { border: 1px solid var(--line); background: var(--surface); border-radius: 4px; padding: 12px 14px; }
+  .msg { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 12px 14px; }
   .msg header { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   .msg.reply { border-left: 4px solid var(--sign); }
   .msg.note { border-left: 4px solid var(--amber); background: color-mix(in srgb, var(--amber) 8%, var(--surface)); }
@@ -233,7 +233,7 @@
 </head>
 <body>
 <aside class="rail">
-  <div class="rail-brand"><strong>emhub</strong><span>Plan&amp;Ride operations</span></div>
+  <div class="rail-brand"><svg width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 32L12 12M32 32L52 12M32 32L12 52M32 32L52 52" stroke="#2C4A3B" stroke-width="4" stroke-linecap="round"/><circle cx="12" cy="12" r="6" fill="#6EE7A8"/><circle cx="52" cy="12" r="6" fill="#6EE7A8"/><circle cx="12" cy="52" r="6" fill="#6EE7A8"/><circle cx="52" cy="52" r="6" fill="#6EE7A8"/><circle cx="32" cy="32" r="12" fill="#fff"/></svg><strong>emHUB</strong><span>Plan&amp;Ride admin</span></div>
   <nav>
     <a href="#bugs" data-nav="bugs">Bugs <span class="count" id="count-new" hidden></span></a>
     <a href="#ideas" data-nav="ideas">Suggestions <span class="count" id="count-ideas" hidden></span></a>
@@ -578,7 +578,7 @@ function renderMap(stationId = null) {
       <span><i class="dot" style="background:#1E8A4C"></i>live (riders' phones or reports)</span>
       <span><i class="dot" style="background:#5f6b7a"></i>by the timetable</span>
       <span><i class="dot" style="background:#C77700"></i>late</span>
-      <span><i class="dot" style="background:#1D4FB8"></i>stop (amber: moved by hand)</span></span></div>
+      <span><i class="dot" style="background:#1D4FB8"></i>stop (mint: moved by hand)</span></span></div>
     <div class="map-wrap"><div id="map"></div><aside class="map-side" id="map-side"></aside></div>`;
   const map = L.map("map", { preferCanvas: true }).setView([48.736, 19.146], 13);
   // OpenStreetMap's tile servers refuse requests without a Referer (403): send our origin with them.
@@ -625,7 +625,7 @@ async function loadStops() {
     if (s.parent && at[s.parent]) stops.addLayer(L.polyline([[s.lat, s.lon], [at[s.parent].lat, at[s.parent].lon]], { color: "#0F766E", weight: 2, dashArray: "6 5", interactive: false }));
     // bubblingMouseEvents: a click on a stop isn't also a click on the map (adding a place, a zone corner).
     const m = L.circleMarker([s.lat, s.lon], { bubblingMouseEvents: false, radius: s.central ? 9 : 6, color: s.central ? "#0F766E" : "#fff", weight: s.central ? 4 : 2,
-      fillColor: s.moved ? "#FFB21E" : s.parent ? "#0F766E" : "#1D4FB8", fillOpacity: 1 });
+      fillColor: s.moved ? "#6EE7A8" : s.parent ? "#0F766E" : "#1D4FB8", fillOpacity: 1 });
     m.bindTooltip(esc(s.name) + (s.central ? " (central)" : "") + (s.parent && at[s.parent] ? ` (platform of ${esc(at[s.parent].name)})` : ""));
     m.on("click", () => stopClicked(s));
     stops.addLayer(m);
@@ -686,7 +686,7 @@ async function showStation(id, center = false) {
   };
   st.places.forEach((p) => addPlaceMarker(p));
   if (st.zone) layer.addLayer(zoneLayer(st.zone));
-  L.circleMarker([st.lat, st.lon], { radius: 10, color: "#FFB21E", weight: 3, fill: false }).addTo(layer);
+  L.circleMarker([st.lat, st.lon], { radius: 10, color: "#6EE7A8", weight: 3, fill: false }).addTo(layer);
 
   side.querySelectorAll("[data-open]").forEach((a) => a.onclick = (e) => { e.preventDefault(); showStation(a.dataset.open); });
   bindLinePickers(side);
@@ -961,7 +961,7 @@ function editSegment(t, seg) {
   const layer = L.layerGroup().addTo(map);
   const redraw = () => {
     layer.clearLayers();
-    layer.addLayer(L.polyline([ends[0], ...inner, ends[1]], { color: "#FFB21E", weight: 5 }));
+    layer.addLayer(L.polyline([ends[0], ...inner, ends[1]], { color: "#6EE7A8", weight: 5 }));
     inner.forEach((p, i) => {
       const v = L.marker(p, { draggable: true, icon: L.divIcon({ className: "vertex", iconSize: [12, 12] }) });
       v.on("drag", (e) => { inner[i] = e.target.getLatLng(); layer.getLayers()[0].setLatLngs([ends[0], ...inner, ends[1]]); });

@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -32,6 +34,7 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +49,11 @@ import com.ksjd.testem.ui.theme.PlateStyle
 import com.ksjd.testem.ui.theme.TransitTheme
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+/** Space to leave under a tab's content so its end can scroll out from under the floating bottom bar. */
+@Composable
+fun barSpace(): Dp = 96.dp + androidx.compose.foundation.layout.WindowInsets.navigationBars
+    .asPaddingValues().calculateBottomPadding()
 
 /** Line number on a small plate, like the ones on stop poles and bus fronts. */
 @Composable
@@ -186,7 +194,7 @@ fun Notice(
     val scheme = MaterialTheme.colorScheme
     val (bg, fg) = when (tone) {
         NoticeTone.Info -> scheme.surfaceVariant to scheme.onSurface
-        NoticeTone.Warning -> TransitTheme.colors.amber.copy(alpha = 0.18f) to scheme.onSurface
+        NoticeTone.Warning -> TransitTheme.colors.delay.copy(alpha = 0.14f) to scheme.onSurface
         NoticeTone.Error -> scheme.errorContainer to scheme.onErrorContainer
     }
     Row(
@@ -202,7 +210,7 @@ fun Notice(
                 Modifier
                     .width(4.dp)
                     .height(20.dp)
-                    .background(TransitTheme.colors.amber, RoundedCornerShape(2.dp))
+                    .background(TransitTheme.colors.delay, RoundedCornerShape(2.dp))
             )
             Spacer(Modifier.width(10.dp))
         }
@@ -249,18 +257,26 @@ fun EmptyState(
     }
 }
 
-/** "+3 min" (late), "−1 min" (early) or "On time". Null delay renders nothing. */
+/**
+ * "+3 min" (late), "−1 min" (early) or "On time". Null delay renders nothing.
+ * Colour only flags exceptions: on time stays neutral, under 5 minutes takes the delay colour, 5 or more the late one.
+ */
 @Composable
-fun DelayLabel(delaySeconds: Int?, modifier: Modifier = Modifier, onBoard: Boolean = false) {
+fun DelayLabel(delaySeconds: Int?, modifier: Modifier = Modifier, onBoard: Boolean = false, neutral: Color? = null) {
     if (delaySeconds == null) return
     val colors = TransitTheme.colors
     val minutes = (delaySeconds / 60.0).roundToInt()
+    // On the dark board the light-mode delay colours are lifted so they keep their contrast.
+    fun board(c: Color) = if (onBoard && c.luminance() < 0.5f) androidx.compose.ui.graphics.lerp(c, Color.White, 0.45f) else c
+    val neutral = neutral ?: if (onBoard) colors.boardDim else colors.onTime
     val (text, color) = when {
-        minutes >= 1 -> stringResource(R.string.delay_late, minutes) to colors.late.let { if (onBoard) Color(0xFFFF8A80) else it }
-        minutes <= -1 -> stringResource(R.string.delay_early, abs(minutes)) to colors.onTime.let { if (onBoard) Color(0xFF7BE0AE) else it }
-        else -> stringResource(R.string.delay_on_time) to colors.onTime.let { if (onBoard) Color(0xFF7BE0AE) else it }
+        minutes >= 5 -> stringResource(R.string.delay_late, minutes) to board(colors.late)
+        minutes >= 1 -> stringResource(R.string.delay_late, minutes) to board(colors.delay)
+        minutes <= -1 -> stringResource(R.string.delay_early, abs(minutes)) to neutral
+        else -> stringResource(R.string.delay_on_time) to neutral
     }
-    Text(text, modifier = modifier, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.SemiBold)
+    Text(text, modifier = modifier, style = MaterialTheme.typography.labelMedium, color = color,
+        fontWeight = if (minutes >= 5) FontWeight.Bold else FontWeight.SemiBold)
 }
 
 /** "now", "4 min" or "1 h 5 min" for a countdown in seconds. */

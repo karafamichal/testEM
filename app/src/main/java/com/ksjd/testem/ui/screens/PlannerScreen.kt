@@ -134,7 +134,7 @@ fun PlannerScreen(
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize(), state = listState) {
+    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = com.ksjd.testem.ui.components.barSpace())) {
         item {
             ScreenHeader(
                 title = stringResource(R.string.planner_title),
@@ -456,7 +456,7 @@ private fun ConnectionCard(
                     Icon(
                         if (saved) Icons.Outlined.Star else Icons.Outlined.StarOutline,
                         stringResource(if (saved) R.string.planner_unsave_journey else R.string.planner_save_journey),
-                        tint = if (saved) TransitTheme.colors.amber else MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = if (saved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 IconButton(onClick = onRepeat) {

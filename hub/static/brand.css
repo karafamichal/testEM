@@ -1,39 +1,26 @@
 @import url("https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap");
 
 :root {
-  --sign: #1D4FB8;        /* stop-sign blue, the app's "Zastávka" primary */
-  --sign-ink: #FFFFFF;
-  --amber: #FFB21E;       /* stop-sign amber */
-  --ink: #14213D;
-  --slate: #3E5470;
-  --paper: #EEF1F5;
-  --surface: #FFFFFF;
-  --line: #D9E0EA;
-  --muted: #5B6B80;
-  --ok: #1E8A4C;
-  --late: #B86B00;
-  --bad: #C0392B;
-  --focus: #FFB21E;
-  --rail: #14213D;
-  --rail-text: #C9D3E3;
-  --shadow: 0 1px 0 rgba(20, 33, 61, 0.06);
+  /* emHUB 2.15: dark only, the forest palette (F3 design). Mint takes amber's old jobs: plates, counts, focus. */
+  --sign: #4CC67A;        /* Plan&Ride green, lifted for the dark ground */
+  --sign-ink: #0C1A14;
+  --amber: #6EE7A8;       /* mint: bug-id plates, counts, highlights */
+  --ink: #E6EFE9;
+  --slate: #9DB3A6;
+  --paper: #0C1A14;
+  --surface: #13241C;
+  --line: #1E3329;
+  --muted: #9DB3A6;
+  --ok: #4CC67A;
+  --late: #FFA866;
+  --bad: #FF6B61;
+  --focus: #6EE7A8;
+  --rail: #08130E;
+  --rail-text: #9DB3A6;
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
   --display: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
   --body: "Barlow", "Segoe UI", system-ui, sans-serif;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper: #0F1A30;
-    --surface: #16233F;
-    --line: #26375A;
-    --ink: #E8EEF7;
-    --muted: #93A3BC;
-    --slate: #B8C5DA;
-    --rail: #0A1325;
-    --ok: #4CC47F;
-    --late: #FFB21E;
-    --bad: #FF7A6B;
-    --sign: #3F74E0;
-  }
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -48,16 +35,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .plate {
   display: inline-flex; align-items: center; justify-content: center;
   font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: 0.3px;
-  min-width: 3.2em; padding: 3px 8px; border-radius: 3px;
-  background: var(--amber); color: #14213D; white-space: nowrap;
+  min-width: 3.2em; padding: 3px 8px; border-radius: 6px;
+  background: var(--amber); color: #0B3D1C; white-space: nowrap;
 }
 .plate.line { background: var(--sign); color: var(--sign-ink); }
 .plate.big { font-size: 22px; padding: 5px 12px; }
 
 .btn {
   display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
-  border: 1px solid transparent; border-radius: 4px; padding: 9px 16px;
-  background: var(--sign); color: #fff; font-weight: 600;
+  border: 1px solid transparent; border-radius: 999px; padding: 9px 18px;
+  background: var(--sign); color: var(--sign-ink); font-weight: 600;
 }
 .btn:hover { filter: brightness(1.08); }
 .btn:disabled { opacity: 0.55; cursor: default; filter: none; }
@@ -66,7 +53,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
 .field input, .field select, .field textarea, .input {
-  background: var(--surface); border: 1px solid var(--line); border-radius: 4px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
   padding: 9px 11px; color: var(--ink); font-size: 15px;
 }
 textarea { resize: vertical; }

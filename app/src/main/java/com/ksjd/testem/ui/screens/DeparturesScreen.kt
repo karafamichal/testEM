@@ -136,7 +136,7 @@ private fun StopFinder(state: LiveState, vm: LiveViewModel) {
         if (granted) vm.findNearby() else vm.onLocationPermissionDenied()
     }
 
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = com.ksjd.testem.ui.components.barSpace())) {
         item {
             // A code someone told you (they share their bus): it opens here once they accept.
             var enteringCode by remember { mutableStateOf(false) }
@@ -279,7 +279,7 @@ private fun StopRow(stop: LiveStop, favourite: Boolean, distanceMeters: Int?, on
                 Icon(
                     if (favourite) Icons.Outlined.Star else Icons.Outlined.StarOutline,
                     contentDescription = stringResource(if (favourite) R.string.favourite_remove else R.string.favourite_add),
-                    tint = if (favourite) TransitTheme.colors.amber else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (favourite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -342,7 +342,7 @@ private fun StopBoard(
                 Icon(
                     if (isFavourite) Icons.Outlined.Star else Icons.Outlined.StarOutline,
                     contentDescription = stringResource(if (isFavourite) R.string.favourite_remove else R.string.favourite_add),
-                    tint = if (isFavourite) colors.amber else colors.boardText
+                    tint = if (isFavourite) colors.live else colors.boardText
                 )
             }
         }
@@ -350,7 +350,7 @@ private fun StopBoard(
 
         when {
             board.isLoading && board.departures.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.amber)
+                CircularProgressIndicator(color = colors.live)
             }
             board.departures.isEmpty() -> Column(
                 Modifier
@@ -363,15 +363,15 @@ private fun StopBoard(
                     style = MaterialTheme.typography.bodyLarge,
                     color = colors.boardText
                 )
-                if (board.hasError) TextButton(onClick = onRetry) { Text(stringResource(R.string.retry), color = colors.amber) }
+                if (board.hasError) TextButton(onClick = onRetry) { Text(stringResource(R.string.retry), color = colors.live) }
             }
-            else -> LazyColumn(Modifier.fillMaxSize()) {
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = com.ksjd.testem.ui.components.barSpace())) {
                 if (board.hasError) {
                     item {
                         Text(
                             stringResource(R.string.board_stale),
                             style = MaterialTheme.typography.bodySmall,
-                            color = colors.amber,
+                            color = colors.live,
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
                         )
                     }
@@ -405,7 +405,7 @@ private fun BoardRow(departure: LiveDeparture, now: Long, highlighted: Boolean, 
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 3.dp)
             .background(colors.boardRow, RoundedCornerShape(10.dp))
-            .then(if (highlighted) Modifier.border(2.dp, colors.amber, RoundedCornerShape(10.dp)) else Modifier)
+            .then(if (highlighted) Modifier.border(2.dp, colors.live, RoundedCornerShape(10.dp)) else Modifier)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -452,7 +452,7 @@ private fun BoardRow(departure: LiveDeparture, now: Long, highlighted: Boolean, 
                 Text(
                     countdownText(departure.secondsUntil - elapsed),
                     style = TimeStyle.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold),
-                    color = colors.amber
+                    color = colors.live
                 )
                 Text(Format.secondOfDay(departure.plannedSecondOfDay), style = MaterialTheme.typography.bodySmall, color = colors.boardDim)
             } else {
@@ -778,7 +778,7 @@ internal fun JourneyDraftBar(modifier: Modifier = Modifier) {
                 Icon(
                     if (saved) Icons.Outlined.Star else Icons.Outlined.StarOutline,
                     stringResource(if (saved) R.string.planner_unsave_journey else R.string.planner_save_journey),
-                    tint = if (saved) TransitTheme.colors.amber else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (saved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             IconButton(onClick = { app.rideFromDraft(draft) { editing = it } }, enabled = connection != null) {

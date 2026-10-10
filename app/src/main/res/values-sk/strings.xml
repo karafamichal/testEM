@@ -552,9 +552,7 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="feature_send">Odoslať návrh</string>
     <string name="feature_sent_title">Návrh %1$s odoslaný</string>
     <string name="feature_sent_body">Ďakujeme za nápad. Ak ste nechali e-mail, ozveme sa, keď bude novinka.</string>
-    <string name="whats_new_body">• Plan&amp;Ride na hodinkách s Wear OS: sledovaný autobus, zastávky, prestupy, upozornenia, odchody aj kredit (Účet → Hodinky).
-• IDS BBSK: pridajte si účet eshop.idsbbsk.sk; jeho QR kód, kredit, lístky a história sú vedľa SAD Zvolen a domovská obrazovka prepne na správny lístok pre každý autobus.\n• Dobitie kreditu na kartu (Účet): platíte priamo SAD Zvolen na jej platobnej bráne.
-• Vlastný prestup: vyberte, kde vystúpite z prvého autobusu a kde nastúpite na ďalší, aj vyhľadanú zastávku (Zmeniť prestup).\n• Neodoslané hlásenia a návrhy sa uchovajú, aj s fotkami.\n• Ťuknite na graf alebo zastávku v Histórii a uvidíte podrobnosti.\n• Widget teraz vyzerá ako živá karta na domovskej obrazovke aplikácie.\n• Keď čakáte na zastávke na meškajúci autobus, aplikácia sa spýta, či už prišiel.\n• „Nestihnete“ už nevychádza zo starej polohy; História sa načíta hneď po odomknutí.</string>
+    <string name="whats_new_body">• Nový vzhľad: zelená Plan&amp;Ride, nová ikona P&amp;R a plávajúca lišta dole, ktorá sa zväčší tam, kde práve ste.\n• Odchody majú hodiny a vyhľadávač autobus, takže si ich nepomýlite.\n• Domov ukáže najbližšie autobusy z obľúbenej zastávky ako karty pod lístkom.\n• Zmeňte každú farbu: témy Plan&amp;Ride, Sage, Tmavozelená a Atrament a mäta a každú časť aplikácie v Účet → Vzhľad.\n• Meškania: načas bez farby, malé meškanie oranžové, 5 minút a viac červené.</string>
     <string name="topup_button">Dobiť kredit</string>
     <string name="topup_title">Dobitie kreditu na kartu</string>
     <string name="topup_card">Karta %1$s · teraz %2$s</string>
@@ -685,4 +683,20 @@ Na ďalšej obrazovke zvoľte „Povoliť vždy“.</string>
     <string name="share_accepted_location">Zdieľané s: %1$s. Vidí váš spoj a kde ste, kým sledovanie neukončíte.</string>
     <string name="share_back">Ukázať im, kde som</string>
     <string name="share_stopped">Zdieľanie skončilo.</string>
+    <string name="colors_every_title">Všetky farby</string>
+    <string name="colors_every_hint">Ťuknite na farbu a zmeňte ju pre túto tému. Automaticky znamená, že ju aplikácia odvodí z ostatných.</string>
+    <string name="color_role_accent">Zvýraznenie: tlačidlá, odkazy</string>
+    <string name="color_role_background">Pozadie</string>
+    <string name="color_role_cards">Karty</string>
+    <string name="color_role_highlight">Karta najbližšieho spoja</string>
+    <string name="color_role_bar">Spodná lišta</string>
+    <string name="color_role_live">Odpočet naživo</string>
+    <string name="color_role_delay">Meškanie</string>
+    <string name="color_role_late">Veľké meškanie (5 min a viac)</string>
+    <string name="color_role_text">Text</string>
+    <string name="color_role_plate">Tabuľky s číslom linky</string>
+    <string name="color_auto">Automaticky</string>
+    <string name="color_role_reset">Späť na farbu témy</string>
+    <string name="theme_reset">Obnoviť túto tému</string>
+    <string name="home_all_departures">Všetky</string>
 </resources>

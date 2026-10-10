@@ -125,7 +125,8 @@ private fun colorsOf(t: WatchTheme): Colors {
     val on = { c: Color -> if (c.luminance() > 0.45f) Color.Black else Color.White }
     return Colors(
         primary = primary, primaryVariant = Color(t.secondary), onPrimary = on(primary),
-        secondary = accent, secondaryVariant = accent, onSecondary = on(accent)
+        secondary = accent, secondaryVariant = accent, onSecondary = on(accent),
+        background = Color(t.background), surface = Color(t.surface)
     )
 }
 
@@ -190,7 +191,7 @@ private fun WatchApp(nav: androidx.navigation.NavHostController) {
 @Composable
 private fun MainScreen(f: WatchFollow?, home: WatchHome?, now: Long, onOpen: (String) -> Unit) {
     val context = LocalContext.current
-    Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colors.background), contentAlignment = Alignment.Center) {
         // Your part of the line, as on the phone's card: the ring fills as the bus goes from your stop to where you get off.
         // Green, orange or red by how late the bus is; the theme's colour while only the timetable is known.
         if (f != null && f.hops > 0) {
@@ -350,7 +351,7 @@ private fun NavChip(label: String, onClick: () -> Unit) {
 @Composable
 private fun StopsScreen(f: WatchFollow, now: Long) {
     val state = rememberScalingLazyListState(initialCenterItemIndex = (f.nextIndex + 1).coerceAtMost(f.stops.size))
-    ScalingLazyColumn(Modifier.fillMaxSize().background(Color.Black), state = state) {
+    ScalingLazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colors.background), state = state) {
         item { ListHeader { Text(stringResource(R.string.line_to, f.line, f.destination), textAlign = TextAlign.Center) } }
         f.stops.indices.forEach { i -> item { StopRow(f, i) } }
     }
@@ -359,7 +360,7 @@ private fun StopsScreen(f: WatchFollow, now: Long) {
 /** The journey's changes: where to get off this bus, then each next bus and when it leaves. */
 @Composable
 private fun TransfersScreen(f: WatchFollow) {
-    ScalingLazyColumn(Modifier.fillMaxSize().background(Color.Black), horizontalAlignment = Alignment.CenterHorizontally) {
+    ScalingLazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colors.background), horizontalAlignment = Alignment.CenterHorizontally) {
         item { ListHeader { Text(stringResource(R.string.transfers)) } }
         f.stops.getOrNull(f.alightIndex)?.let { stop ->
             item { InfoCard(stringResource(R.string.line_to, f.line, f.destination), stringResource(R.string.get_off_at, stop.name, clock(stop.atMs))) }
@@ -381,7 +382,7 @@ private fun TransfersScreen(f: WatchFollow) {
 /** What the phone announced on this trip (the notifications themselves came to the watch once, from the phone). */
 @Composable
 private fun AlertsScreen(f: WatchFollow) {
-    ScalingLazyColumn(Modifier.fillMaxSize().background(Color.Black), horizontalAlignment = Alignment.CenterHorizontally) {
+    ScalingLazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colors.background), horizontalAlignment = Alignment.CenterHorizontally) {
         item { ListHeader { Text(stringResource(R.string.alerts)) } }
         f.alerts.asReversed().forEach { a -> item { InfoCard(a.title, "${clock(a.atMs)}  ${a.body}") } }
     }
@@ -403,7 +404,7 @@ private fun InfoCard(title: String, body: String) {
 @Composable
 private fun TripsScreen(home: WatchHome?) {
     val context = LocalContext.current
-    ScalingLazyColumn(Modifier.fillMaxSize().background(Color.Black), horizontalAlignment = Alignment.CenterHorizontally) {
+    ScalingLazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colors.background), horizontalAlignment = Alignment.CenterHorizontally) {
         item { ListHeader { Text(stringResource(R.string.my_trips)) } }
         val trips = home?.trips.orEmpty()
         if (trips.isEmpty()) item { Text(stringResource(R.string.no_trips), textAlign = TextAlign.Center, style = MaterialTheme.typography.caption2, modifier = Modifier.padding(horizontal = edge(), vertical = 16.dp)) }
@@ -425,7 +426,7 @@ private fun TripsScreen(home: WatchHome?) {
 @Composable
 private fun BoardsScreen(title: String, boards: List<WatchHome.Board>, now: Long, emptyText: String) {
     val context = LocalContext.current
-    ScalingLazyColumn(Modifier.fillMaxSize().background(Color.Black), horizontalAlignment = Alignment.CenterHorizontally) {
+    ScalingLazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colors.background), horizontalAlignment = Alignment.CenterHorizontally) {
         item { ListHeader { Text(title) } }
         if (boards.isEmpty()) item { Text(emptyText, textAlign = TextAlign.Center, style = MaterialTheme.typography.caption2, modifier = Modifier.padding(horizontal = edge(), vertical = 16.dp)) }
         boards.forEach { b ->

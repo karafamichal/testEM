@@ -27,7 +27,7 @@ val ErrorDark = Color(0xFFFF8A80)
 val ErrorContainerDark = Color(0xFF45160F)
 val OnErrorContainerDark = Color(0xFFFFDAD5)
 
-/** Colours specific to transit UI that Material's scheme has no slot for. */
+/** Colours specific to transit UI that Material's scheme has no slot for. Each can be set by the rider ([com.ksjd.testem.ThemeRole]). */
 @Immutable
 data class TransitColors(
     /** Departure board background ("asphalt"). */
@@ -35,13 +35,22 @@ data class TransitColors(
     val boardRow: Color,
     val boardText: Color,
     val boardDim: Color,
-    /** Live countdowns only. */
-    val amber: Color,
+    /** Live countdowns on the board. */
+    val live: Color,
     val onTime: Color,
+    /** A small delay (under 5 minutes). */
+    val delay: Color,
+    /** 5 minutes or more, and cancelled. */
     val late: Color,
     /** Line-number plate on light surfaces. */
     val plate: Color,
-    val onPlate: Color
+    val onPlate: Color,
+    /** The next-bus card on Home. */
+    val highlight: Color,
+    val onHighlight: Color,
+    /** The floating bottom bar. */
+    val bar: Color,
+    val onBar: Color
 )
 
 val LightTransitColors = TransitColors(
@@ -49,11 +58,16 @@ val LightTransitColors = TransitColors(
     boardRow = Color(0xFF262C34),
     boardText = Color(0xFFF3F5F7),
     boardDim = Color(0xFF8D97A3),
-    amber = Color(0xFFFFB21E),
-    onTime = Color(0xFF1F8A55),
-    late = Color(0xFFC8372D),
+    live = Color(0xFF6EE7A8),
+    onTime = Color(0xFF56606C),
+    delay = Color(0xFFB5530A),
+    late = Color(0xFFB42318),
     plate = Ink,
-    onPlate = Color.White
+    onPlate = Color.White,
+    highlight = Color(0xFF157A38),
+    onHighlight = Color.White,
+    bar = Ink,
+    onBar = Color.White
 )
 
 val DarkTransitColors = TransitColors(
@@ -61,11 +75,16 @@ val DarkTransitColors = TransitColors(
     boardRow = Color(0xFF161B21),
     boardText = Color(0xFFF3F5F7),
     boardDim = Color(0xFF8D97A3),
-    amber = Color(0xFFFFB21E),
-    onTime = Color(0xFF4CC38A),
+    live = Color(0xFF6EE7A8),
+    onTime = Color(0xFFA8B2BE),
+    delay = Color(0xFFFFA866),
     late = Color(0xFFFF6B61),
     plate = Color(0xFFE8ECF1),
-    onPlate = Ink
+    onPlate = Ink,
+    highlight = Color(0xFF157A38),
+    onHighlight = Color.White,
+    bar = Color(0xFF6EE7A8),
+    onBar = Color(0xFF0B3D1C)
 )
 
 val LocalTransitColors = staticCompositionLocalOf { LightTransitColors }

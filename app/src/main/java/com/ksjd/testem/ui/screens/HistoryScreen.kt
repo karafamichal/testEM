@@ -124,7 +124,7 @@ fun HistoryScreen(viewModel: AppViewModel) {
         items.groupBy { YearMonth.from(Instant.ofEpochMilli(it.timestampMs).atZone(ZoneId.systemDefault())) }
     }
 
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = com.ksjd.testem.ui.components.barSpace())) {
         item {
             ScreenHeader(
                 title = stringResource(R.string.history_title),

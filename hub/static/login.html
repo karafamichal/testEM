@@ -3,34 +3,38 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>emhub sign in</title>
-<link rel="icon" href="/favicon.svg">
+<title>emHUB sign in</title>
+<link rel="icon" href="/favicon.svg?v=1.18">
 <link rel="stylesheet" href="/brand.css">
 <style>
-  body { min-height: 100dvh; display: grid; place-items: center; padding: 16px; }
-  .sign {
-    width: 100%; max-width: 380px; background: var(--surface); border-radius: 6px; overflow: hidden;
-    border: 1px solid var(--line);
-  }
-  .sign-head { background: var(--sign); color: #fff; padding: 22px 24px 18px; }
-  .sign-head h1 { font-size: 34px; }
-  .sign-head p { margin: 2px 0 0; opacity: 0.85; font-size: 15px; }
-  .stripe { height: 6px; background: var(--amber); }
-  form { padding: 22px 24px 8px; display: flex; flex-direction: column; gap: 14px; }
-  .alt { padding: 6px 24px 24px; display: flex; flex-direction: column; gap: 10px; }
+  /* F3: a brand panel beside the form; they stack on a phone. */
+  body { min-height: 100dvh; display: flex; flex-wrap: wrap; }
+  .panel { flex: 1 1 420px; background: #0F2A1C; padding: 56px; display: flex; flex-direction: column; gap: 24px; box-sizing: border-box; }
+  .panel .mark { display: flex; align-items: center; gap: 12px; font: 700 26px/1 var(--display); color: #fff; }
+  .panel h1 { font-size: clamp(36px, 5vw, 56px); line-height: 1.02; color: #fff; max-width: 12em; }
+  .panel p { margin: 0; font-size: 18px; color: var(--muted); max-width: 28em; }
+  .side { flex: 1 1 420px; display: flex; align-items: center; justify-content: center; padding: 48px 24px; box-sizing: border-box; }
+  .sign { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 18px; }
+  .sign h2 { font-size: 34px; }
+  form { display: flex; flex-direction: column; gap: 14px; }
+  .field input { min-height: 46px; }
+  .alt { display: flex; flex-direction: column; gap: 10px; }
   .or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
   .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-  .btn { justify-content: center; }
+  .btn { justify-content: center; min-height: 48px; }
   #msg { margin: 0; font-size: 14px; }
+  @media (max-width: 640px) { .panel { padding: 32px 24px; } }
 </style>
 </head>
 <body>
+<section class="panel">
+  <div class="mark"><svg width="40" height="40" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 32L12 12M32 32L52 12M32 32L12 52M32 32L52 52" stroke="#2C4A3B" stroke-width="4" stroke-linecap="round"/><circle cx="12" cy="12" r="6" fill="#6EE7A8"/><circle cx="52" cy="12" r="6" fill="#6EE7A8"/><circle cx="12" cy="52" r="6" fill="#6EE7A8"/><circle cx="52" cy="52" r="6" fill="#6EE7A8"/><circle cx="32" cy="32" r="12" fill="#fff"/></svg>emHUB</div>
+  <h1>The control room behind Plan&amp;Ride.</h1>
+  <p>Bug reports, suggestions, community delays, the timetable and the website, in one place.</p>
+</section>
+<div class="side">
 <main class="sign">
-  <div class="sign-head">
-    <h1>emhub</h1>
-    <p>Bug reports and community delays for Plan&amp;Ride</p>
-  </div>
-  <div class="stripe"></div>
+  <h2>Sign in</h2>
   <form method="post" action="/auth/login">
     <label class="field">Username
       <input name="username" autocomplete="username" required autofocus>
@@ -47,6 +51,7 @@
     <p class="muted small" style="margin:0">Link your Authentik account in Settings first, after signing in with your password once.</p>
   </div>
 </main>
+</div>
 <script>
   const messages = {
     invalid: "Wrong username or password.",

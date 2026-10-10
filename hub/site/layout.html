@@ -5,67 +5,79 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{title}}</title>
 <meta name="description" content="{{description}}">
-<link rel="icon" href="/mark.png">
+<link rel="icon" href="/mark.png?v=1.18">
 <link rel="alternate" hreflang="sk" href="{{url_sk}}">
 <link rel="alternate" hreflang="en" href="{{url_en}}">
 <link rel="stylesheet" href="/brand.css">
 <style>
-  /* Plan&Ride colours: the logo's green on white; emhub's own pages keep their blue. */
-  :root { --sign: #13914A; --accent: #13914A; --ink: #1B1F27; --paper: #F6F8F7; --surface: #FFFFFF; --line: #DDE3DF; --muted: #5C6670; }
+  /* Plan&Ride website (2.15, "E1 green signage"): green on cool paper, pill buttons, the P&R line plate. */
+  :root { --sign: #157A38; --accent: #157A38; --mint: #6EE7A8; --ink: #14181D; --paper: #F4F6F8; --surface: #FFFFFF;
+    --line: #E7EBF0; --muted: #56606C; --band: #157A38; --on-band: #FFFFFF; --band-muted: #DDF1E3; --chip: #DDF1E3; --on-chip: #0B3D1C;
+    --amber: #157A38; --ok: #1E8A4C; --bad: #B42318; --focus: #157A38; color-scheme: light; }
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --sign: #3CC77A; --accent: #3CC77A; --ink: #E9EEEB; --paper: #0F1512; --surface: #17201B; --line: #2A372F; --muted: #9AA8A0; }
-    /* The logo's bus is black: give it its white ground back. */
-    :root:not([data-theme="light"]) .brand img, :root:not([data-theme="light"]) .hero img { background: #fff; border-radius: 8px; padding: 4px; }
-    :root:not([data-theme="light"]) .hero img { border-radius: 20px; padding: 16px; }
-    :root:not([data-theme="light"]) .btn:not(.quiet) { color: #0F1512; }
+    :root:not([data-theme="light"]) { --sign: #4CC67A; --accent: #4CC67A; --ink: #E6EFE9; --paper: #0C1A14; --surface: #13241C;
+      --line: #1E3329; --muted: #9DB3A6; --band: #13241C; --band-muted: #9DB3A6; --chip: #1E4A2D; --on-chip: #B8F5D4;
+      --amber: #6EE7A8; --ok: #4CC67A; --bad: #FF6B61; --focus: #6EE7A8; color-scheme: dark; }
+    :root:not([data-theme="light"]) .btn:not(.quiet) { color: #0C1A14; }
   }
   body { min-height: 100dvh; display: flex; flex-direction: column; }
-  .wrap { width: 100%; max-width: 860px; margin: 0 auto; padding: 0 16px; }
+  .wrap { width: 100%; max-width: 1040px; margin: 0 auto; padding: 0 20px; }
   header.site { background: var(--surface); border-bottom: 1px solid var(--line); }
-  header.site .wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+  header.site .wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding-top: 14px; padding-bottom: 14px; }
   .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-family: var(--display); font-weight: 700; font-size: 24px; }
-  .brand img { height: 32px; width: auto; }
-  .brand b { color: var(--accent); }
+  .brand .pr { display: inline-flex; align-items: center; height: 32px; padding: 0 8px; border-radius: 6px; background: #14181D; color: #fff; font-size: 20px; }
+  .brand .pr b, .brand > span b { color: var(--mint); }
+  .brand > span b { color: var(--accent); }
   nav.site { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
-  nav.site a { color: var(--ink); text-decoration: none; padding: 6px 10px; border-radius: 6px; font-weight: 500; }
-  nav.site a[aria-current="page"] { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  nav.site a { color: var(--ink); text-decoration: none; padding: 8px 12px; border-radius: 999px; font-weight: 500; }
+  nav.site a[aria-current="page"] { background: var(--chip); color: var(--on-chip); }
   .lang { font-size: 14px; color: var(--muted); }
   .lang a { color: var(--muted); }
-  main { flex: 1; padding: 32px 0 48px; }
-  main h1 { font-size: 40px; margin: 0 0 12px; }
-  main h2 { font-size: 26px; margin: 32px 0 8px; }
-  main h3 { font-size: 20px; margin: 22px 0 6px; }
+  main { flex: 1; padding: 40px 0 56px; }
+  main h1 { font-size: clamp(36px, 6vw, 64px); line-height: 1.02; margin: 0 0 14px; }
+  main h2 { font-size: 30px; margin: 40px 0 10px; }
+  main h3 { font-size: 21px; margin: 24px 0 6px; }
   main p, main li { max-width: 68ch; }
   main ul { padding-left: 22px; }
-  main li { margin: 4px 0; }
+  main li { margin: 6px 0; }
   main code { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 0.92em; }
   main hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
-  .hero { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; }
-  .hero img { width: 200px; height: auto; }
-  .lead { font-size: 19px; color: var(--muted); }
-  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0 8px; }
-  .btn { text-decoration: none; }
+  .hero { display: grid; grid-template-columns: 1fr auto; gap: 40px; align-items: center; }
+  .hero img { width: 220px; height: auto; border-radius: 48px; }
+  .badge { display: inline-block; background: var(--chip); color: var(--on-chip); border-radius: 999px; padding: 4px 12px; font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+  .lead { font-size: 20px; color: var(--muted); }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 24px 0 8px; }
+  .btn { text-decoration: none; border-radius: 999px; min-height: 52px; padding: 0 24px; display: inline-flex; align-items: center; background: var(--accent); color: #fff; }
+  .btn.quiet { background: transparent; color: var(--ink); border: 2px solid var(--line); }
   .btn[aria-disabled] { cursor: default; }
-  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 28px; }
-  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-  .card h3 { margin: 0 0 4px; font-size: 19px; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 40px; }
+  .card { background: var(--surface); border-radius: 18px; padding: 22px; }
+  .card h3 { margin: 0 0 6px; font-size: 21px; }
   .card p { margin: 0; color: var(--muted); }
+  /* A full-width green band, e.g. "Built with riders" on the home page. */
+  .band { background: var(--band); color: var(--on-band); border-radius: 22px; padding: 32px; margin: 40px 0 8px; }
+  .band h2 { margin: 0 0 8px; color: var(--on-band); font-size: 34px; }
+  .band p { color: var(--band-muted); margin: 0; }
+  /* What's new: each version a big heading, its sections as small labels. */
+  .page-changelog main h2 { font-size: 40px; margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--line); }
+  .page-changelog main h1 + h2 { border-top: 0; padding-top: 0; }
+  .page-changelog main h3 { display: inline-block; font: 600 14px/1 var(--body); background: var(--chip); color: var(--on-chip); border-radius: 999px; padding: 6px 12px; margin: 18px 0 4px; }
   footer.site { border-top: 1px solid var(--line); background: var(--surface); font-size: 14px; color: var(--muted); }
-  footer.site .wrap { display: flex; gap: 16px; flex-wrap: wrap; padding-top: 16px; padding-bottom: 16px; }
+  footer.site .wrap { display: flex; gap: 16px; flex-wrap: wrap; padding-top: 18px; padding-bottom: 18px; }
   footer.site a { color: var(--muted); }
   footer.site .admin { margin-left: auto; }
-  @media (max-width: 600px) {
+  @media (max-width: 640px) {
     .hero { grid-template-columns: 1fr; }
-    .hero img { width: 140px; order: -1; }
-    main h1 { font-size: 32px; }
+    .hero img { width: 120px; border-radius: 28px; order: -1; }
     nav.site { margin-left: 0; width: 100%; }
+    .band { padding: 24px; }
   }
 </style>
 </head>
-<body>
+<body class="page-{{page}}">
 <header class="site">
   <div class="wrap">
-    <a class="brand" href="{{home_url}}"><img src="/mark.png" alt="" width="49" height="32"><span>Plan<b>&amp;</b>Ride</span></a>
+    <a class="brand" href="{{home_url}}"><span class="pr" aria-hidden="true">P<b>&amp;</b>R</span><span>Plan<b>&amp;</b>Ride</span></a>
     <nav class="site" aria-label="{{nav_label}}">{{{nav}}}</nav>
     <span class="lang">{{{lang_switch}}}</span>
   </div>

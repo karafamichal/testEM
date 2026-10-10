@@ -202,7 +202,15 @@ export async function renderPreview(el) {
   const stops = favourites().slice(0, 3);
   if (!stops.length) { el.innerHTML = `<h2 class="section-label">${t('favourites')}</h2><p class="hint pad">${t('ticket_next_hint')}</p>`; return; }
   const boards = await Promise.all(stops.map((stop) => api('/api/live/departures', { platformIds: stop.platforms.map((p) => p.id), stopId: stop.id })));
-  el.innerHTML = `<h2 class="section-label">${t('favourites')}</h2>` + stops.map((stop, i) => {
+  // D1: the first favourite's next buses as cards (the first in the next-bus colour), the others as small boards.
+  const first = boards[0].ok ? boards[0].json.filter((d) => !d.isCancelled).slice(0, 4) : [];
+  const cards = `<div class="section-label"><span>${esc(stops[0].name)}</span><button class="text-btn" data-preview-stop="${stops[0].id}">${t('all_departures')}</button></div>
+    <div class="next-cards">${first.map((d, i) => `<button class="next-card ${i === 0 ? 'first' : ''}" data-preview-stop="${stops[0].id}">${plate(d.line)}
+      <span class="next-dest">${esc(d.destination)}</span>
+      <strong class="next-time">${d.fromTimetable ? clock(d.departsAtMs) : esc(countdown((d.departsAtMs - Date.now()) / 1000))}</strong>
+      <span class="next-sub">${d.fromTimetable ? esc(d.operator || t('timetable')) : delayChip(d.delaySeconds)}</span></button>`).join('') || `<p class="hint pad">${t('board_empty')}</p>`}</div>`;
+  el.innerHTML = cards + (stops.length > 1 ? `<h2 class="section-label">${t('favourites')}</h2>` : '') + stops.slice(1).map((stop, n) => {
+    const i = n + 1;
     const deps = boards[i].ok ? boards[i].json.slice(0, 3) : [];
     return `<button class="preview-board" data-preview-stop="${stop.id}"><span class="preview-name">${esc(stop.name)}</span>
       <ul class="board compact">${deps.map((d) => `<li><div class="departure">${plate(d.line)}<span class="dep-main"><span class="dep-dest">${esc(d.destination)}</span><span class="dep-sub">${d.fromTimetable ? `<span class="hint small">${esc(d.operator || t('timetable'))}</span>` : delayChip(d.delaySeconds)}</span></span>

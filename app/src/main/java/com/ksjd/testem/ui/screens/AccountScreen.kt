@@ -1,5 +1,6 @@
 package com.ksjd.testem.ui.screens
 
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.QrCode2
 import com.ksjd.testem.ui.components.NoticeTone
 import androidx.compose.material3.CircularProgressIndicator
@@ -166,7 +167,7 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = 24.dp)
+            .padding(bottom = com.ksjd.testem.ui.components.barSpace())
     ) {
         ScreenHeader(
             title = when {
@@ -594,7 +595,7 @@ private fun SettingsPageScreen(page: SettingsPage, viewModel: AppViewModel, onBa
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = 24.dp)
+            .padding(bottom = com.ksjd.testem.ui.components.barSpace())
     ) {
         Row(Modifier.padding(start = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back)) }
@@ -785,14 +786,21 @@ private fun AppearanceSettings(app: AppState, viewModel: AppViewModel) {
     var primary by rememberSaveable { mutableStateOf<Long?>(null) }
     var secondary by rememberSaveable { mutableStateOf<Long?>(null) }
     var accent by rememberSaveable { mutableStateOf<Long?>(null) }
+    val selectedPreset = app.themePresets.firstOrNull { it.id == app.selectedThemeId } ?: app.themePresets.firstOrNull()
     picking?.let { which ->
         ColorPickDialog(
-            initial = when (which) { "bg" -> app.backgroundColor; "p" -> primary; "s" -> secondary; else -> accent },
-            title = stringResource(when (which) {
+            initial = when {
+                which.startsWith("role:") -> selectedPreset?.let { colorOf(it, which.removePrefix("role:")) }
+                which == "bg" -> app.backgroundColor; which == "p" -> primary; which == "s" -> secondary; else -> accent
+            },
+            title = if (which.startsWith("role:")) stringResource(roleLabel(which.removePrefix("role:"))) else stringResource(when (which) {
                 "bg" -> R.string.background_title; "p" -> R.string.primary_hex_label; "s" -> R.string.secondary_hex_label; else -> R.string.tertiary_hex_label
             }),
             onPick = { c ->
-                when (which) { "bg" -> viewModel.setBackgroundColor(c); "p" -> primary = c; "s" -> secondary = c; else -> accent = c }
+                when {
+                    which.startsWith("role:") -> viewModel.setThemeColor(which.removePrefix("role:"), c)
+                    which == "bg" -> viewModel.setBackgroundColor(c); which == "p" -> primary = c; which == "s" -> secondary = c; else -> accent = c
+                }
                 picking = null
             },
             onDismiss = { picking = null }
@@ -842,6 +850,42 @@ private fun AppearanceSettings(app: AppState, viewModel: AppViewModel) {
             )
         }
     }
+    // Every single colour of the selected theme; a tap opens the picker, the cross goes back to the theme's own.
+    if (selectedPreset != null) {
+        SectionLabel(stringResource(R.string.colors_every_title))
+        ListGroup {
+            (listOf("primary") + com.ksjd.testem.ThemeRole.all).forEachIndexed { index, role ->
+                if (index > 0) GroupDivider()
+                val color = colorOf(selectedPreset, role)
+                val default = com.ksjd.testem.DefaultThemePresets.all.firstOrNull { it.id == selectedPreset.id }
+                val changed = default != null && color != colorOf(default, role)
+                ListRow(
+                    title = stringResource(roleLabel(role)),
+                    subtitle = color?.let { hexOf(Color(it)) } ?: stringResource(R.string.color_auto),
+                    onClick = { picking = "role:$role" },
+                    leading = { if (color != null) Swatch(Color(color)) else CustomColorSwatch(null, size = 22) { picking = "role:$role" } },
+                    trailing = if (changed || (default == null && color != null && role != "primary")) {
+                        {
+                            IconButton(onClick = { viewModel.setThemeColor(role, null) }) {
+                                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.color_role_reset))
+                            }
+                        }
+                    } else null
+                )
+            }
+        }
+        Text(
+            stringResource(R.string.colors_every_hint),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+        )
+        if (com.ksjd.testem.DefaultThemePresets.all.any { it.id == selectedPreset.id && it != selectedPreset }) {
+            TextButton(onClick = viewModel::resetThemePreset, modifier = Modifier.padding(horizontal = 8.dp)) {
+                Text(stringResource(R.string.theme_reset))
+            }
+        }
+    }
+
     Spacer(Modifier.height(16.dp))
     ListGroup {
         SwitchRow(stringResource(R.string.amoled_mode_title), stringResource(R.string.amoled_mode_subtitle), app.amoledEnabled, viewModel::setAmoledEnabled)
@@ -864,6 +908,25 @@ private fun AppearanceSettings(app: AppState, viewModel: AppViewModel) {
             shape = RoundedCornerShape(12.dp)
         ) { Text(stringResource(R.string.save_preset)) }
     }
+}
+
+/** The colour a theme gives one part of the app; null when the app works it out (shown as "Auto"). */
+private fun colorOf(preset: com.ksjd.testem.ThemePreset, role: String): Long? = when (role) {
+    "primary" -> preset.primary
+    else -> preset.roles[role]
+}
+
+private fun roleLabel(role: String): Int = when (role) {
+    "primary" -> R.string.color_role_accent
+    com.ksjd.testem.ThemeRole.BACKGROUND -> R.string.color_role_background
+    com.ksjd.testem.ThemeRole.CARDS -> R.string.color_role_cards
+    com.ksjd.testem.ThemeRole.HIGHLIGHT -> R.string.color_role_highlight
+    com.ksjd.testem.ThemeRole.BAR -> R.string.color_role_bar
+    com.ksjd.testem.ThemeRole.LIVE -> R.string.color_role_live
+    com.ksjd.testem.ThemeRole.DELAY -> R.string.color_role_delay
+    com.ksjd.testem.ThemeRole.LATE -> R.string.color_role_late
+    com.ksjd.testem.ThemeRole.TEXT -> R.string.color_role_text
+    else -> R.string.color_role_plate
 }
 
 /** One colour of a new theme: its name and swatch; a tap opens the colour picker. */

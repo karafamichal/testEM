@@ -21,6 +21,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontWeight
+import com.ksjd.testem.ui.components.DelayLabel
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -169,7 +173,7 @@ fun TicketScreen(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = 24.dp)
+            .padding(bottom = com.ksjd.testem.ui.components.barSpace())
     ) {
         ScreenHeader(
             title = ticket.userName.substringBefore(' ').takeIf { unlocked }?.ifBlank { null }
@@ -286,10 +290,20 @@ fun TicketScreen(
             }
         }
 
+        // D1: the next buses from the first favourite stop, right under the ticket (the ticket comes first).
+        live.favourites.firstOrNull()?.let { stop ->
+            val board = live.previews.firstOrNull { it.stop.id == stop.id }
+            NextBusCards(stop.name, board, now) {
+                liveViewModel.openStop(stop)
+                onOpenDepartures()
+            }
+        }
+
         JourneysSection(timetable.savedJourneys, now, viewModel, onOpenPlanner)
         RidesSection(timetable.rides, now, viewModel)
 
-        SectionLabel(stringResource(R.string.departures_favourites))
+        // The first favourite is on top as cards; the next two follow as small boards.
+        if (live.favourites.size > 1 || live.favourites.isEmpty()) SectionLabel(stringResource(R.string.departures_favourites))
         if (live.favourites.isEmpty()) {
             Text(
                 stringResource(R.string.ticket_next_hint),
@@ -301,7 +315,7 @@ fun TicketScreen(
             )
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                live.favourites.take(3).forEach { stop ->
+                live.favourites.take(3).drop(1).forEach { stop ->
                     val board = live.previews.firstOrNull { it.stop.id == stop.id }
                     MiniBoard(stop.name, board, now) {
                         liveViewModel.openStop(stop)
@@ -631,11 +645,11 @@ private fun Perforation() {
 
 /**
  * Thin bar that drains smoothly until the next code. When a new code is confirmed
- * it stretches back to full with a springy motion; it turns amber when the code is old.
+ * it stretches back to full with a springy motion; it turns the delay colour when the code is old.
  */
 @Composable
 private fun FreshnessBar(ticket: TicketState, now: Long) {
-    val amber = TransitTheme.colors.amber
+    val staleColor = TransitTheme.colors.delay
     val stale = ticket.phase == TicketPhase.Offline || isStale(ticket, now)
     val active = ticket.phase == TicketPhase.Active && ticket.lastConfirmedTime > 0L
     val level = remember { Animatable(0f) }
@@ -654,7 +668,7 @@ private fun FreshnessBar(ticket: TicketState, now: Long) {
         }
     }
 
-    val color = if (stale) amber else MaterialTheme.colorScheme.primary
+    val color = if (stale) staleColor else MaterialTheme.colorScheme.primary
     val track = Color(0xFFE9EDF1)
     Canvas(
         Modifier
@@ -794,6 +808,73 @@ private fun FullscreenQr(bitmap: android.graphics.Bitmap?, title: String, detail
     }
 }
 
+/**
+ * D1: a favourite stop's next departures as cards you swipe through. The first card takes the theme's
+ * next-bus colour; the countdown is big because that is what the rider looks for.
+ */
+@Composable
+private fun NextBusCards(stopName: String, board: BoardState?, now: Long, onOpen: () -> Unit) {
+    val colors = TransitTheme.colors
+    val departures = board?.departures.orEmpty().filterNot { it.isCancelled }.take(4)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+        Text(stopName, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(stringResource(R.string.home_all_departures), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+    }
+    if (departures.isEmpty()) {
+        Box(Modifier.fillMaxWidth().height(96.dp), contentAlignment = Alignment.Center) {
+            if (board == null || board.isLoading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+            else Text(stringResource(if (board.hasError) R.string.board_error else R.string.board_empty),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+    Row(
+        Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        departures.forEachIndexed { i, d ->
+            val first = i == 0
+            val elapsed = ((now - d.fetchedAtMs) / 1000L).toInt()
+            val minutes = ((d.secondsUntil - elapsed) / 60).coerceAtLeast(0)
+            Surface(
+                onClick = onOpen,
+                modifier = Modifier.width(150.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = if (first) colors.highlight else MaterialTheme.colorScheme.surface,
+                contentColor = if (first) colors.onHighlight else MaterialTheme.colorScheme.onSurface
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LinePlate(d.line, onBoard = first)
+                    Text(d.destination, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (d.isRealtime) {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text("$minutes", style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold))
+                            Text(" min", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 4.dp))
+                        }
+                    } else {
+                        Text(Format.secondOfDay(d.plannedSecondOfDay), style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold))
+                    }
+                    DelayLabel(
+                        d.delaySeconds,
+                        onBoard = first && colors.onHighlight.luminance() > 0.5f,
+                        neutral = if (first) colors.onHighlight.copy(alpha = 0.8f) else null
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** Three-row slice of a favourite stop's departure board, used on the home tab. */
 @Composable
 private fun MiniBoard(stopName: String, board: BoardState?, now: Long, onOpen: () -> Unit) {
@@ -822,7 +903,7 @@ private fun MiniBoard(stopName: String, board: BoardState?, now: Long, onOpen: (
                         .fillMaxWidth()
                         .height(72.dp),
                     contentAlignment = Alignment.Center
-                ) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = colors.amber) }
+                ) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = colors.live) }
                 departures.isEmpty() -> Text(
                     stringResource(if (board.hasError) R.string.board_error else R.string.board_empty),
                     style = MaterialTheme.typography.bodyMedium,
@@ -851,7 +932,7 @@ private fun MiniBoard(stopName: String, board: BoardState?, now: Long, onOpen: (
                         Text(
                             if (d.isRealtime) countdownText(d.secondsUntil - elapsed) else Format.secondOfDay(d.plannedSecondOfDay),
                             style = TimeStyle,
-                            color = if (d.isRealtime) colors.amber else colors.boardText
+                            color = if (d.isRealtime) colors.live else colors.boardText
                         )
                     }
                 }

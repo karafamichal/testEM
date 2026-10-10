@@ -197,14 +197,14 @@ private fun draw(
             }
         })
     }
-    // People sharing with each other by a code: an amber dot with their name.
+    // People sharing with each other by a code: a mint dot with their name.
     others.forEachIndexed { i, (name, pos) ->
         map.overlays.add(Marker(map).apply {
             id = "pr:person$i"
             position = GeoPoint(pos.lat, pos.lon)
             title = name
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-            icon = dot(0xFFFFB21E.toInt(), surface, 22, map.context.resources.displayMetrics.density)
+            icon = dot(0xFF6EE7A8.toInt(), surface, 22, map.context.resources.displayMetrics.density)
         })
     }
     map.invalidate()

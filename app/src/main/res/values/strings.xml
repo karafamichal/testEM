@@ -539,9 +539,7 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• Plan&amp;Ride on Wear OS: the followed bus, its stops, transfers and alerts, departures and credit on your watch (Account → Watch).
-• IDS BBSK: add your eshop.idsbbsk.sk account; its QR code, credit, tickets and history sit next to SAD Zvolen, and the home tab switches to the right ticket for each bus.\n• Add credit to your card (Account): you pay SAD Zvolen directly on its own payment gateway.
-• Choose your own change: where to get off the first bus and where to get on the next, also a stop you search for (Change stop).\n• Unsent bug reports and suggestions are kept, photos too.\n• Tap the History chart or a stop for a closer look.\n• The widget now looks like the live card on the home tab.\n• Waiting at your stop for a late bus asks whether it came.\n• “You won\'t make it” no longer comes from an old position; History loads right after unlocking.</string>
+    <string name="whats_new_body">• A new look: Plan&amp;Ride green, a new P&amp;R icon and a floating bar at the bottom that grows to show where you are.\n• Departures has a clock and the planner a bus, so they are easy to tell apart.\n• Home shows your favourite stop\'s next buses as cards under the ticket.\n• Change every colour: themes Plan&amp;Ride, Sage, Dark green and Ink &amp; mint, and each part of the app in Account → Appearance.\n• Delays: on time stays calm, small delays orange, 5 minutes or more red.</string>
     <string name="topup_button">Add credit</string>
     <string name="topup_title">Add credit to your card</string>
     <string name="topup_card">Card %1$s · credit now %2$s</string>
@@ -672,4 +670,20 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="share_accepted_location">Shared with %1$s. They see your bus and where you are until you stop following.</string>
     <string name="share_back">Show them where I am</string>
     <string name="share_stopped">They stopped sharing.</string>
+    <string name="colors_every_title">Every colour</string>
+    <string name="colors_every_hint">Tap a colour to change it for this theme. Auto means the app works it out from the others.</string>
+    <string name="color_role_accent">Accent: buttons, links</string>
+    <string name="color_role_background">Background</string>
+    <string name="color_role_cards">Cards</string>
+    <string name="color_role_highlight">Next-bus card</string>
+    <string name="color_role_bar">Bottom bar</string>
+    <string name="color_role_live">Live countdown</string>
+    <string name="color_role_delay">Delay</string>
+    <string name="color_role_late">Late (5 min or more)</string>
+    <string name="color_role_text">Text</string>
+    <string name="color_role_plate">Line plates</string>
+    <string name="color_auto">Auto</string>
+    <string name="color_role_reset">Back to the theme\'s colour</string>
+    <string name="theme_reset">Reset this theme</string>
+    <string name="home_all_departures">All</string>
 </resources>

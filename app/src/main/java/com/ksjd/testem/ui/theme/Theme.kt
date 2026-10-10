@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import com.ksjd.testem.DefaultThemePresets
+import com.ksjd.testem.ThemeRole
 import com.ksjd.testem.ThemePreset
 
 private fun onColorFor(color: Color): Color = if (color.luminance() > 0.45f) Ink else Color.White
@@ -119,15 +120,44 @@ fun TestEMTheme(
     content: @Composable () -> Unit
 ) {
     val preset = themePreset ?: DefaultThemePresets.all.first()
+    val roles = preset.roles
+    // A theme's own background and cards are drawn for light or for dark: in the other mode the app works them out
+    // itself. Colours the rider picked are always used (their background then decides light or dark, see MainActivity).
+    val builtIn = DefaultThemePresets.all.firstOrNull { it.id == preset.id }?.roles.orEmpty()
+    fun fits(role: String) = roles[role]?.takeIf { (Color(it).luminance() < 0.5f) == darkTheme || builtIn[role] != it }
+    // A theme's near-black bar or plates would vanish on a dark page: in dark mode they take the dark default.
+    // A colour the rider picked themselves is always kept.
+    fun visible(role: String) = roles[role]?.takeUnless { darkTheme && Color(it).luminance() < 0.15f && builtIn[role] == it }
+
     val base = if (darkTheme) darkScheme(preset, amoledMode) else lightScheme(preset)
-    val colorScheme = background?.let { withBackground(base, Color(it), darkTheme) } ?: base
-    val transit = if (darkTheme) {
+    var scheme = (background ?: fits(ThemeRole.BACKGROUND))?.let { withBackground(base, Color(it), darkTheme) } ?: base
+    fits(ThemeRole.CARDS)?.let { c ->
+        val cards = Color(c)
+        scheme = scheme.copy(surface = cards, surfaceContainerLow = cards, surfaceContainer = cards, surfaceContainerHigh = cards)
+    }
+    roles[ThemeRole.TEXT]?.let { t ->
+        val text = Color(t)
+        scheme = scheme.copy(onBackground = text, onSurface = text, onSurfaceVariant = lerp(text, scheme.surface, 0.3f))
+    }
+
+    val defaults = if (darkTheme) {
         if (amoledMode) DarkTransitColors.copy(board = Color.Black, boardRow = Color(0xFF0E0E0E)) else DarkTransitColors
     } else {
         LightTransitColors
     }
+    val plate = visible(ThemeRole.PLATE)?.let(::Color) ?: defaults.plate
+    val highlight = roles[ThemeRole.HIGHLIGHT]?.let(::Color) ?: Color(preset.primary)
+    val bar = visible(ThemeRole.BAR)?.let(::Color) ?: defaults.bar
+    val transit = defaults.copy(
+        live = roles[ThemeRole.LIVE]?.let(::Color) ?: defaults.live,
+        delay = roles[ThemeRole.DELAY]?.let(::Color) ?: defaults.delay,
+        late = roles[ThemeRole.LATE]?.let(::Color) ?: defaults.late,
+        plate = plate, onPlate = onColorFor(plate),
+        highlight = highlight, onHighlight = onColorFor(highlight),
+        bar = bar, onBar = onColorFor(bar)
+    )
     CompositionLocalProvider(LocalTransitColors provides transit) {
-        MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+        MaterialTheme(colorScheme = scheme, typography = Typography, content = content)
     }
 }
 

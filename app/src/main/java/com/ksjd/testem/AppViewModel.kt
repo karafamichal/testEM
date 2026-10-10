@@ -594,11 +594,40 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun addThemePreset(name: String, primary: Long, secondary: Long, tertiary: Long) {
         val preset = ThemePreset(java.util.UUID.randomUUID().toString(), name, primary, secondary, tertiary)
-        val updated = _appState.value.themePresets + preset
-        prefs.saveThemePresets(updated.filter { p -> DefaultThemePresets.all.none { it.id == p.id } })
-        prefs.saveSelectedThemeId(preset.id)
-        _appState.update { it.copy(themePresets = updated, selectedThemeId = preset.id) }
+        savePresets(_appState.value.themePresets + preset)
+        selectThemePreset(preset.id)
+    }
+
+    /** One colour of the selected theme ([ThemeRole], or "primary"/"secondary"/"tertiary"); null goes back to the theme's own. */
+    fun setThemeColor(role: String, color: Long?) {
+        val id = _appState.value.selectedThemeId
+        savePresets(_appState.value.themePresets.map { p ->
+            if (p.id != id) p
+            else {
+                val default = DefaultThemePresets.all.firstOrNull { it.id == id }
+                when (role) {
+                    "primary" -> p.copy(primary = color ?: default?.primary ?: p.primary)
+                    "secondary" -> p.copy(secondary = color ?: default?.secondary ?: p.secondary)
+                    "tertiary" -> p.copy(tertiary = color ?: default?.tertiary ?: p.tertiary)
+                    else -> p.copy(roles = if (color == null) p.roles - role else p.roles + (role to color))
+                }
+            }
+        })
         com.ksjd.testem.live.TripTracking.refreshWatch(app)
+    }
+
+    /** The selected built-in theme back to how it shipped (a rider's own theme keeps its colours). */
+    fun resetThemePreset() {
+        val id = _appState.value.selectedThemeId
+        val default = DefaultThemePresets.all.firstOrNull { it.id == id } ?: return
+        savePresets(_appState.value.themePresets.map { if (it.id == id) default else it })
+        com.ksjd.testem.live.TripTracking.refreshWatch(app)
+    }
+
+    /** Stores the rider's own themes and any built-in one they changed. */
+    private fun savePresets(presets: List<ThemePreset>) {
+        prefs.saveThemePresets(presets.filter { p -> DefaultThemePresets.all.none { it == p } })
+        _appState.update { it.copy(themePresets = presets) }
     }
 
     fun setLanguageCode(languageCode: String) {

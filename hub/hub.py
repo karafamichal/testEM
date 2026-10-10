@@ -47,7 +47,7 @@ from pathlib import Path
 import sadzv
 import timetable
 
-VERSION = "1.17.1"
+VERSION = "1.18.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -859,7 +859,7 @@ def render_site(name, lang, content=None):
     )
     words = SITE_WORDS[lang]
     values = {
-        "lang": lang, "title": title, "description": description, "nav": nav, "nav_label": words["nav"],
+        "lang": lang, "page": name, "title": title, "description": description, "nav": nav, "nav_label": words["nav"],
         "home_url": site_url("home", lang), "url_sk": PUBLIC_URL + site_url(name, "sk"), "url_en": PUBLIC_URL + site_url(name, "en"),
         "lang_switch": f'<a href="{site_url(name, other)}" hreflang="{other}" lang="{other}">{words["other"]}</a>',
         "admin_label": words["admin"], "year": datetime.now(LOCAL_ZONE).year,

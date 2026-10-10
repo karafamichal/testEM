@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.15.0
+
+### New
+- **A new look**: Plan&Ride green on cool grey, a new **P&R** icon (white P and R, a mint "&", on ink) for the app, the watch, the web version and the website.
+- **Floating bar**: the tabs sit in one floating pill at the bottom; the open tab grows into a labelled button with a short animation, and pages scroll on under it.
+- **Departures vs. Planner**: Departures now has a clock and the planner a bus, so they're no longer mixed up. The first tab is always *Home*.
+- **Next buses on Home**: your first favourite stop's next buses as cards under the ticket, the first one in the next-bus colour.
+- **Every colour is yours**: four new themes (*Plan&Ride*, *Sage*, *Dark green*, *Ink & mint*) next to *Zastávka* and *Ocean*, and in *Account → Appearance → Every colour* each part of the app on its own: background, cards, accent, the next-bus card, the bottom bar, live countdowns, delays, text and line plates. *Reset this theme* brings a built-in one back.
+- **Watch**: the phone's background, cards and live colour; city lines green, regional lines blue.
+
+### Changed
+- **Delays**: on time stays neutral, under 5 minutes in the delay colour, 5 minutes or more in the late colour and bold. The yellow highlights are gone.
+- **Website**: the new look, and emHUB's admin pages are dark (forest green) with their own hub mark.
+
 ## 2.14.2 (web version)
 
 ### Fixed

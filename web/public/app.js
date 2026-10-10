@@ -23,11 +23,17 @@ const s = {
 
 // ------------------------------------------------------------------ theme
 
+/** Built-in themes, as in the Android app (ThemePreset.kt): a main colour plus single colours for parts of the app. */
 const PRESETS = [
-  { id: 'stop', name: 'Zastávka', color: '#1D4FB8' },
-  { id: 'ocean', name: 'Ocean', color: '#136F63' },
-  { id: 'sunset', name: 'Sunset', color: '#E85D04' },
+  { id: 'planride', name: 'Plan&Ride', color: '#157A38', roles: { background: '#F2F5F3', highlight: '#157A38', bar: '#14181D' } },
+  { id: 'sage', name: 'Sage', color: '#157A38', roles: { background: '#E2ECE4', highlight: '#0B3D1C', bar: '#157A38', plate: '#0B3D1C' } },
+  { id: 'darkgreen', name: 'Dark green', color: '#157A38', roles: { background: '#0F1D17', cards: '#172A21', highlight: '#157A38', bar: '#6EE7A8', plate: '#2A4A3A' } },
+  { id: 'inkmint', name: 'Ink & mint', color: '#157A38', roles: { background: '#FFFFFF', cards: '#EEF3F0', highlight: '#14181D', bar: '#14181D' } },
+  { id: 'stop', name: 'Zastávka', color: '#1D4FB8', roles: {} },
+  { id: 'ocean', name: 'Ocean', color: '#136F63', roles: {} },
 ];
+/** Every colour a rider can set, in the order Appearance lists them ("primary" is the accent). */
+const ROLES = ['primary', 'background', 'cards', 'highlight', 'bar', 'live', 'delay', 'late', 'text', 'plate'];
 /** Relative brightness of "#rrggbb", 0 (black) to 1 (white). */
 function luminance(hex) {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
@@ -35,29 +41,74 @@ function luminance(hex) {
 }
 /** Ready background colours, as in the Android app. */
 const BACKGROUNDS = ['#F3EEE4', '#E8F0E6', '#E6EEF7', '#F6E8EC', '#1C2433', '#1E2A22', '#2B1F2E', '#000000'];
+const onColor = (hex) => (luminance(hex) > 0.45 ? '#14181D' : '#FFFFFF');
+
+/** The selected theme with the rider's own changes to it: { id, accent, roles }. */
+function currentTheme() {
+  let id = store.get('themeId', 'planride');
+  if (id === 'sunset') id = 'planride';
+  const own = (store.get('themeRoles', {}) || {})[id] || {};
+  if (id === 'custom') return { id, accent: store.get('themeColor', '#157A38'), roles: own };
+  const preset = PRESETS.find((x) => x.id === id) || PRESETS[0];
+  const roles = { ...preset.roles, ...own };
+  return { id: preset.id, accent: roles.primary || preset.color, roles };
+}
+
+/** One colour of the selected theme; null goes back to the theme's own. */
+function setThemeColor(role, hex) {
+  const id = currentTheme().id;
+  const all = { ...(store.get('themeRoles', {}) || {}) };
+  const own = { ...(all[id] || {}) };
+  if (hex) own[role] = hex; else delete own[role];
+  all[id] = own;
+  store.set('themeRoles', all);
+}
+
+const THEME_VARS = ['--bg', '--surface', '--surface-2', '--line', '--text', '--muted', '--highlight', '--on-highlight',
+  '--bar', '--on-bar', '--live', '--late', '--bad', '--plate', '--on-plate'];
 
 function applyTheme() {
-  const preset = store.get('themeId', 'stop');
-  const color = preset === 'custom' ? store.get('themeColor', '#1D4FB8') : (PRESETS.find((x) => x.id === preset) || PRESETS[0]).color;
+  const { accent, roles } = currentTheme();
   const root = document.documentElement;
-  root.style.setProperty('--accent', color);
+  root.style.setProperty('--accent', accent);
+  root.style.setProperty('--on-accent', onColor(accent));
+  for (const v of THEME_VARS) root.style.removeProperty(v);
   const mode = store.get('themeMode', 'auto');
-  // EM-0042: an own background colour; light or dark text then follows its brightness.
-  const bg = store.get('bgColor', null);
-  for (const v of ['--bg', '--surface', '--surface-2', '--line', '--text', '--muted']) root.style.removeProperty(v);
+  // EM-0042: an own background colour; light or dark text then follows its brightness. A dark theme does the same.
+  const own = store.get('bgColor', null);
+  // A dark theme's own background, or any background the rider picked, decides light or dark.
+  const shipped = (PRESETS.find((x) => x.id === currentTheme().id) || {}).roles || {};
+  const picked = (role) => roles[role] && roles[role] !== shipped[role];
+  const themeDark = roles.background && (luminance(roles.background) < 0.2 || picked('background')) ? roles.background : null;
+  if (own || themeDark) root.dataset.theme = luminance(own || themeDark) < 0.5 ? 'dark' : 'light';
+  else if (mode === 'auto') delete root.dataset.theme; else root.dataset.theme = mode;
+  root.dataset.amoled = store.get('amoled', false) ? '1' : '';
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  // A theme's background and cards are drawn for light or dark: in the other mode the app works them out itself.
+  // Colours the rider picked are always used; a theme's own ones only where they suit the mode.
+  const fits = (role) => (roles[role] && ((luminance(roles[role]) < 0.5) === dark || picked(role)) ? roles[role] : null);
+  const visible = (role) => (roles[role] && !(dark && luminance(roles[role]) < 0.15 && !picked(role)) ? roles[role] : null);
+  const bg = own || fits('background');
   if (bg) {
-    const dark = luminance(bg) < 0.5;
-    root.dataset.theme = dark ? 'dark' : 'light';
     const mix = (to, pct) => `color-mix(in srgb, ${bg} ${100 - pct}%, ${to})`;
     root.style.setProperty('--bg', bg);
     root.style.setProperty('--surface', mix('#fff', dark ? 7 : 50));
     root.style.setProperty('--surface-2', mix(dark ? '#fff' : '#000', 8));
     root.style.setProperty('--line', mix(dark ? '#fff' : '#000', 18));
-    root.style.setProperty('--text', dark ? '#F2F4F8' : '#14213D');
-    root.style.setProperty('--muted', mix(dark ? '#F2F4F8' : '#14213D', 70));
-  } else if (mode === 'auto') delete root.dataset.theme; else root.dataset.theme = mode;
-  root.dataset.amoled = store.get('amoled', false) ? '1' : '';
-  $('meta[name="theme-color"]').content = getComputedStyle(root).getPropertyValue('--bg').trim() || '#0F1A30';
+    root.style.setProperty('--text', dark ? '#E8ECF1' : '#14181D');
+    root.style.setProperty('--muted', mix(dark ? '#E8ECF1' : '#14181D', 70));
+  }
+  const set = (v, hex) => hex && root.style.setProperty(v, hex);
+  set('--surface', fits('cards'));
+  if (roles.text) { set('--text', roles.text); root.style.setProperty('--muted', `color-mix(in srgb, ${roles.text} 70%, var(--surface))`); }
+  const highlight = roles.highlight || accent;
+  set('--highlight', highlight); set('--on-highlight', onColor(highlight));
+  const bar = visible('bar');
+  if (bar) { set('--bar', bar); set('--on-bar', onColor(bar)); }
+  const plate = visible('plate');
+  if (plate) { set('--plate', plate); set('--on-plate', onColor(plate)); }
+  set('--live', roles.live); set('--late', roles.delay); set('--bad', roles.late);
+  $('meta[name="theme-color"]').content = getComputedStyle(root).getPropertyValue('--bg').trim() || '#101317';
 }
 
 // ------------------------------------------------------------------ credentials & PIN
@@ -1070,11 +1121,25 @@ function security(body) {
 }
 
 function appearance(body) {
-  const id = store.get('themeId', 'stop');
+  const theme = currentTheme();
+  const id = theme.id;
+  const preset = PRESETS.find((x) => x.id === id);
+  const own = (store.get('themeRoles', {}) || {})[id] || {};
+  const colourOf = (role) => (role === 'primary' ? theme.accent : theme.roles[role] || null);
+  // Every single colour of the selected theme; a tap opens the picker, the cross goes back to the theme's own.
+  const everyColour = `<h2 class="section-label">${t('colors_every_title')}</h2>
+    <ul class="list">${ROLES.map((role) => {
+      const c = colourOf(role);
+      return `<li><div class="row"><button type="button" class="swatch-btn" data-role="${role}" style="background:${c ? esc(c) : 'transparent'}" aria-label="${esc(t('color_role_' + role))}"></button>
+        <span class="row-main"><span class="row-title">${t('color_role_' + role)}</span><span class="row-sub">${c ? esc(c.toUpperCase()) : t('color_auto')}</span></span>
+        ${role in own ? `<button type="button" class="icon-btn" data-role-reset="${role}" aria-label="${esc(t('color_role_reset'))}">✕</button>` : ''}</div></li>`;
+    }).join('')}</ul>
+    <p class="hint small pad">${t('colors_every_hint')} ${preset && Object.keys(own).length ? `<button class="text-btn" data-theme-reset>${t('theme_reset')}</button>` : ''}</p>`;
   const bgNow = store.get('bgColor', null);
   body.innerHTML = `<h2 class="section-label">${t('theme_colours')}</h2>
     <ul class="list">${PRESETS.map((p) => `<li><label class="row"><span class="swatch" style="background:${p.color}"></span><span class="row-title">${esc(p.name)}</span><input type="radio" name="theme" value="${p.id}" ${id === p.id ? 'checked' : ''}></label></li>`).join('')}
-      <li><label class="row"><button type="button" class="swatch-btn" data-pick-theme style="background:${esc(store.get('themeColor', '#1D4FB8'))}" aria-label="${esc(t('theme_custom'))}"></button><span class="row-title">${t('theme_custom')}</span><input type="radio" name="theme" value="custom" ${id === 'custom' ? 'checked' : ''}></label></li></ul>
+      <li><label class="row"><button type="button" class="swatch-btn" data-pick-theme style="background:${esc(store.get('themeColor', '#157A38'))}" aria-label="${esc(t('theme_custom'))}"></button><span class="row-title">${t('theme_custom')}</span><input type="radio" name="theme" value="custom" ${id === 'custom' ? 'checked' : ''}></label></li></ul>
+    ${everyColour}
     <h2 class="section-label">${t('theme_mode')}</h2>
     <ul class="list">${['auto', 'light', 'dark'].map((m) => `<li><label class="row"><span class="row-title">${t('mode_' + m)}</span><input type="radio" name="mode" value="${m}" ${store.get('themeMode', 'auto') === m ? 'checked' : ''} ${bgNow ? 'disabled' : ''}></label></li>`).join('')}</ul>
     <h2 class="section-label">${t('background_title')}</h2>
@@ -1087,9 +1152,23 @@ function appearance(body) {
     if (e.target.name === 'mode') store.set('themeMode', e.target.value);
     if (e.target.id === 'amoled') store.set('amoled', e.target.checked);
     applyTheme();
+    if (e.target.name === 'theme') appearance(body);
   };
   body.onclick = async (e) => {
     // EM-0049: our own colour picker; nothing changes until "Use" (iPhone's applied every slider move).
+    const role = e.target.closest('[data-role]')?.dataset.role;
+    if (role) {
+      const c = await pickColor(colourOf(role) || theme.accent, t('color_role_' + role));
+      if (c) { setThemeColor(role, c); applyTheme(); appearance(body); }
+      return;
+    }
+    const resetRole = e.target.closest('[data-role-reset]')?.dataset.roleReset;
+    if (resetRole) { setThemeColor(resetRole, null); applyTheme(); appearance(body); return; }
+    if (e.target.closest('[data-theme-reset]')) {
+      const all = { ...(store.get('themeRoles', {}) || {}) };
+      delete all[id];
+      store.set('themeRoles', all); applyTheme(); appearance(body); return;
+    }
     if (e.target.closest('[data-pick-bg]')) {
       const c = await pickColor(bgNow || '#1C2433', t('background_title'));
       if (c) { store.set('bgColor', c); applyTheme(); appearance(body); }
@@ -1097,7 +1176,7 @@ function appearance(body) {
     }
     if (e.target.closest('[data-pick-theme]')) {
       e.preventDefault();
-      const c = await pickColor(store.get('themeColor', '#1D4FB8'), t('theme_custom'));
+      const c = await pickColor(store.get('themeColor', '#157A38'), t('theme_custom'));
       if (c) { store.set('themeColor', c); store.set('themeId', 'custom'); applyTheme(); appearance(body); }
       return;
     }

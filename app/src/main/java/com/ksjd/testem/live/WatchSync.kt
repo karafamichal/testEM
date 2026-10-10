@@ -1,5 +1,6 @@
 package com.ksjd.testem.live
 
+import androidx.compose.ui.graphics.luminance
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -228,6 +229,13 @@ object WatchSync {
             dataMap.putInt("primary", lift(preset.primary, 0.35f))
             dataMap.putInt("secondary", lift(preset.secondary, 0.35f))
             dataMap.putInt("tertiary", lift(preset.tertiary, 0.2f))
+            // 2.15: the watch's own ground, cards and live colour. A dark theme background is used as it is;
+            // otherwise a near-black tinted by the theme's main colour.
+            fun toward(c: Long, black: Float) = androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.Color(c), androidx.compose.ui.graphics.Color.Black, black).toArgb()
+            val bg = preset.roles[com.ksjd.testem.ThemeRole.BACKGROUND]?.takeIf { androidx.compose.ui.graphics.Color(it).luminance() < 0.2f }
+            dataMap.putInt("background", bg?.toInt() ?: toward(preset.primary, 0.9f))
+            dataMap.putInt("surface", preset.roles[com.ksjd.testem.ThemeRole.CARDS]?.takeIf { bg != null }?.toInt() ?: toward(preset.primary, 0.78f))
+            dataMap.putInt("live", (preset.roles[com.ksjd.testem.ThemeRole.LIVE] ?: 0xFF6EE7A8).toInt())
         }.asPutDataRequest()
         runCatching { Tasks.await(Wearable.getDataClient(context).putDataItem(request)) }
     }
