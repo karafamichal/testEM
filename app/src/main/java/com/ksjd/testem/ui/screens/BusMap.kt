@@ -63,10 +63,13 @@ fun BusMapDialog(ref: TripRef, detail: TripDetail, alightOrder: Int?, onDismiss:
     var withCoords by remember { mutableStateOf<TripDetail?>(null) }
     var failed by remember { mutableStateOf(false) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    // EM-0064: the roads between the stops, as drawn or snapped in emHUB (none: straight lines).
+    var roads by remember { mutableStateOf<Map<Int, List<GeoPoint>>>(emptyMap()) }
     LaunchedEffect(ref, detail) {
         val loaded = runCatching { LiveRepository(context).withCoordinates(ref, detail) }.getOrNull()
         withCoords = loaded
         failed = loaded == null || loaded.stops.count { it.lat != null } < 2
+        if (!failed && loaded != null) roads = roadsBetween(loaded)
     }
     // The bus moves along by the clock between updates.
     LaunchedEffect(Unit) { while (true) { delay(10_000); now = System.currentTimeMillis() } }
@@ -130,7 +133,7 @@ fun BusMapDialog(ref: TripRef, detail: TripDetail, alightOrder: Int?, onDismiss:
                         var framed by remember { mutableStateOf(false) }
                         DisposableEffect(Unit) { onDispose { map.onDetach() } }
                         AndroidView({ map }, Modifier.fillMaxSize()) { view ->
-                            draw(view, ref, shown, alightOrder, now, primary, muted, surface, others)
+                            draw(view, ref, shown, alightOrder, now, primary, muted, surface, others, roads)
                             if (!framed) {
                                 framed = true
                                 val points = shown.stops.mapNotNull { s -> s.lat?.let { GeoPoint(it, s.lon!!) } }
@@ -153,15 +156,18 @@ fun BusMapDialog(ref: TripRef, detail: TripDetail, alightOrder: Int?, onDismiss:
 /** Route, stops and the bus, drawn again whenever the time (so the bus's place) changes. */
 private fun draw(
     map: MapView, ref: TripRef, detail: TripDetail, alightOrder: Int?, now: Long, primary: Int, muted: Int, surface: Int,
-    others: List<Pair<String, com.ksjd.testem.hub.HubClient.SharedPosition>>
+    others: List<Pair<String, com.ksjd.testem.hub.HubClient.SharedPosition>>,
+    roads: Map<Int, List<GeoPoint>>
 ) {
     map.overlays.removeAll { it is Polyline || (it is Marker && it.id?.startsWith("pr:") == true) }
     val progress = TripProgress.from(detail, TrackedTrip(ref, emptyList(), alightOrder), now)
     val stops = detail.stops
     val points = stops.map { s -> s.lat?.let { GeoPoint(it, s.lon!!) } }
     val passedUpTo = progress.position
+    // Stop to stop along the road where emHUB has it (keyed by the stop a hop starts at).
+    val path = points.flatMapIndexed { i, at -> listOfNotNull(at) + roads[i].orEmpty() }
     map.overlays.add(0, Polyline(map).apply {
-        setPoints(points.filterNotNull())
+        setPoints(path)
         outlinePaint.color = primary
         outlinePaint.strokeWidth = 10f
     })
@@ -185,7 +191,7 @@ private fun draw(
         val f = (passedUpTo - from).toDouble().coerceIn(0.0, 1.0)
         map.overlays.add(Marker(map).apply {
             id = "pr:bus"
-            position = GeoPoint(a.latitude + (b.latitude - a.latitude) * f, a.longitude + (b.longitude - a.longitude) * f)
+            position = along(listOf(a) + roads[from].orEmpty() + b, f)
             title = ref.line
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
             icon = androidx.core.content.ContextCompat.getDrawable(map.context, R.drawable.ic_stat_bus)?.mutate()?.let { bus ->
@@ -216,4 +222,31 @@ private fun dot(color: Int, ring: Int, sizeDp: Int, density: Float) = GradientDr
     setStroke((2 * density).toInt(), ring)
     val px = (sizeDp * density).toInt()
     setSize(px, px)
+}
+
+/** The road traces between the stops from emHUB, by the index of the stop each starts at; empty when it has none. */
+private suspend fun roadsBetween(detail: TripDetail): Map<Int, List<GeoPoint>> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    val known = detail.stops.indices.filter { detail.stops[it].lat != null }
+    val stops = known.joinToString(";") { i -> "%.6f,%.6f".format(java.util.Locale.ROOT, detail.stops[i].lat, detail.stops[i].lon) }
+    val hops = runCatching { com.ksjd.testem.hub.HubClient.timetable("path", mapOf("stops" to stops)).getAsJsonArray("hops") }.getOrNull()
+        ?: return@withContext emptyMap()
+    known.zipWithNext().withIndex().mapNotNull { (j, pair) ->
+        // Only between stops next to each other in the list: a hop over a stop without a position stays straight.
+        val points = (if (j < hops.size()) hops[j] else null)?.asJsonArray?.map { p -> p.asJsonArray.let { GeoPoint(it[0].asDouble, it[1].asDouble) } }
+        if (points.isNullOrEmpty() || pair.second != pair.first + 1) null else pair.first to points
+    }.toMap()
+}
+
+/** The point a fraction [f] of the way along [path], by length. */
+private fun along(path: List<GeoPoint>, f: Double): GeoPoint {
+    val lengths = path.zipWithNext { p, q -> p.distanceToAsDouble(q) }
+    var left = lengths.sum() * f
+    lengths.forEachIndexed { i, length ->
+        if (left <= length && length > 0) {
+            val t = left / length
+            return GeoPoint(path[i].latitude + (path[i + 1].latitude - path[i].latitude) * t, path[i].longitude + (path[i + 1].longitude - path[i].longitude) * t)
+        }
+        left -= length
+    }
+    return path.last()
 }

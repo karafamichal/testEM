@@ -179,6 +179,11 @@ async function timetable(path, params) {
   return data;
 }
 
+/** EM-0064: the roads between a trip's stops ("lat,lon;lat,lon;..."), as drawn or snapped in emHUB: one list per hop. */
+export async function roadPath(stops) {
+  return (await timetable('path', { stops: String(stops).slice(0, 2000) })).hops || [];
+}
+
 const clockOf = (ms) => new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: 'numeric', minute: '2-digit', hourCycle: 'h23' }).format(ms);
 const dateOf = (ms) => new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(ms);
 const minutesOf = (ms) => { const [h, m] = clockOf(ms).split(':').map(Number); return h * 60 + m; };
@@ -207,6 +212,13 @@ function sameBus(d, row) {
 }
 
 const suggestion = (s) => ({ text: s.name, value: s.id, value2: HUB_STOP, coorX: s.lat ?? '', coorY: s.lon ?? '', description: '' });
+
+/** EM-0068: the timetable stop nearest to the rider (within 1.5 km), or null. */
+export async function nearestStop(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const s = (await timetable('stops', { lat, lon, radius: 1500, n: 1 })).stops[0];
+  return s ? suggestion(s) : null;
+}
 
 export async function suggestStops(_city, input) {
   const q = String(input || '').trim();
@@ -393,22 +405,23 @@ function connection(c) {
   };
 }
 
-async function plan(from, to, epochS, directOnly, listed) {
-  const r = await timetable('plan', { from, to, time: epochS, n: 5, direct: directOnly ? 1 : 0 });
+async function plan(from, to, epochS, directOnly, listed, arriveBy = false) {
+  const r = await timetable('plan', { from, to, time: epochS, n: 5, direct: directOnly ? 1 : 0, arrive: arriveBy ? 1 : 0 });
   const connections = r.connections.map(connection).filter((c) => c.segments.length && !listed.includes(c.id));
-  const last = r.connections.at(-1);
+  // "More" lists later departures: none after the time to be there (EM-0053).
+  const last = arriveBy ? null : r.connections.at(-1);
   const cursor = last ? { from, to, next: Math.floor(last.departure / 1000) + 60, directOnly: !!directOnly, listedIds: [...listed, ...connections.map((c) => c.id)] } : null;
   return { connections, cursor, from: suggestion(r.from), to: suggestion(r.to) };
 }
 
 /** date: "" (today), "2026-09-30" or "30.9.2026"; time: "7:05". */
-export async function searchConnections({ from, to, fromSug, toSug, time, date, directOnly }) {
+export async function searchConnections({ from, to, fromSug, toSug, time, date, directOnly, arriveBy }) {
   const iso = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(date || '');
   const day = iso ? { year: +iso[3], month: +iso[2], day: +iso[1] }
     : /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? (([y, m, d]) => ({ year: y, month: m, day: d }))(date.split('-').map(Number)) : todayLocal();
   const hm = /^(\d{1,2}):(\d{2})$/.exec(String(time || '').trim());
   const epoch = hm ? localToEpoch(day.year, day.month, day.day, +hm[1], +hm[2]) : Date.now();
-  return plan(stopParam(fromSug, from), stopParam(toSug, to), Math.floor(epoch / 1000), directOnly, []);
+  return plan(stopParam(fromSug, from), stopParam(toSug, to), Math.floor(epoch / 1000), directOnly, [], !!(arriveBy && hm));
 }
 
 export async function moreConnections(cursor) {

@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.16.0
+
+### New
+- **Arrive by** (EM-0053): with a time picked in the planner, *Arrive by* finds the connections that get you there by then, the ones leaving latest first in line.
+- **Following a later bus** (EM-0054): follow a bus that leaves later (tomorrow, say) and you get only a quiet notification ("Following line 1 at tomorrow 7:12"), with *Stop following*. The live notification starts 30 minutes before it leaves; *Account → Reminders → Following a later bus* sets 15, 30, 60 or 120 minutes. Home shows when it leaves and from when it's followed live.
+- **The whole journey while following** (EM-0067): following a journey with changes, Home shows where to get off this bus and when, then each next bus with its time and stops.
+- **Nearest stop in the planner** (EM-0068): the location button in *From* picks the stop nearest to you; the planner also tries the stops within a short walk of it.
+- **Install on your watch**: with a Wear OS watch connected that doesn't have Plan&Ride yet, Home offers to open its Play Store page on the watch (Google Play on the phone doesn't list the watch app).
+
+### Fixed
+- **"My journey" on Home** (EM-0066): a journey put together bus by bus shows on Home too, and a tap on it lists its buses.
+- **Stops named without their town** (EM-0065): "z lipo" finds Lipovec in Zvolen (the timetable calls it just "Lipovec").
+- **Planner date** (EM-0069): a date left from a starred journey opened on an earlier day no longer sticks: a past date means today, and the date picker never opens on a day it can't pick.
+- **The bus's map follows the roads** (EM-0064): the map of a bus (app and web) draws the roads between its stops as set up in emHUB's map editor, and the bus moves along them; before, it joined the stops with straight lines.
+- **GPS jump** (EM-0063): on a bus with stops far apart, a position well past the next stop counted as standing at it, so the bus jumped ahead. Only a position beside the road between two stops counts now (app and web).
+- **Missing stops** (EM-0062): where S.A.D.'s own list of a bus leaves stops out (line 1 towards Železničná stanica: stops 1–3, then 12), the bus's stops say so. emHUB fills such gaps from a whole run of the line when one has exactly the missing stops, and puts back stops that a platform's list leaves out (line 1 to Roosevelt. nem. now has all 14).
+- emHUB map: snapping to the roads goes by bus (Valhalla), so bus stations' own exits are used (Zvolen AS); it no longer loops round to reach a stop on the other side of the road, takes a stop's platform on the bus's right where no direction is set up, and drops a way three times longer than the distance instead of drawing it.
+
+## 2.15.1
+
+### Changed
+- **Blue is back** (EM-0056): *Zastávka* is the default theme again, with a slate bottom bar, light blue live times and a blue "&" in the P&R icon. The green themes are still in *Account → Appearance*, and every colour can still be changed.
+- **The followed bus on Home** has a softly moving background: the theme's colour, a neighbouring hue and a deeper shade slowly drift into each other.
+
+### Fixed
+- **The bottom bar squeezed the last icon** (EM-0052): the bar always spans the screen now, and the open tab takes the space the others leave.
+- **Follow the whole journey** (EM-0055): the button now says the journey is followed, and a tap on it stops following.
+- **Where you get on** (EM-0057): a bus's stops mark the stop where you get on ("You get on here"), not only where you get off.
+- **Bug reports** (EM-0058): your name and email are filled in once the app is unlocked, also for a report started while it was locked; anything you typed is kept.
+- **"Now" at the right stop** (EM-0059): from a minute before the bus is due at a stop (or while your phone stands at it, in automatic mode), the notification says it's at that stop. Before, the stop before stayed "now" until the bus left, so at Štadlerovo it said "Now: Rákoš".
+- emHUB: delays from riders' phones in automatic mode no longer show as "taps" when the bus is between two far-apart stops.
+- emHUB: snapping a trip to the roads no longer loops round to the other side of a dual carriageway: it routes from the kerb side, and when that's still a detour it tries the stop's other platforms and keeps the shortest way.
+
 ## 2.15.0
 
 ### New

@@ -95,6 +95,10 @@
         <receiver
             android:name=".rides.RideAlarmReceiver"
             android:exported="false" />
+        <!-- A bus followed long before it leaves: the live notification starts shortly before (EM-0054). -->
+        <receiver
+            android:name=".live.FollowLaterReceiver"
+            android:exported="false" />
         <!-- "Leave by" for starred journeys. -->
         <receiver
             android:name=".reminders.LeaveByReceiver"

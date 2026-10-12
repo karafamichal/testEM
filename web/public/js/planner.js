@@ -12,7 +12,7 @@ const upgrade = (r) => (r.city === 'slovensko' ? { ...r, city: ALL, fromSug: nul
 const SWAP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>';
 
 const p = {
-  city: upgrade({ city: store.get('plannerCity', ALL) }).city, from: '', to: '', fromSug: null, toSug: null, time: '', date: '', direct: false,
+  city: upgrade({ city: store.get('plannerCity', ALL) }).city, from: '', to: '', fromSug: null, toSug: null, time: '', date: '', direct: false, arrive: false,
   searchedRoute: null, // the route of the results on screen (the fields may have been edited since)
   results: [], cursor: null, loading: false, loadingMore: false, error: '', searched: false,
 };
@@ -25,6 +25,7 @@ const sameRoute = (a, b) => a.from.toLowerCase() === b.from.toLowerCase() && a.t
 export function renderPlanner(el, { openStop } = {}) {
   root = el;
   onOpenStop = openStop || onOpenStop;
+  if (p.date && p.date < todayIso()) p.date = '';
   const saved = routes('savedRoutes');
   const isSaved = p.from && p.to && saved.some((r) => sameRoute(r, { from: p.from.trim(), to: p.to.trim() }));
   el.innerHTML = `
@@ -36,10 +37,12 @@ export function renderPlanner(el, { openStop } = {}) {
         <button type="button" class="icon-btn swap" data-swap aria-label="${esc(t('swap'))}">${SWAP}</button>
         <ul class="suggest" id="pl-suggest" role="listbox" hidden></ul>
       </div>
+      <button type="button" class="chip" data-near>${t('nearest_stop')}</button>
       <div class="planner-opts">
         <div class="segmented small"><button type="button" aria-pressed="${!p.time && !p.date}" data-now>${t('leave_now')}</button>
-          <label class="time-pick ${p.time ? 'on' : ''}">${t('at_time')} <input type="time" id="pl-time" value="${esc(p.time)}"></label>
+          <label class="time-pick ${p.time ? 'on' : ''}">${t(p.time && p.arrive ? 'arrive_at_time' : 'at_time')} <input type="time" id="pl-time" value="${esc(p.time)}"></label>
           <label class="time-pick ${p.date ? 'on' : ''}"><input type="date" id="pl-date" value="${esc(p.date)}" min="${todayIso()}" aria-label="${esc(t('date'))}"></label></div>
+        ${p.time ? `<label class="mini-switch"><input type="checkbox" id="pl-arrive" ${p.arrive ? 'checked' : ''}> ${t('arrive_by')}</label>` : ''}
         <label class="mini-switch"><input type="checkbox" id="pl-direct" ${p.direct ? 'checked' : ''}> ${t('direct_only')}</label>
       </div>
       <div class="planner-actions">
@@ -125,6 +128,8 @@ function bind(el) {
   $('#pl-time', el).onchange = (e) => { p.time = e.target.value; renderPlanner(root); };
   $('#pl-date', el).onchange = (e) => { p.date = e.target.value === todayIso() ? '' : e.target.value; renderPlanner(root); };
   $('#pl-direct', el).onchange = (e) => (p.direct = e.target.checked);
+  const arrive = $('#pl-arrive', el);
+  if (arrive) arrive.onchange = (e) => { p.arrive = e.target.checked; renderPlanner(root); };
   $('form', el).onsubmit = (e) => { e.preventDefault(); search(); };
   el.onclick = (e) => {
     if (e.target.closest('[data-swap]')) {
@@ -132,6 +137,16 @@ function bind(el) {
       return renderPlanner(root);
     }
     if (e.target.closest('[data-now]')) { p.time = ''; p.date = ''; return renderPlanner(root); }
+    if (e.target.closest('[data-near]')) {
+      if (!navigator.geolocation) return toast(t('no_stop_near'));
+      return navigator.geolocation.getCurrentPosition(async (pos) => {
+        const s = await apiJson(`/api/cp/nearest?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`).catch(() => null);
+        if (!s) return toast(t('no_stop_near'));
+        p.from = s.text;
+        p.fromSug = s;
+        renderPlanner(root);
+      }, () => toast(t('no_stop_near')), { maximumAge: 60000, timeout: 15000 });
+    }
     const sj = e.target.closest('[data-save-journey]');
     if (sj) { toggleJourney(p.results[Number(sj.dataset.saveJourney)]); return renderBody(); }
     const rep = e.target.closest('[data-repeat]');
@@ -189,7 +204,7 @@ async function search() {
   renderPlanner(root);
   try {
     const r = await apiJson('/api/cp/search', {
-      city: p.city, from: p.from.trim(), to: p.to.trim(), fromSug: p.fromSug, toSug: p.toSug, time: p.time, date: cpDate(p.date), directOnly: p.direct,
+      city: p.city, from: p.from.trim(), to: p.to.trim(), fromSug: p.fromSug, toSug: p.toSug, time: p.time, date: cpDate(p.date), directOnly: p.direct, arriveBy: p.arrive && !!p.time,
     });
     Object.assign(p, { results: r.connections, cursor: r.cursor, fromSug: r.from, toSug: r.to });
     p.searchedRoute = { city: p.city, from: r.from.text, to: r.to.text, fromSug: r.from, toSug: r.to };

@@ -58,7 +58,7 @@ val LightTransitColors = TransitColors(
     boardRow = Color(0xFF262C34),
     boardText = Color(0xFFF3F5F7),
     boardDim = Color(0xFF8D97A3),
-    live = Color(0xFF6EE7A8),
+    live = Color(0xFF8AB4FF),
     onTime = Color(0xFF56606C),
     delay = Color(0xFFB5530A),
     late = Color(0xFFB42318),
@@ -66,7 +66,7 @@ val LightTransitColors = TransitColors(
     onPlate = Color.White,
     highlight = Color(0xFF157A38),
     onHighlight = Color.White,
-    bar = Ink,
+    bar = Color(0xFF1F2935),
     onBar = Color.White
 )
 
@@ -75,7 +75,7 @@ val DarkTransitColors = TransitColors(
     boardRow = Color(0xFF161B21),
     boardText = Color(0xFFF3F5F7),
     boardDim = Color(0xFF8D97A3),
-    live = Color(0xFF6EE7A8),
+    live = Color(0xFF8AB4FF),
     onTime = Color(0xFFA8B2BE),
     delay = Color(0xFFFFA866),
     late = Color(0xFFFF6B61),
@@ -83,8 +83,8 @@ val DarkTransitColors = TransitColors(
     onPlate = Ink,
     highlight = Color(0xFF157A38),
     onHighlight = Color.White,
-    bar = Color(0xFF6EE7A8),
-    onBar = Color(0xFF0B3D1C)
+    bar = Color(0xFF1F2935),
+    onBar = Color.White
 )
 
 val LocalTransitColors = staticCompositionLocalOf { LightTransitColors }

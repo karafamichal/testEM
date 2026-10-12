@@ -20,7 +20,9 @@ class TimetableService {
         val fromSuggestion: CpStopSuggestion? = null,
         val toSuggestion: CpStopSuggestion? = null,
         /** ISO date, "" = today. */
-        val dateInput: String = ""
+        val dateInput: String = "",
+        /** EM-0053: [timeInput] is when to be there. */
+        val arriveBy: Boolean = false
     )
 
     /** One row of a stop's departure board; [atMs] is the departure in epoch ms. */
@@ -43,7 +45,7 @@ class TimetableService {
         val date = runCatching { LocalDate.parse(request.dateInput) }.getOrElse { LocalDate.now(SK_ZONE) }
         val (h, m) = request.timeInput.trim().split(":").map { it.toInt() }
         plan(stopParam(request.fromSuggestion, request.fromInput), stopParam(request.toSuggestion, request.toInput),
-            date.atTime(h, m).atZone(SK_ZONE).toEpochSecond(), request.directOnly, emptyList())
+            date.atTime(h, m).atZone(SK_ZONE).toEpochSecond(), request.directOnly, emptyList(), request.arriveBy)
     }
 
     /** A stop of a planner leg's bus after where the rider gets on (for editing the change, EM-0026, EM-0030). */
@@ -134,12 +136,13 @@ class TimetableService {
         plan(cursor.fromText, cursor.toText, cursor.searchDate.toLong(), cursor.handle == "direct", cursor.listedIds)
     }
 
-    private fun plan(from: String, to: String, epochS: Long, direct: Boolean, listed: List<String>): TimetableSearchResult {
+    private fun plan(from: String, to: String, epochS: Long, direct: Boolean, listed: List<String>, arriveBy: Boolean = false): TimetableSearchResult {
         val root = HubClient.timetable("plan", mapOf("from" to from, "to" to to, "time" to epochS.toString(), "n" to "5",
-            "direct" to if (direct) "1" else "0", "change" to changeMinutes.toString()))
+            "direct" to if (direct) "1" else "0", "change" to changeMinutes.toString(), "arrive" to if (arriveBy) "1" else "0"))
         val connections = root.getAsJsonArray("connections").map { parseConnection(it.asJsonObject) }
             .filter { it.id !in listed }.distinctBy { it.id }
-        val last = root.getAsJsonArray("connections").lastOrNull()?.asJsonObject?.get("departure")?.asLong
+        // "More" lists later departures: none after the time to be there.
+        val last = root.getAsJsonArray("connections").lastOrNull()?.asJsonObject?.get("departure")?.asLong?.takeUnless { arriveBy }
         val cursor = last?.let {
             TimetablePagingCursor(PLANNER_ALL, "", from, to, if (direct) "direct" else "all", (it / 1000 + 60).toString(),
                 listed + connections.map { c -> c.id })
@@ -152,6 +155,11 @@ class TimetableService {
             if (input.isBlank()) emptyList()
             else HubClient.timetable("stops", mapOf("q" to input.trim())).getAsJsonArray("stops").map { suggestion(it.asJsonObject) }
         }
+
+    /** EM-0068: the timetable stop nearest to the rider (within 1.5 km), or null. */
+    fun nearestStop(lat: Double, lon: Double): CpStopSuggestion? =
+        HubClient.timetable("stops", mapOf("lat" to lat.toString(), "lon" to lon.toString(), "radius" to "1500", "n" to "1"))
+            .getAsJsonArray("stops").firstOrNull()?.let { suggestion(it.asJsonObject) }
 
     /** The timetable station at a sadzv stop, matched by position (names differ between the two). */
     fun intercityStopNear(@Suppress("UNUSED_PARAMETER") name: String, lat: Double, lon: Double): CpStopSuggestion? =

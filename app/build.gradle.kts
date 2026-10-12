@@ -15,8 +15,8 @@ android {
         applicationId = "com.ksjd.testem"
         minSdk = 24
         targetSdk = 36
-        versionCode = 25
-        versionName = "2.15.0"
+        versionCode = 27
+        versionName = "2.16.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -102,6 +102,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     // The followed bus on the Plan&Ride watch app (EM-0041).
     implementation("com.google.android.gms:play-services-wearable:19.0.0")
+    // Opens Plan&Ride's page in the Play Store on the watch (the phone's Play Store doesn't offer the watch app).
+    implementation("androidx.wear:wear-remote-interactions:1.1.0")
 
     // Lifecycle / ViewModel
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")

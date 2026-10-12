@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Plan&amp;Ride: the P&amp;R plate sits on ink -->
+<!-- Plan&amp;Ride: the logo sits on white -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#14181D" />
+    <solid android:color="#FFFFFF" />
 </shape>

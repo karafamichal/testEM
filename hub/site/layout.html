@@ -5,29 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{title}}</title>
 <meta name="description" content="{{description}}">
-<link rel="icon" href="/mark.png?v=1.18">
+<link rel="icon" href="/mark.png?v=1.20">
 <link rel="alternate" hreflang="sk" href="{{url_sk}}">
 <link rel="alternate" hreflang="en" href="{{url_en}}">
 <link rel="stylesheet" href="/brand.css">
 <style>
-  /* Plan&Ride website (2.15, "E1 green signage"): green on cool paper, pill buttons, the P&R line plate. */
-  :root { --sign: #157A38; --accent: #157A38; --mint: #6EE7A8; --ink: #14181D; --paper: #F4F6F8; --surface: #FFFFFF;
-    --line: #E7EBF0; --muted: #56606C; --band: #157A38; --on-band: #FFFFFF; --band-muted: #DDF1E3; --chip: #DDF1E3; --on-chip: #0B3D1C;
-    --amber: #157A38; --ok: #1E8A4C; --bad: #B42318; --focus: #157A38; color-scheme: light; }
+  /* Plan&Ride website (2.15.1): Zastávka blue on cool paper, pill buttons, the original logo in blue. */
+  :root { --sign: #1D4FB8; --accent: #1D4FB8; --ink: #14181D; --paper: #F4F6F8; --surface: #FFFFFF;
+    --line: #E7EBF0; --muted: #56606C; --band: #1D4FB8; --on-band: #FFFFFF; --band-muted: #DCE6FB; --chip: #E1E9FA; --on-chip: #14398A;
+    --amber: #1D4FB8; --ok: #1E8A4C; --bad: #B42318; --focus: #1D4FB8; --logo-pin: #1D4FB8; --logo-bus: #1F2935; --logo-hole: #FFFFFF;
+    color-scheme: light; }
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --sign: #4CC67A; --accent: #4CC67A; --ink: #E6EFE9; --paper: #0C1A14; --surface: #13241C;
-      --line: #1E3329; --muted: #9DB3A6; --band: #13241C; --band-muted: #9DB3A6; --chip: #1E4A2D; --on-chip: #B8F5D4;
-      --amber: #6EE7A8; --ok: #4CC67A; --bad: #FF6B61; --focus: #6EE7A8; color-scheme: dark; }
-    :root:not([data-theme="light"]) .btn:not(.quiet) { color: #0C1A14; }
+    :root:not([data-theme="light"]) { --sign: #8AB4FF; --accent: #8AB4FF; --ink: #E8ECF1; --paper: #101317; --surface: #171B21;
+      --line: #222831; --muted: #A8B2BE; --band: #1F2935; --band-muted: #A8B2BE; --chip: #1F2D4A; --on-chip: #C9D8FF;
+      --amber: #8AB4FF; --ok: #4CC47F; --bad: #FF6B61; --focus: #8AB4FF; --logo-pin: #8AB4FF; --logo-bus: #FFFFFF; --logo-hole: #101317;
+      color-scheme: dark; }
+    :root:not([data-theme="light"]) .btn:not(.quiet) { color: #101317; }
   }
   body { min-height: 100dvh; display: flex; flex-direction: column; }
   .wrap { width: 100%; max-width: 1040px; margin: 0 auto; padding: 0 20px; }
   header.site { background: var(--surface); border-bottom: 1px solid var(--line); }
   header.site .wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding-top: 14px; padding-bottom: 14px; }
   .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-family: var(--display); font-weight: 700; font-size: 24px; }
-  .brand .pr { display: inline-flex; align-items: center; height: 32px; padding: 0 8px; border-radius: 6px; background: #14181D; color: #fff; font-size: 20px; }
-  .brand .pr b, .brand > span b { color: var(--mint); }
+  .brand .logo { width: 48px; height: 36px; }
   .brand > span b { color: var(--accent); }
+  .lg-pin { fill: var(--logo-pin); } .lg-bus { fill: var(--logo-bus); } .lg-hole { fill: var(--logo-hole); }
+  .lg-route { fill: none; stroke: var(--logo-pin); stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; }
+  .lg-node { fill: var(--logo-hole); stroke: var(--logo-pin); stroke-width: 7; }
   nav.site { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
   nav.site a { color: var(--ink); text-decoration: none; padding: 8px 12px; border-radius: 999px; font-weight: 500; }
   nav.site a[aria-current="page"] { background: var(--chip); color: var(--on-chip); }
@@ -43,7 +47,7 @@
   main code { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 0.92em; }
   main hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
   .hero { display: grid; grid-template-columns: 1fr auto; gap: 40px; align-items: center; }
-  .hero img { width: 220px; height: auto; border-radius: 48px; }
+  .hero-logo { width: 260px; height: auto; }
   .badge { display: inline-block; background: var(--chip); color: var(--on-chip); border-radius: 999px; padding: 4px 12px; font-size: 14px; font-weight: 600; margin-bottom: 14px; }
   .lead { font-size: 20px; color: var(--muted); }
   .actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 24px 0 8px; }
@@ -68,7 +72,7 @@
   footer.site .admin { margin-left: auto; }
   @media (max-width: 640px) {
     .hero { grid-template-columns: 1fr; }
-    .hero img { width: 120px; border-radius: 28px; order: -1; }
+    .hero-logo { width: 150px; order: -1; }
     nav.site { margin-left: 0; width: 100%; }
     .band { padding: 24px; }
   }
@@ -77,7 +81,7 @@
 <body class="page-{{page}}">
 <header class="site">
   <div class="wrap">
-    <a class="brand" href="{{home_url}}"><span class="pr" aria-hidden="true">P<b>&amp;</b>R</span><span>Plan<b>&amp;</b>Ride</span></a>
+    <a class="brand" href="{{home_url}}"><svg class="logo" viewBox="30 34 190 140" aria-hidden="true"><path class="lg-pin" d="M62 38a28 28 0 0 1 28 28c0 21-28 48-28 48S34 87 34 66a28 28 0 0 1 28-28z"/><circle class="lg-hole" cx="62" cy="66" r="12"/><path class="lg-route" d="M104 102H120a15 15 0 0 1 0 30H88a15 15 0 0 0 0 30H158"/><circle class="lg-node" cx="96" cy="102" r="8"/><circle class="lg-node" cx="166" cy="162" r="8"/><path class="lg-bus" d="M138 62a16 16 0 0 1 16-16h35a16 16 0 0 1 16 16v47a6 6 0 0 1-6 6h-55a6 6 0 0 1-6-6z"/><rect class="lg-bus" x="127" y="72" width="7" height="18" rx="3"/><rect class="lg-bus" x="209" y="72" width="7" height="18" rx="3"/><rect class="lg-bus" x="144" y="113" width="12" height="10" rx="3"/><rect class="lg-bus" x="187" y="113" width="12" height="10" rx="3"/><rect class="lg-hole" x="154" y="54" width="35" height="6" rx="3"/><rect class="lg-hole" x="145" y="68" width="53" height="28" rx="4"/><circle class="lg-hole" cx="152" cy="105" r="5"/><circle class="lg-hole" cx="191" cy="105" r="5"/></svg><span>Plan<b>&amp;</b>Ride</span></a>
     <nav class="site" aria-label="{{nav_label}}">{{{nav}}}</nav>
     <span class="lang">{{{lang_switch}}}</span>
   </div>

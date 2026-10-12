@@ -1,5 +1,6 @@
 package com.ksjd.testem.ui.screens
 
+import androidx.compose.material.icons.outlined.Check
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.withContext
@@ -30,6 +31,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.EventRepeat
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Share
@@ -210,13 +212,40 @@ private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
                         .weight(1f)
                         .padding(start = 12.dp, top = 8.dp, bottom = 8.dp)
                 ) {
+                    // EM-0068: start at the nearest stop; the planner also walks to the stops around it (400 m).
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val scope = androidx.compose.runtime.rememberCoroutineScope()
+                    var locating by remember { mutableStateOf(false) }
+                    val nearest: () -> Unit = {
+                        locating = true
+                        scope.launch {
+                            val stop = com.ksjd.testem.live.Locations.current(context, fallbackToLastKnown = true)?.let { at ->
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    runCatching { com.ksjd.testem.TimetableService().nearestStop(at.latitude, at.longitude) }.getOrNull()
+                                }
+                            }
+                            locating = false
+                            if (stop != null) viewModel.selectTimetableFromSuggestion(stop)
+                            else android.widget.Toast.makeText(context, R.string.planner_no_stop_near, android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+                        if (granted.values.any { it }) nearest()
+                    }
                     StopField(
                         value = state.fromInput,
                         label = stringResource(R.string.timetables_from_label),
-                        loading = state.isLoadingFromSuggestions,
+                        loading = state.isLoadingFromSuggestions || locating,
                         suggestions = state.fromSuggestions,
                         onValueChange = viewModel::updateTimetableFromInput,
-                        onPick = viewModel::selectTimetableFromSuggestion
+                        onPick = viewModel::selectTimetableFromSuggestion,
+                        trailing = {
+                            IconButton(onClick = {
+                                haptic(Haptics.TAP)
+                                if (com.ksjd.testem.live.Locations.hasPermission(context)) nearest()
+                                else askLocation.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+                            }) { Icon(Icons.Outlined.MyLocation, stringResource(R.string.planner_nearest_stop)) }
+                        }
                     )
                     Spacer(Modifier.height(8.dp))
                     StopField(
@@ -237,6 +266,11 @@ private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
 
         var pickTime by remember { mutableStateOf(false) }
         var pickDate by remember { mutableStateOf(false) }
+        // EM-0069: a date left from yesterday (a starred journey opened then) is today again.
+        LaunchedEffect(state.dateInput) {
+            val picked = runCatching { LocalDate.parse(state.dateInput) }.getOrNull()
+            if (picked != null && picked.isBefore(LocalDate.now(SK_ZONE))) viewModel.setTimetableDate("")
+        }
         if (pickTime) {
             val parts = state.timeInput.split(":").mapNotNull { it.toIntOrNull() }
             val now = java.time.LocalTime.now(SK_ZONE)
@@ -272,10 +306,18 @@ private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
                 label = {
                     Text(
                         if (state.timeInput.isBlank()) stringResource(R.string.planner_pick_time)
-                        else stringResource(R.string.planner_at_time, state.timeInput)
+                        else stringResource(if (state.arriveBy) R.string.planner_arrive_at_time else R.string.planner_at_time, state.timeInput)
                     )
                 }
             )
+            // EM-0053: with a time chosen, it can be when to be there instead of when to leave.
+            if (state.timeInput.isNotBlank()) {
+                FilterChip(
+                    selected = state.arriveBy,
+                    onClick = { haptic(Haptics.TAP); viewModel.setTimetableArriveBy(!state.arriveBy) },
+                    label = { Text(stringResource(R.string.planner_arrive_by)) }
+                )
+            }
             FilterChip(
                 selected = state.dateInput.isNotBlank(),
                 onClick = { haptic(Haptics.TAP); pickDate = true },
@@ -328,12 +370,14 @@ private fun StopField(
     loading: Boolean,
     suggestions: List<CpStopSuggestion>,
     onValueChange: (String) -> Unit,
-    onPick: (CpStopSuggestion) -> Unit
+    onPick: (CpStopSuggestion) -> Unit,
+    trailing: (@Composable () -> Unit)? = null
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
+        trailingIcon = trailing,
         singleLine = true,
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth()
@@ -526,11 +570,27 @@ private fun ConnectionCard(
             val legs = connection.segments.mapNotNull { s -> plannerTrip(s, lineNumber(s.line)) }
             if (legs.size > 1) {
                 val withNotifications = rememberWithNotifications()
-                Button(
-                    onClick = { withNotifications { haptic(Haptics.CONFIRM); TripTracking.startJourney(context, legs) } },
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().padding(end = 12.dp, top = 8.dp)
-                ) { Text(stringResource(R.string.journey_follow)) }
+                // EM-0055: once followed, the button says so (with a check) and a tap stops following.
+                val active by TripTracking.active.collectAsState()
+                val following = active?.let { a -> legs.any { it.ref == a.ref } } == true
+                if (following) {
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = { haptic(Haptics.CONFIRM); TripTracking.stop(context) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(end = 12.dp, top = 8.dp)
+                    ) {
+                        androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Outlined.Check, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.journey_following), modifier = Modifier.weight(1f, fill = false))
+                        Text(" · " + stringResource(R.string.journey_following_stop))
+                    }
+                } else {
+                    Button(
+                        onClick = { withNotifications { haptic(Haptics.CONFIRM); TripTracking.startJourney(context, legs) } },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(end = 12.dp, top = 8.dp)
+                    ) { Text(stringResource(R.string.journey_follow)) }
+                }
             }
         }
     }

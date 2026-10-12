@@ -86,6 +86,7 @@ assert.equal(communityKey(detail, { lineId: 910009139, tripNumber: 123, line: '1
 const route = [[48.570, 19.125], [48.580, 19.125], [48.590, 19.125], [48.600, 19.125]];
 assert.ok(Math.abs(snapToRoute(48.5825, 19.1252, route, BUS_GPS_MAX_M).index - 1.25) < 0.03);
 assert.equal(snapToRoute(48.73, 19.15, route, BUS_GPS_MAX_M), null, 'far off the route: wrong trip');
+assert.equal(snapToRoute(48.648, 19.12, [[48.50, 19.12], [48.635, 19.12]], RIDER_GPS_MAX_M), null, 'EM-0063: 1.5 km past a long hop is off the route');
 assert.equal(snapToRoute(48.5825, 19.1272, route, RIDER_GPS_MAX_M), null, 'rider beside the road is not on the bus');
 const loop = [[48.570, 19.125], [48.580, 19.125], [48.590, 19.125], [48.580, 19.125], [48.570, 19.125]];
 assert.ok(Math.abs(snapToRoute(48.575, 19.125, loop, 300, 0.4).index - 0.5) < 0.05);
@@ -117,10 +118,12 @@ assert.equal(trip.stops[2].scheduledMs, at(0, 15, 25), 'alight uses arrival');
 assert.equal(trip.stops[2].lat, null);
 assert.equal(trip.destination, 'Brezno, AS');
 // A city bus from SAD Zvolen's live data is followed live, from the stop where the user gets on.
-const liveLeg = plannerLeg({ line: 'Bus 9', arrivalStop: 'Lipovec, Potraviny', serviceDate: '2026-09-29',
+const liveLeg = plannerLeg({ line: 'Bus 9', departureStop: 'Zvolen, AS', departureTime: '21:43', arrivalStop: 'Lipovec, Potraviny', arrivalTime: '21:58', serviceDate: '2026-09-29',
   routeUrl: 'sadzv:trip?line=9&lineId=910009195&route=9004&trip=67&board=1296&alight=12&stop=4913&planned=78180' });
 assert.deepEqual(liveLeg, { ref: { line: '9', lineId: 910009195, routeNumber: '9004', tripNumber: 67, destination: 'Lipovec, Potraviny',
-  scheduleUrl: '', serviceDate: '2026-09-29', fromStopId: 4913, plannedSecondOfDay: 78180 }, boardingPlatformIds: [1296], alightOrder: 12 });
+  scheduleUrl: '', serviceDate: '2026-09-29', fromStopId: 4913, plannedSecondOfDay: 78180 }, boardingPlatformIds: [1296], alightOrder: 12,
+  // EM-0067: where and when the rider gets on and off, for the whole journey's list.
+  fromStop: 'Zvolen, AS', toStop: 'Lipovec, Potraviny', leaves: '21:43', arrives: '21:58' });
 // On another day a city bus opens from the timetable (sadzv only knows today's run).
 const tomorrowLeg = plannerLeg({ line: 'Bus 9', arrivalStop: 'Lipovec, Potraviny', serviceDate: '2099-01-01',
   routeUrl: 'sadzv:trip?line=9&lineId=1&route=9004&trip=67&board=1296&alight=12&stop=4913&planned=78180&tt=' + encodeURIComponent(tripUrl('sad-zvolen-as-city:x:20990101', 6, 10)) });
@@ -170,4 +173,16 @@ console.log('ok');
   assert.ok(card.hasProducts && card.valid && card.alias === 'NFC Karta');
   assert.equal(ids.parseCredit('<div class="my-credit__credit-amount">\n 0,15\n</div>'), 0.15);
   console.log('ok 2.13: tickets by bus, IDS BBSK pages');
+}
+
+// EM-0059: from a minute before the bus is due at a stop, that stop is "now" (the alerts still go by nextIndex).
+{
+  const t0 = 1_800_000_000_000;
+  const stop = (name, order, min) => ({ name, platformId: order, order, scheduledMs: t0 + min * 60000, actualMs: null });
+  const d = { delaySeconds: 0, stops: [stop('A', 1, 0), stop('B', 2, 10), stop('C', 3, 12)] };
+  const between = tripProgress(d, { boardingPlatformIds: [], alightOrder: null }, t0 + 5 * 60000);
+  assert.equal(between.currentStopName, 'A'); assert.equal(between.nextStopName, 'B');
+  const arriving = tripProgress(d, { boardingPlatformIds: [], alightOrder: null }, t0 + 9.5 * 60000);
+  assert.equal(arriving.currentStopName, 'B'); assert.equal(arriving.nextStopName, 'C'); assert.equal(arriving.nextIndex, 1);
+  console.log('ok 2.15.1: the stop the bus is at is "now"');
 }

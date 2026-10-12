@@ -1,6 +1,8 @@
 package com.ksjd.testem.ui.screens
 
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.material.icons.outlined.Watch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -298,6 +300,9 @@ fun TicketScreen(
                 onOpenDepartures()
             }
         }
+
+        WatchInstallCard()
+        JourneyDraftBar(Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
 
         JourneysSection(timetable.savedJourneys, now, viewModel, onOpenPlanner)
         RidesSection(timetable.rides, now, viewModel)
@@ -804,6 +809,48 @@ private fun FullscreenQr(bitmap: android.graphics.Bitmap?, title: String, detail
             Text(detail, style = MaterialTheme.typography.bodyMedium, color = InkMuted)
             Spacer(Modifier.height(32.dp))
             Text(stringResource(R.string.ticket_fullscreen_close), style = MaterialTheme.typography.bodySmall, color = InkMuted)
+        }
+    }
+}
+
+/**
+ * A paired watch without the Plan&Ride watch app: one tap opens its page in the Play Store on the watch, because the
+ * phone's Play Store doesn't offer it. "Not now" hides it for good (Account → Watch still has the button).
+ */
+@Composable
+private fun WatchInstallCard() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { com.ksjd.testem.CredentialsManager(context) }
+    var watches by remember { mutableStateOf<List<String>>(emptyList()) }
+    var hidden by remember { mutableStateOf(prefs.isWatchInstallHidden()) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(hidden) {
+        if (!hidden) watches = withContext(kotlinx.coroutines.Dispatchers.IO) { com.ksjd.testem.live.WatchSync.watchesWithoutApp(context) }
+    }
+    if (hidden || watches.isEmpty()) return
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(androidx.compose.material.icons.Icons.Outlined.Watch, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.watch_install_title), style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.watch_install_body), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { prefs.setWatchInstallHidden(true); hidden = true }) { Text(stringResource(R.string.watch_install_later)) }
+                androidx.compose.material3.Button(onClick = {
+                    scope.launch {
+                        val ok = withContext(kotlinx.coroutines.Dispatchers.IO) { com.ksjd.testem.live.WatchSync.openPlayOnWatch(context, watches.first()) }
+                        android.widget.Toast.makeText(context, if (ok) R.string.watch_install_sent else R.string.watch_install_failed, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }) { Text(stringResource(R.string.watch_install_button)) }
+            }
         }
     }
 }

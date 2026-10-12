@@ -413,26 +413,102 @@ class Timetable:
             child, parent = self._edited(sid, e.get("name")), self.by_id.get(e.get("parent"))
             if child is None or parent is None or child == parent:
                 continue
-            info = {"label": e.get("label") or "", "lines": e.get("lines") or []}
+            info = {"label": e.get("label") or "", "platform": e.get("platform") or "", "lines": e.get("lines") or [],
+                    "directions": e.get("directions") or []}
             self.children.setdefault(parent, []).append((child, info))
             self.parent_of[child] = (parent, info)
 
-    def platform_for(self, s, line):
+    def platform_for(self, s, line, trip=None, k=None):
         """
-        Where line `line` stops at station s, if set up in the dashboard: a place of s for that line, or s itself as a
-        central station's sub-station for it. (lat, lon, label) or None.
+        Where a bus of line `line` stops at station s, if set up in the dashboard: a place of s, or s itself as a central
+        station's sub-station. A place or sub-station has directions, each with its lines and the towns it heads towards;
+        with the trip known (trip, its stop number k), a direction "towards" a town fits buses that end there or pass it
+        later. The best fit wins: a direction towards where the bus ends beats one towards a town it only passes (a bus
+        to Dudince through Krupina goes to "towards Dudince", not "towards Krupina"); then a direction with lines beats
+        one without. (lat, lon, label) or None.
         """
         own = line_key(line)
-        for p in getattr(self, "places", {}).get(s, ()):
-            if own in {line_key(x) for x in p.get("lines") or ()}:
-                return p["lat"], p["lon"], p.get("label") or ""
+        heading = ends = None
+        if trip is not None and k is not None:
+            end = trip[3] or self.names[trip[7][-1]]
+            ends = name_keys(end) | name_keys(self.names[trip[7][-1]])
+            heading = ends | {key for x in trip[7][k + 1:] for key in name_keys(self.names[x])}
+        best, best_score = None, 0
+        candidates = [(p["lat"], p["lon"], p) for p in getattr(self, "places", {}).get(s, ())]
         parent = getattr(self, "parent_of", {}).get(s)
-        if parent and own in {line_key(x) for x in parent[1]["lines"]} and self.lat[s] is not None:
-            return self.lat[s], self.lon[s], parent[1]["label"]
-        return None
+        if parent and self.lat[s] is not None:
+            candidates.append((self.lat[s], self.lon[s], parent[1]))
+        for lat, lon, spot in candidates:
+            for d in directions_of(spot):
+                lines = {line_key(x) for x in d.get("lines") or ()}
+                towards = {" ".join(fold(x)) for x in d.get("towards") or () if x}
+                if lines and own not in lines:
+                    continue
+                if towards and (heading is None or not towards & heading):
+                    continue
+                score = (4 if towards and towards & ends else 2 if towards else 0) + (1 if lines else 0)
+                if score > best_score:
+                    best, best_score = (lat, lon, spot.get("platform") or spot.get("label") or ""), score
+        if best is None and trip is not None and k is not None:
+            best = self.traced_spot(s, trip, k) or self.kerb_side(s, trip, k)
+        return best
 
-    def position_for(self, s, line):
-        p = self.platform_for(s, line)
+    def free_spots(self, s):
+        """
+        Where a bus may stop at station s when no direction says which: its places without directions and its own
+        point, (lat, lon, label) each. Only for a stop with up to two places: a bus station's bays don't count.
+        """
+        spots = [(p["lat"], p["lon"], p.get("platform") or p.get("label") or "")
+                 for p in getattr(self, "places", {}).get(s, ()) if not directions_of(p)]
+        if not spots or len(spots) > 2 or s in getattr(self, "central", ()) or self.lat[s] is None:
+            return []
+        return spots + [(self.lat[s], self.lon[s], "")]
+
+    def traced_spot(self, s, trip, k):
+        """
+        Of a stop's free spots, the one the trip's road traces go to (snapping picks the one reached without a detour:
+        Namestie slobody, 44 m apart on one side of the road, one only after a loop round the block). Lines and stops
+        then always meet. None without a trace there.
+        """
+        spots = self.free_spots(s)
+        if not spots:
+            return None
+        stops = trip[7]
+        # The way there decides (snapping goes stop by stop, the next part leaves from where this one arrived).
+        into = edits["segments"].get(f"{self.station_ids[stops[k - 1]]}>{self.station_ids[s]}", [])[-1:] if k > 0 else []
+        out = edits["segments"].get(f"{self.station_ids[s]}>{self.station_ids[stops[k + 1]]}", [])[:1] if k + 1 < len(stops) else []
+        end = (into or out or [None])[0]
+        return min(spots, key=lambda p: meters(p[0], p[1], end[0], end[1])) if end else None
+
+    def kerb_side(self, s, trip, k):
+        """
+        No direction set up: of station s's places without directions and its own point, the one on the right of the
+        way the bus goes from the stop before to the one after (traffic keeps right), so it stops on its own side of
+        the road (Zvolen, Rakos: a platform added across the road, for buses to Banska Bystrica). (lat, lon, label) or None.
+        """
+        spots = [(p["lat"], p["lon"], p.get("platform") or p.get("label") or "")
+                 for p in getattr(self, "places", {}).get(s, ()) if not directions_of(p)]
+        # Only a stop with its place across the road: a bus station's bays (Zvolen AS has 21) have no "right side".
+        if len(spots) != 1 or s in getattr(self, "central", ()) or self.lat[s] is None:
+            return None
+        spots.append((self.lat[s], self.lon[s], ""))
+        stops = trip[7]
+        before, after = stops[max(k - 1, 0)], stops[min(k + 1, len(stops) - 1)]
+        if before == after or self.lat[before] is None or self.lat[after] is None:
+            return None
+        cos = math.cos(math.radians(self.lat[s]))
+        dx, dy = (self.lon[after] - self.lon[before]) * cos, self.lat[after] - self.lat[before]
+        size = math.hypot(dx, dy) or 1
+        lat0, lon0 = sum(p[0] for p in spots) / len(spots), sum(p[1] for p in spots) / len(spots)
+        # How far left of the way the bus goes, in metres (negative = on its right).
+        left = {p: (dx * (p[0] - lat0) - dy * (p[1] - lon0) * cos) / size * 111_000 for p in spots}
+        # Two places along the same side (Namestie slobody: 44 m apart, 6 m across) aren't two sides of the road.
+        if max(left.values()) - min(left.values()) < 10:
+            return None
+        return min(spots, key=left.get)
+
+    def position_for(self, s, line, trip=None, k=None):
+        p = self.platform_for(s, line, trip, k)
         return (p[0], p[1]) if p else (self.lat[s], self.lon[s])
 
     def in_zone(self, s, lat, lon):
@@ -458,16 +534,25 @@ class Timetable:
             for t, trip in enumerate(self.trips):
                 for k, st in enumerate(trip[7]):
                     self._stops_at.setdefault(st, []).append((t, k))
-        lines, platforms = {}, set()
+        lines, platforms, ways = {}, set(), {}
         for t, k in self._stops_at.get(s, ()):
             trip = self.trips[t]
             if k < len(trip[7]) - 1:  # where it goes from here (not where it ends)
-                lines.setdefault(trip[2], set()).add(trip[3] or self.names[trip[7][-1]])
+                head = trip[3] or self.names[trip[7][-1]]
+                lines.setdefault(trip[2], set()).add(head)
+                # Buses whose next stop is the same leave the same way: one direction for the dashboard to offer.
+                way = ways.setdefault(self.names[trip[7][k + 1]], {"lines": set(), "headsigns": {}, "trips": 0})
+                way["lines"].add(trip[2])
+                way["headsigns"][head] = way["headsigns"].get(head, 0) + 1
+                way["trips"] += 1
             if trip[10][k]:
                 platforms.add(trip[10][k])
         order = lambda x: (len(x) > 3, x.zfill(6))  # noqa: E731 - city lines first, then by number
+        directions = [{"next": nxt, "lines": sorted(w["lines"], key=order), "trips": w["trips"],
+                       "headsigns": [h for h, _ in sorted(w["headsigns"].items(), key=lambda kv: -kv[1])][:8]}
+                      for nxt, w in sorted(ways.items(), key=lambda kv: -kv[1]["trips"])]
         return {"lines": [{"line": line, "headsigns": sorted(h)[:3]} for line, h in sorted(lines.items(), key=lambda kv: order(kv[0]))],
-                "platforms": sorted(platforms, key=lambda x: x.zfill(4))}
+                "platforms": sorted(platforms, key=lambda x: x.zfill(4)), "directions": directions[:12]}
 
     def station_detail(self, s):
         """Everything set up for a station, for the dashboard, with what stops there (for its choices)."""
@@ -498,10 +583,37 @@ class Timetable:
         out.sort(key=lambda x: -x["weight"])
         return out[:limit]
 
-    def segment_points(self, a, b, line=None):
-        """The way between two stations (where `line` stops there): the road trace drawn or snapped, else a straight line."""
+    def fits_trace(self, a, b, line, trip, k):
+        """
+        A road trace between a and b made for this trip's platforms there: not one snapped to another place of the stop
+        (Namestie slobody: drawn to it, the line zig-zagged from the trace to the trip's platform and back).
+        """
         traced = edits["segments"].get(f"{self.station_ids[a]}>{self.station_ids[b]}")
-        ends = [self.position_for(a, line), self.position_for(b, line)] if line else [(self.lat[a], self.lon[a]), (self.lat[b], self.lon[b])]
+        if not traced:
+            return False
+
+        def fits(s, at, end):
+            if at is None:
+                return True
+            mine = meters(at[0], at[1], end[0], end[1])
+            others = [meters(p[0], p[1], end[0], end[1]) for p in self.positions_of(s) if (p[0], p[1]) != (at[0], at[1])]
+            return mine <= 60 or not others or min(others) + 20 > mine
+        return fits(a, self.position_for(a, line, trip, k), traced[0]) and fits(b, self.position_for(b, line, trip, k + 1), traced[-1])
+
+    def positions_of(self, s):
+        """Every place a bus may stop at station s: its places, its sub-stations and its own point."""
+        out = [(p["lat"], p["lon"]) for p in getattr(self, "places", {}).get(s, ())]
+        out += [(self.lat[c], self.lon[c]) for c, _ in getattr(self, "children", {}).get(s, ())]
+        return [p for p in out + [(self.lat[s], self.lon[s])] if p[0] is not None]
+
+    def segment_points(self, a, b, line=None, trip=None, k=None):
+        """
+        The way between two stations (where `line` stops there; with the trip and a's stop number k, at the platform for
+        the way it heads): the road trace drawn or snapped, else a straight line.
+        """
+        traced = edits["segments"].get(f"{self.station_ids[a]}>{self.station_ids[b]}")
+        ends = ([self.position_for(a, line, trip, k), self.position_for(b, line, trip, None if k is None else k + 1)] if line
+                else [(self.lat[a], self.lon[a]), (self.lat[b], self.lon[b])])
         return [ends[0], *[tuple(p) for p in traced], ends[1]] if traced else ends
 
     def community_keys(self, index, service_day):
@@ -514,12 +626,14 @@ class Timetable:
             keys.append(f"sadzv|{city[0]}|{city[2]}|{service_day.isoformat()}|{city[3]}")
         return keys
 
-    def vehicles(self, when, box, delay_of=lambda keys: None):
+    def vehicles(self, when, box, delay_of=lambda keys: None, gps=None):
         """
         Buses on the road at `when` (epoch s) in box (south, west, north, east): where the timetable puts them, or, with
         riders' reports (delay_of(keys) -> {"delaySeconds", "source"}), as late as they are ("live"). Along the road
-        traces where there are some.
+        traces where there are some. A city bus sending its own GPS (gps: {(line id, trip number): (lat, lon, delay s)},
+        sadzv) is where it says, with its delay; only a rider's phone on board comes first.
         """
+        gps = gps or {}
         south, west, north, east = box
         d = datetime.fromtimestamp(when, ZONE).date()
         out, seen = [], set()
@@ -538,6 +652,10 @@ class Timetable:
                 trip = self.trips[index]
                 offset = base_epoch(service_day) - day.base
                 live = delay_of(self.community_keys(index, service_day))
+                city = self.city.get(index)
+                bus = gps.get((city[0], city[2])) if city and service_day == d and not (live and live.get("source") == "gps") else None
+                if bus:
+                    live = {"delaySeconds": bus[2], "source": "bus"}
                 t = t0 - (live["delaySeconds"] if live else 0) - offset
                 st, arr, dep = trip[7], trip[8], trip[9]
                 if t < dep[0] or t > arr[-1]:
@@ -547,7 +665,7 @@ class Timetable:
                 if self.lat[a] is None or self.lat[b] is None:
                     continue
                 f = 0.0 if t <= dep[k] else min(1.0, (t - dep[k]) / max(1, arr[k + 1] - dep[k]))
-                lat, lon = along(self.segment_points(a, b, trip[2]), f)
+                lat, lon = bus[:2] if bus else along(self.segment_points(a, b, trip[2], trip, k), f)
                 if not (south <= lat <= north and west <= lon <= east):
                     continue
                 out.append({"tripId": f"{trip[0]}:{trip[1]}:{service_day:%Y%m%d}", "line": trip[2], "headsign": trip[3] or self.names[st[-1]],
@@ -564,9 +682,10 @@ class Timetable:
         index = self.trip_index[(trip_id.split(":", 1)[0], trip_id.split(":", 1)[1].rsplit(":", 1)[0])]
         st = self.trips[index][7]
         trip["segments"] = [{"from": self.station_ids[a], "to": self.station_ids[b],
-                             "points": self.segment_points(a, b, trip["line"]) if self.lat[a] is not None and self.lat[b] is not None else [],
-                             "traced": f"{self.station_ids[a]}>{self.station_ids[b]}" in edits["segments"]}
-                            for a, b in zip(st, st[1:])]
+                             "points": (self.segment_points(a, b, trip["line"], self.trips[index], k)
+                                        if self.lat[a] is not None and self.lat[b] is not None else []),
+                             "traced": self.fits_trace(a, b, trip["line"], self.trips[index], k)}
+                            for k, (a, b) in enumerate(zip(st, st[1:]))]
         return trip
 
     # ---- per-day connections
@@ -610,12 +729,38 @@ class Timetable:
     def station_json(self, s):
         return {"id": self.station_ids[s], "name": self.names[s], "lat": self.lat[s], "lon": self.lon[s]}
 
+    def search_words(self):
+        """
+        Each station's words for search. A name without its town ("Lipovec", a part of Zvolen) gets the town of the
+        nearest station within 1.5 km that has one in front, so "z lipo" finds it like "Zvolen, Lipovec" (EM-0065).
+        """
+        if not hasattr(self, "_search_words"):
+            cell = lambda lat, lon: (int(lat * 60), int(lon * 40))  # noqa: E731 - about 1.9 km by 1.9 km
+            towns = {}
+            for s, name in enumerate(self.names):
+                if "," in name and self.lat[s] is not None:
+                    towns.setdefault(cell(self.lat[s], self.lon[s]), []).append(s)
+            words = list(self.words)
+            for s, name in enumerate(self.names):
+                if "," in name or self.lat[s] is None:
+                    continue
+                y, x = cell(self.lat[s], self.lon[s])
+                near = [(meters(self.lat[s], self.lon[s], self.lat[o], self.lon[o]), o)
+                        for dy in (-1, 0, 1) for dx in (-1, 0, 1) for o in towns.get((y + dy, x + dx), ())]
+                d, o = min(near, default=(None, None))
+                if d is not None and d <= 1500:
+                    town = fold(self.names[o].split(",")[0])
+                    if town != words[s][:len(town)]:
+                        words[s] = town + words[s]
+            self._search_words = words
+        return self._search_words
+
     def search(self, text, limit=18):
         tokens = fold(text)
         if not tokens:
             return []
         found = []
-        for s, words in enumerate(self.words):
+        for s, words in enumerate(self.search_words()):
             if not words or tokens[0][0] not in {w[0] for w in words}:
                 continue
             score = match_score(tokens, words)
@@ -684,7 +829,7 @@ class Timetable:
             if key in seen:
                 continue
             seen.add(key)
-            set_up = self.platform_for(s, trip[2])
+            set_up = self.platform_for(s, trip[2], trip, k)
             out.append({"at": at * 1000, "tripId": f"{trip[0]}:{trip[1]}:{service_day:%Y%m%d}", "line": trip[2],
                         "headsign": trip[3] or self.names[trip[7][-1]], "operator": trip[4], "mode": trip[5],
                         "platform": (set_up[2] if set_up and set_up[2] else trip[10][k]), "stop": self.station_json(s), "seq": k, "feed": trip[0],
@@ -692,6 +837,30 @@ class Timetable:
             if len(out) >= limit:
                 break
         return out
+
+    def line_routes(self, line, limit=60):
+        """
+        Every way line `line` goes ("34", "60101"): one trip for each list of stops, dated the next day it runs, the
+        most frequent first. For drawing the roads of buses that aren't on the road right now.
+        """
+        want = line_key(line)
+        if not want:
+            return []
+        today = (datetime.now(ZONE).date() - self.first_day).days
+        groups = {}
+        for i, trip in enumerate(self.trips):
+            if line_key(trip[2]) == want:
+                groups.setdefault((trip[0], tuple(trip[7])), []).append(i)
+        out = []
+        for (_, stops), indexes in groups.items():
+            trip = self.trips[indexes[0]]
+            days = self.services.get(trip[6], ())
+            day = self.first_day + timedelta(days=min((d for d in days if d >= today), default=max(days, default=today)))
+            out.append({"tripId": f"{trip[0]}:{trip[1]}:{day:%Y%m%d}", "line": trip[2], "headsign": trip[3] or self.names[stops[-1]],
+                        "from": self.names[stops[0]], "to": self.names[stops[-1]], "stops": len(stops), "trips": len(indexes),
+                        "operator": trip[4]})
+        out.sort(key=lambda r: (-r["trips"], r["from"], r["to"]))
+        return out[:limit]
 
     def trip(self, trip_id):
         feed, tid, day_text = trip_id.split(":", 1)[0], *trip_id.split(":", 1)[1].rsplit(":", 1)
@@ -703,7 +872,7 @@ class Timetable:
         stops = []
         for k, s in enumerate(trip[7]):
             stop = dict(self.station_json(s), arrival=(base + trip[8][k]) * 1000, departure=(base + trip[9][k]) * 1000, platform=trip[10][k])
-            set_up = self.platform_for(s, trip[2])
+            set_up = self.platform_for(s, trip[2], trip, k)
             if set_up:
                 stop.update(lat=set_up[0], lon=set_up[1], platform=set_up[2] or stop["platform"])
             if s in self.zones:
@@ -905,7 +1074,7 @@ class Timetable:
     def leg_stop(self, s, trip, k):
         """Where a connection gets on or off: the station, at the place or platform set up for this line in the dashboard."""
         stop = dict(self.station_json(s), seq=k, platform=trip[10][k])
-        set_up = self.platform_for(s, trip[2])
+        set_up = self.platform_for(s, trip[2], trip, k)
         if set_up:
             stop.update(lat=set_up[0], lon=set_up[1], platform=set_up[2] or stop["platform"])
         if s in self.parent_of:
@@ -966,6 +1135,19 @@ def along(points, f):
     return points[-1]
 
 
+def name_keys(name):
+    """
+    A stop's name as a direction can say it: the whole name, or just its town. "Zvolen, Západ" -> {"zvolen zapad",
+    "zvolen"}, so "towards Krupina" fits every Krupina stop while "towards Zvolen, Západ" fits only that one.
+    """
+    return {" ".join(fold(str(name))), " ".join(fold(str(name).split(",")[0]))}
+
+
+def directions_of(spot):
+    """A place's or sub-station's directions; one set up before directions existed has its lines as its only one."""
+    return spot.get("directions") or ([{"name": "", "lines": spot.get("lines") or [], "towards": []}] if spot.get("lines") else [])
+
+
 def line_key(line):
     """A line as the dashboard writes it and the timetable has it: "60101", "Linka 34" -> "34"."""
     return str(line or "").strip().split(" ")[-1].lower()
@@ -984,8 +1166,9 @@ def inside_polygon(lat, lon, points):
 
 # Map edits from the dashboard (the hub loads them from its database): moved stops by station id
 # {"name", "lat", "lon", "origLat", "origLon"}; road traces between two stations "from>to" -> [[lat, lon], …];
-# stations' extra places, zones and the central flag {"name", "places": [{"label", "lat", "lon", "lines"}], "zone", "central"};
-# and sub-stations of central stations {"name", "parent", "label", "lines"} by the sub-station's id.
+# stations' extra places, zones and the central flag {"name", "places": [{"label", "platform", "lat", "lon", "lines", "directions"}],
+# "zone", "central"}; and sub-stations of central stations {"name", "parent", "label", "platform", "lines", "directions"} by the
+# sub-station's id. A direction is {"name", "lines", "towards"}; "lines" of a place is all its directions' lines together.
 edits = {"stops": {}, "segments": {}, "stations": {}, "children": {}}
 
 

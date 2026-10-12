@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +42,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.lerp
@@ -55,6 +58,45 @@ import com.ksjd.testem.live.TrackedTrip
 import com.ksjd.testem.live.TripTracking
 import com.ksjd.testem.ui.Format
 import kotlin.math.ceil
+
+/**
+ * A background that is alive while a bus is followed: the theme's colour, a neighbouring hue and a deeper shade
+ * drift into each other and the light slowly sweeps across (about ten seconds each way). Only the drawing changes,
+ * nothing recomposes; with animations turned off in Android it stays still.
+ */
+@Composable
+private fun Modifier.livingGradient(base: Color): Modifier {
+    val shift = androidx.compose.animation.core.rememberInfiniteTransition(label = "follow")
+    val t by shift.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(10_000, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "t"
+    )
+    val neighbour = hueShift(base, 26f)
+    val deep = lerp(base, Color.Black, 0.28f)
+    return this.drawBehind {
+        val w = size.width
+        val h = size.height
+        drawRect(
+            Brush.linearGradient(
+                listOf(lerp(base, neighbour, t), lerp(deep, base, t), lerp(neighbour, deep, t)),
+                start = androidx.compose.ui.geometry.Offset(w * 0.6f * t, 0f),
+                end = androidx.compose.ui.geometry.Offset(w, h * (1f - 0.6f * t))
+            )
+        )
+    }
+}
+
+/** The same colour with its hue turned by `degrees` (lightness and saturation kept). */
+private fun hueShift(c: Color, degrees: Float): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(c.toArgb(), hsv)
+    hsv[0] = (hsv[0] + degrees + 360f) % 360f
+    return Color(android.graphics.Color.HSVToColor(hsv))
+}
 
 /**
  * The followed bus on the home screen, like its live notification: countdown, delay, and the bus
@@ -74,7 +116,7 @@ fun FollowCard(trip: TrackedTrip, view: FollowView?, now: Long, modifier: Modifi
     ) {
         Column(
             Modifier
-                .background(Brush.linearGradient(listOf(scheme.primary, lerp(scheme.primary, scheme.tertiary, 0.55f))))
+                .livingGradient(scheme.primary)
                 .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 18.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -94,7 +136,14 @@ fun FollowCard(trip: TrackedTrip, view: FollowView?, now: Long, modifier: Modifi
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.height(14.dp))
-                if (p == null) {
+                val plannedAt by com.ksjd.testem.live.FollowLater.planned.collectAsState()
+                val leaves = com.ksjd.testem.live.FollowLater.departureMs(trip)
+                if (p == null && plannedAt != null && leaves != null) {
+                    fun clock(ms: Long) = java.time.Instant.ofEpochMilli(ms).atZone(com.ksjd.testem.SK_ZONE).let { "%d:%02d".format(it.hour, it.minute) }
+                    Text(stringResource(R.string.follow_planned_card, clock(leaves)), color = on, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(stringResource(R.string.follow_planned_card_live, clock(plannedAt!!)), color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
+                } else if (p == null) {
                     Text(stringResource(R.string.track_loading), color = on.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyLarge)
                 } else {
                     val summary = followSummary(context, view, now)
@@ -124,7 +173,32 @@ fun FollowCard(trip: TrackedTrip, view: FollowView?, now: Long, modifier: Modifi
                         Text(it, color = on, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+                if (trip.nextLegs.isNotEmpty()) JourneyLegs(trip, on)
             }
+        }
+    }
+}
+
+/**
+ * EM-0067: a whole journey followed shows all of it: where to get off this bus and when, then each next bus (line,
+ * when it leaves, from where to where), so nobody has to search for the journey again.
+ */
+@Composable
+private fun JourneyLegs(trip: TrackedTrip, on: Color) {
+    fun clock(ms: Long) = java.time.Instant.ofEpochMilli(ms).atZone(com.ksjd.testem.SK_ZONE).let { "%d:%02d".format(it.hour, it.minute) }
+    Spacer(Modifier.height(12.dp))
+    Column(Modifier.padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (trip.toStop != null && trip.arrivesAtMs > 0) {
+            Text(stringResource(R.string.journey_get_off, trip.toStop, clock(trip.arrivesAtMs)), color = on,
+                style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+        }
+        trip.nextLegs.forEach { leg ->
+            val times = listOfNotNull(
+                leg.departsAtMs.takeIf { it > 0 }?.let { clock(it) + " " + leg.fromStop.orEmpty() },
+                leg.toStop?.let { it + if (leg.arrivesAtMs > 0) " " + clock(leg.arrivesAtMs) else "" }
+            ).joinToString(" → ")
+            Text(stringResource(R.string.journey_next_leg, leg.ref.line, times), color = on.copy(alpha = 0.9f),
+                style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

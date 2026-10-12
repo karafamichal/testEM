@@ -58,6 +58,19 @@ data class LiveState(
  * where the user gets on; any other bus by its timetable trip, which knows the user's stops itself.
  */
 fun plannerTrip(segment: TimetableSegment, line: String): TrackedTrip? {
+    val leaves = runCatching {
+        java.time.LocalDate.parse(segment.serviceDate).atTime(com.ksjd.testem.parseClock(segment.departureTime))
+            .atZone(com.ksjd.testem.SK_ZONE).toInstant().toEpochMilli()
+    }.getOrDefault(0L)
+    // Arriving before it left: past midnight, the next day.
+    val arrives = runCatching {
+        java.time.LocalDate.parse(segment.serviceDate).atTime(com.ksjd.testem.parseClock(segment.arrivalTime))
+            .atZone(com.ksjd.testem.SK_ZONE).toInstant().toEpochMilli().let { if (it < leaves) it + 86_400_000L else it }
+    }.getOrDefault(0L)
+    return plannerTripAt(segment, line)?.copy(departsAtMs = leaves, fromStop = segment.departureStop, toStop = segment.arrivalStop, arrivesAtMs = arrives)
+}
+
+private fun plannerTripAt(segment: TimetableSegment, line: String): TrackedTrip? {
     val live = com.ksjd.testem.TimetableService.parseLiveUrl(segment.routeUrl)
         ?: return scheduledTripRef(segment, line)?.let { TrackedTrip(it, emptyList()) }
     // sadzv only knows today's run: a city bus on another day comes from the timetable, with that day's times.
@@ -106,7 +119,7 @@ fun draftLeg(sheet: TripSheetState, detail: TripDetail): DraftLeg {
         departurePlatform = b.platform, arrivalPlatform = a.platform,
         routeUrl = url, serviceDate = local(b.scheduledMs).toLocalDate().toString()
     )
-    return DraftLeg(trip, segment, b.lat?.let { it to b.lon!! }, a.lat?.let { it to a.lon!! })
+    return DraftLeg(trip.copy(departsAtMs = b.scheduledMs, fromStop = b.name, toStop = a.name, arrivesAtMs = a.scheduledMs), segment, b.lat?.let { it to b.lon!! }, a.lat?.let { it to a.lon!! })
 }
 
 /** A planner bus as a timetable trip: stops, times and the user's stops come from its trip link. */

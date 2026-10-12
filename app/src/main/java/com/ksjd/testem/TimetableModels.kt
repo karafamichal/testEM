@@ -75,6 +75,8 @@ data class TimetableState(
     /** ISO date to search on, "" = today. */
     val dateInput: String = "",
     val directOnly: Boolean = false,
+    /** EM-0053: the time is when to be there, not when to leave. */
+    val arriveBy: Boolean = false,
     val fromSuggestions: List<CpStopSuggestion> = emptyList(),
     val toSuggestions: List<CpStopSuggestion> = emptyList(),
     val selectedFromSuggestion: CpStopSuggestion? = null,

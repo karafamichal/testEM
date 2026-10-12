@@ -14,7 +14,6 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.foundation.clickable
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -315,15 +314,16 @@ private fun FloatingBar(tabs: List<AppTab>, selected: AppTab, anyAccount: Boolea
             .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
         contentAlignment = androidx.compose.ui.Alignment.Center
     ) {
+        // EM-0052: the bar always spans the screen and the tabs share it by weight, the open one taking about three
+        // shares. Before, the bar grew to fit the open tab's name and pushed the last icon into the corner.
         androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxWidth(),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
             color = colors.bar,
             contentColor = colors.onBar,
         ) {
             androidx.compose.foundation.layout.Row(
-                Modifier
-                    .padding(4.dp)
-                    .animateContentSize(androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 500f)),
+                Modifier.fillMaxWidth().padding(4.dp),
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(2.dp)
             ) {
@@ -345,8 +345,13 @@ private fun FloatingBar(tabs: List<AppTab>, selected: AppTab, anyAccount: Boolea
                     val fill by androidx.compose.animation.animateColorAsState(
                         if (on) colors.onBar.copy(alpha = 0.16f) else androidx.compose.ui.graphics.Color.Transparent, label = "tab"
                     )
+                    // The open tab grows smoothly to about three shares, the one it left shrinks back to one.
+                    val share by androidx.compose.animation.core.animateFloatAsState(
+                        if (on) 3f else 1f, androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f), label = "share"
+                    )
                     androidx.compose.foundation.layout.Row(
                         Modifier
+                            .weight(share)
                             .height(52.dp)
                             // Clipped first, so the tap ripple is a pill too (unclipped it flashed a square box).
                             .clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
@@ -356,8 +361,9 @@ private fun FloatingBar(tabs: List<AppTab>, selected: AppTab, anyAccount: Boolea
                                 role = androidx.compose.ui.semantics.Role.Tab,
                                 onClickLabel = label
                             ) { if (!on) com.ksjd.testem.ui.components.Haptics.perform(view); onSelect(tab) }
-                            .padding(horizontal = 14.dp),
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center
                     ) {
                         Icon(icon, contentDescription = if (on) null else label,
                             tint = if (on && tab == AppTab.Home && colors.onBar.luminance() > 0.5f) colors.live else colors.onBar)
@@ -366,7 +372,8 @@ private fun FloatingBar(tabs: List<AppTab>, selected: AppTab, anyAccount: Boolea
                             enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandHorizontally(),
                             exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkHorizontally()
                         ) {
-                            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, modifier = Modifier.padding(start = 10.dp, end = 4.dp))
+                            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp))
                         }
                     }
                 }

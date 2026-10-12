@@ -54,7 +54,13 @@ data class TrackedTrip(
     /** stopOrder where the user gets off, null = ride to the end. */
     val alightOrder: Int? = null,
     /** The buses after this one on a journey with changes; followed one after another. */
-    val nextLegs: List<TrackedTrip> = emptyList()
+    val nextLegs: List<TrackedTrip> = emptyList(),
+    /** When it leaves the user's stop (epoch ms), 0 = unknown: a later bus is followed live only shortly before (EM-0054). */
+    val departsAtMs: Long = 0L,
+    /** EM-0067: where the user gets on and off and when it's there, to show the whole journey (null = unknown). */
+    val fromStop: String? = null,
+    val toStop: String? = null,
+    val arrivesAtMs: Long = 0L
 )
 
 /** The live notification's texts: title, body and the short countdown ("5 min"). */
@@ -112,7 +118,8 @@ object TripTracking {
     }
     internal fun set(context: Context, value: TrackedTrip?) {
         if (value == null) _alerts.value = emptyList()
-        _active.value = value
+        // A later bus that's planned stays followed when the live one ends (EM-0054).
+        _active.value = value ?: if (FollowLater.planned.value != null) FollowLater.restore(context) else null
         refreshWidget(context)
         if (value == null || _view.value?.trip?.ref != value.ref) _view.value = null
         // Kept on disk so an app update (which kills the service) can pick the bus up again.
@@ -127,6 +134,12 @@ object TripTracking {
      */
     fun resume(context: Context) {
         if (_active.value != null) return
+        FollowLater.restore(context)?.let { planned ->
+            // The alarm was missed (inexact, or the phone was off): it's time to follow it live.
+            if (FollowLater.startAt(context, planned) == null) runCatching { start(context, planned, now = true) }
+            else { _active.value = planned; refreshWidget(context) }
+            return
+        }
         val saved = context.getSharedPreferences(RESUME_PREFS, Context.MODE_PRIVATE)
         val json = saved.getString("trip", null) ?: return
         val trip = runCatching { com.google.gson.Gson().fromJson(json, TrackedTrip::class.java) }.getOrNull()
@@ -135,15 +148,26 @@ object TripTracking {
             saved.edit().clear().apply()
             return
         }
-        runCatching { start(context, trip) }.onFailure { _active.value = null }
+        runCatching { start(context, trip, now = true) }.onFailure { _active.value = null }
     }
 
     private const val RESUME_PREFS = "trip_resume"
     private const val RESUME_MAX_MS = 6 * 60 * 60 * 1000L
 
-    fun start(context: Context, trip: TrackedTrip) {
+    /** Follows [trip]; one leaving later than the lead time is only planned until then, unless [now] (EM-0054). */
+    fun start(context: Context, trip: TrackedTrip, now: Boolean = false) {
+        val at = if (now) null else FollowLater.startAt(context, trip)
+        if (at != null) {
+            FollowLater.plan(context, trip, at)
+            // A bus followed live until now ends; set(null) then keeps the planned one.
+            if (_view.value != null) runCatching { context.startService(Intent(context, TripTrackerService::class.java).setAction(TripTrackerService.ACTION_STOP)) }
+            _active.value = trip
+            refreshWidget(context)
+            return
+        }
         _active.value = trip
         ContextCompat.startForegroundService(context, TripTrackerService.intent(context, trip))
+        FollowLater.cancel(context)
     }
 
     /**
@@ -152,7 +176,7 @@ object TripTracking {
      * or Android won't deliver the rider's GPS once the screen goes off.
      */
     fun refresh(context: Context) {
-        _active.value?.let { start(context, it) }
+        if (FollowLater.planned.value == null) _active.value?.let { start(context, it, now = true) }
     }
 
     /**
@@ -160,13 +184,13 @@ object TripTracking {
      * alarm or a restart), add it now, while Android allows it. Nothing else is restarted.
      */
     fun promote(context: Context) {
-        if (_active.value == null) return
+        if (_active.value == null || FollowLater.planned.value != null) return
         runCatching { context.startService(Intent(context, TripTrackerService::class.java).setAction(TripTrackerService.ACTION_PROMOTE)) }
     }
 
     fun setAlightStop(context: Context, order: Int?) {
         val current = _active.value ?: return
-        start(context, current.copy(alightOrder = order))
+        start(context, current.copy(alightOrder = order), now = FollowLater.planned.value == null)
     }
 
     /** A journey the user is putting together bus by bus (when the planner finds no connection). */
@@ -189,8 +213,11 @@ object TripTracking {
     fun showHandled() { _showRequested.value = false }
 
     fun stop(context: Context) {
+        val planned = FollowLater.planned.value != null
+        FollowLater.cancel(context)
         _active.value = null
-        context.startService(Intent(context, TripTrackerService::class.java).setAction(TripTrackerService.ACTION_STOP))
+        if (planned && _view.value == null) { set(context, null); return }
+        runCatching { context.startService(Intent(context, TripTrackerService::class.java).setAction(TripTrackerService.ACTION_STOP)) }
     }
 }
 
@@ -225,6 +252,8 @@ class TripTrackerService : Service() {
     private var nextFixAt = 0L
     private var stopPass = StopPassDetector()
     private var lastArrivalStop = -1
+    /** EM-0059: the stop the rider's phone is standing at now (automatic mode), -1 when moving or not at one. */
+    private var standingAt = -1
 
     // Automatic mode: the rider's phone on the bus marks where it is (only the stop is sent).
     private var riderListener: android.location.LocationListener? = null
@@ -505,6 +534,7 @@ class TripTrackerService : Service() {
         val atStop = coords.getOrNull(nearest)?.let { (lat, lon) ->
             LiveRepository.distanceMeters(fix.latitude, fix.longitude, lat, lon) <= STOP_RADIUS_M
         } == true
+        standingAt = if (!moving && atStop) nearest else -1
         // EM-0033: the rider stands at their stop after the bus was due, so it hasn't passed yet, whatever the
         // timetable says: keep it at the stop (late) and ask in the notification whether it's here or gone.
         val boardIdx = p.boardingIndex
@@ -596,7 +626,7 @@ class TripTrackerService : Service() {
 
     private fun redraw(current: TrackedTrip, raw: TripDetail) {
         val detail = withLocalDelay(raw)
-        val progress = TripProgress.from(detail, current)
+        val progress = TripProgress.from(detail, current, standingAt = standingAt.takeIf { it >= 0 })
         show(current, detail, progress, catchLine(detail, progress))
     }
 
@@ -743,14 +773,14 @@ class TripTrackerService : Service() {
                 }
             } else {
                 failures = 0
-                var progress = TripProgress.from(detail, current)
+                var progress = TripProgress.from(detail, current, standingAt = standingAt.takeIf { it >= 0 })
                 if (progress.finished && current.nextLegs.isNotEmpty() && stillOnBoard(progress)) {
                     // EM-0040: by the clock the bus is at the change stop, but the rider's phone is still on it before
                     // there: it is late. Keep following it, as late as where the rider is.
                     localDelay = RoutePosition.delayAt(lastRiderIndex, detail.stops.map { it.scheduledMs }, System.currentTimeMillis()) to System.currentTimeMillis()
                     localFromGps = true
                     detail = withLocalDelay(detail)
-                    progress = TripProgress.from(detail, current)
+                    progress = TripProgress.from(detail, current, standingAt = standingAt.takeIf { it >= 0 })
                 }
                 if (progress.finished || riderOffAt >= (progress.alightIndex ?: detail.stops.lastIndex)) {
                     val next = current.nextLegs.firstOrNull()
@@ -1177,7 +1207,15 @@ data class TripProgress(
     val nextIndex: Int = 0
 ) {
     companion object {
-        fun from(detail: TripDetail, trip: TrackedTrip, now: Long = System.currentTimeMillis()): TripProgress {
+        /** How long before it is due the bus counts as at a stop (arriving, or standing at it). */
+        private const val AT_STOP_LEAD_MS = 60_000L
+
+        /**
+         * [standingAt]: the stop the rider's phone stands at right now (automatic mode), if any. It and the clock (from a
+         * minute before the bus is due) make a stop "now" while the bus is at it; before EM-0059 the stop before stayed
+         * "now" until the bus had left, so a rider at Štadlerovo read "Now: Rákoš".
+         */
+        fun from(detail: TripDetail, trip: TrackedTrip, now: Long = System.currentTimeMillis(), standingAt: Int? = null): TripProgress {
             val stops = detail.stops
             val delayMs = (detail.delaySeconds ?: 0) * 1000L
             val expected = stops.map { it.actualMs ?: (it.scheduledMs + delayMs) }
@@ -1202,7 +1240,11 @@ data class TripProgress(
                 }
             }
             val boardingMs = boardingIndex?.let { expected[it] } ?: 0L
-            val nextMs = expected.getOrNull(nextIndex) ?: expected.lastOrNull() ?: now
+            // The stop the bus is at (only for the "now" and "next" names; alerts keep going by nextIndex).
+            val atIndex = standingAt?.takeIf { it in stops.indices && it >= nextIndex - 1 }
+                ?: nextIndex.takeIf { it < stops.size && now >= expected[it] - AT_STOP_LEAD_MS }
+            val shownNext = if (atIndex != null) atIndex + 1 else nextIndex
+            val nextMs = expected.getOrNull(shownNext) ?: expected.lastOrNull() ?: now
             return TripProgress(
                 onBoard = onBoard,
                 finished = finished,
@@ -1211,8 +1253,8 @@ data class TripProgress(
                 boardingStopName = boardingIndex?.let { stops[it].name }.orEmpty(),
                 boardingExpectedMs = boardingMs,
                 secondsToBoarding = ((boardingMs - now) / 1000L).toInt(),
-                currentStopName = stops.getOrNull(nextIndex - 1)?.name,
-                nextStopName = stops.getOrNull(nextIndex)?.name,
+                currentStopName = stops.getOrNull(atIndex ?: (nextIndex - 1))?.name,
+                nextStopName = stops.getOrNull(shownNext)?.name,
                 nextExpectedMs = nextMs,
                 secondsToNext = ((nextMs - now) / 1000L).toInt().coerceAtLeast(0),
                 alightIndex = alightIndex,

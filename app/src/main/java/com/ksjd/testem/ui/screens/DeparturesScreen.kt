@@ -552,9 +552,18 @@ fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit, onPickAlight: (Int?) 
                 title = stringResource(R.string.trip_unavailable_title),
                 body = stringResource(R.string.trip_unavailable_body)
             )
-            else -> TripTimeline(
+            else -> Column {
+            // EM-0062: S.A.D.'s own list of this bus leaves stops out (line 1 to Zeleznicna stanica: stops 1-3, then 12).
+            if (!trip.detail.fromTimetable && !trip.ref.isScheduleOnly &&
+                trip.detail.stops.zipWithNext().any { (a, b) -> b.order - a.order > 1 }) {
+                Notice(stringResource(R.string.trip_stops_missing), modifier = Modifier.padding(bottom = 8.dp))
+            }
+            TripTimeline(
                 stops = trip.detail.stops,
                 delaySeconds = trip.detail.delaySeconds,
+                // EM-0057: where you get on is marked too (the timetable says it, or the platform the board was opened at).
+                boardOrder = trip.detail.boardingOrder ?: (if (following) tracked?.boardingPlatformIds else trip.boardingPlatformIds)
+                    ?.takeIf { it.isNotEmpty() }?.let { ids -> trip.detail.stops.firstOrNull { it.platformId in ids }?.order },
                 alightOrder = alight,
                 onStopClick = if (following) {
                     { order -> TripTracking.setAlightStop(context, order.takeIf { it != tracked?.alightOrder }) }
@@ -563,6 +572,7 @@ fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit, onPickAlight: (Int?) 
                     { order -> onPickAlight(order.takeIf { it != trip.alightOrder }) }
                 }
             )
+            }
         }
     }
 }
@@ -571,6 +581,7 @@ fun TripSheet(trip: TripSheetState, onDismiss: () -> Unit, onPickAlight: (Int?) 
 private fun TripTimeline(
     stops: List<com.ksjd.testem.live.TripStop>,
     delaySeconds: Int?,
+    boardOrder: Int?,
     alightOrder: Int?,
     onStopClick: ((Int) -> Unit)?
 ) {
@@ -596,12 +607,19 @@ private fun TripTimeline(
             val passed = index < nextIndex
             val expectedMs = if (stop.actualMs != null || delaySeconds != null) expected[index] else null
             val isAlight = stop.order == alightOrder
+            val isBoard = !isAlight && stop.order == boardOrder
             Row(
                 Modifier
                     .fillMaxWidth()
                     .height(IntrinsicRowHeight)
                     .then(if (onStopClick != null && !passed) Modifier.clickable { onStopClick(stop.order) } else Modifier)
-                    .then(if (isAlight) Modifier.background(MaterialTheme.colorScheme.primaryContainer) else Modifier),
+                    .then(
+                        when {
+                            isAlight -> Modifier.background(MaterialTheme.colorScheme.primaryContainer)
+                            isBoard -> Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
+                            else -> Modifier
+                        }
+                    ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Rail with a stop marker; passed stops are drawn in the brand colour.
@@ -633,13 +651,16 @@ private fun TripTimeline(
                 Column(Modifier.weight(1f)) {
                     Text(
                         stop.name,
-                        style = if (isNext || isAlight) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
+                        style = if (isNext || isAlight || isBoard) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
                         color = if (passed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     if (isAlight) {
                         Text(stringResource(R.string.track_your_stop), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    }
+                    if (isBoard) {
+                        Text(stringResource(R.string.track_board_stop), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     }
                     if (stop.platform.isNotBlank()) {
                         Text(
@@ -677,7 +698,10 @@ private fun FollowControls(trip: TripSheetState) {
     val following = tracked?.ref == trip.ref
     var denied by remember { mutableStateOf(false) }
     val haptic = rememberHaptic()
-    val start = { haptic(Haptics.CONFIRM); TripTracking.start(context, TrackedTrip(trip.ref, trip.boardingPlatformIds, trip.alightOrder)) }
+    val start = {
+        haptic(Haptics.CONFIRM)
+        TripTracking.start(context, trip.detail?.let { com.ksjd.testem.live.draftLeg(trip, it).trip } ?: TrackedTrip(trip.ref, trip.boardingPlatformIds, trip.alightOrder))
+    }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         denied = !granted
         if (granted) start()
@@ -766,12 +790,15 @@ internal fun JourneyDraftBar(modifier: Modifier = Modifier) {
     if (draft.isEmpty()) return
     val connection = app.draftConnection(draft)
     val saved = connection != null && timetable.savedJourneys.any { it.sameAs(connection) }
+    // EM-0066: a tap on "My journey" lists its buses (times and stops).
+    var open by remember { mutableStateOf(false) }
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+      Column {
         Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 stringResource(R.string.journey_draft, draft.joinToString(" → ") { it.trip.ref.line }),
                 style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f).clickable { open = !open }.padding(vertical = 8.dp)
             )
             // Like a planner result: star it for the home tab, or make it a regular ride.
             IconButton(onClick = { app.toggleSaveDraft(draft) }, enabled = connection != null) {
@@ -793,5 +820,15 @@ internal fun JourneyDraftBar(modifier: Modifier = Modifier) {
                 }
             }) { Text(stringResource(R.string.journey_start)) }
         }
+        if (open) {
+            draft.mapNotNull { it.segment }.forEach { s ->
+                Text(
+                    "${s.line.trim().substringAfterLast(' ')}  ${s.departureTime} ${s.departureStop} → ${s.arrivalTime} ${s.arrivalStop}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
+                )
+            }
+        }
+      }
     }
 }

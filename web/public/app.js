@@ -25,11 +25,12 @@ const s = {
 
 /** Built-in themes, as in the Android app (ThemePreset.kt): a main colour plus single colours for parts of the app. */
 const PRESETS = [
+  // First = the default: Zastávka blue with the slate bar riders asked for (EM-0052, EM-0056).
+  { id: 'stop', name: 'Zastávka', color: '#1D4FB8', roles: { bar: '#1F2935' } },
   { id: 'planride', name: 'Plan&Ride', color: '#157A38', roles: { background: '#F2F5F3', highlight: '#157A38', bar: '#14181D' } },
   { id: 'sage', name: 'Sage', color: '#157A38', roles: { background: '#E2ECE4', highlight: '#0B3D1C', bar: '#157A38', plate: '#0B3D1C' } },
   { id: 'darkgreen', name: 'Dark green', color: '#157A38', roles: { background: '#0F1D17', cards: '#172A21', highlight: '#157A38', bar: '#6EE7A8', plate: '#2A4A3A' } },
   { id: 'inkmint', name: 'Ink & mint', color: '#157A38', roles: { background: '#FFFFFF', cards: '#EEF3F0', highlight: '#14181D', bar: '#14181D' } },
-  { id: 'stop', name: 'Zastávka', color: '#1D4FB8', roles: {} },
   { id: 'ocean', name: 'Ocean', color: '#136F63', roles: {} },
 ];
 /** Every colour a rider can set, in the order Appearance lists them ("primary" is the accent). */
@@ -45,8 +46,8 @@ const onColor = (hex) => (luminance(hex) > 0.45 ? '#14181D' : '#FFFFFF');
 
 /** The selected theme with the rider's own changes to it: { id, accent, roles }. */
 function currentTheme() {
-  let id = store.get('themeId', 'planride');
-  if (id === 'sunset') id = 'planride';
+  let id = store.get('themeId', 'stop');
+  if (id === 'sunset') id = 'stop';
   const own = (store.get('themeRoles', {}) || {})[id] || {};
   if (id === 'custom') return { id, accent: store.get('themeColor', '#157A38'), roles: own };
   const preset = PRESETS.find((x) => x.id === id) || PRESETS[0];
@@ -582,6 +583,7 @@ function renderTicket(el) {
     ${hasIds() ? `<div class="pass" data-pass="ids">${lip('ids')}${idsPassHtml()}</div>` : ''}
     </div>`}
     <div id="follow-slot-ticket"></div>
+    <div data-journey-bar></div>
     <div id="journeys">${journeysHtml()}</div>
     <div id="rides-next">${ridesHtml()}</div>
     <div id="preview"></div>
@@ -625,6 +627,7 @@ function renderTicket(el) {
     };
   }
   live.renderFollowSlot($('#follow-slot-ticket', el));
+  live.renderJourneyBar($('[data-journey-bar]', el));
   renderPreview();
 }
 

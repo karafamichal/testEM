@@ -438,6 +438,9 @@ async function openBusMap(ref, detail, alightOrder) {
     const n = 256 * 2 ** z, r = (lat * Math.PI) / 180;
     return [((lon + 180) / 360) * n, ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n];
   };
+  // EM-0064: the roads between the stops, as drawn or snapped in emHUB (a hop without one stays straight).
+  const roads = await apiJson('/api/live/path?stops=' + encodeURIComponent(stops.map((x) => `${x.lat.toFixed(6)},${x.lon.toFixed(6)}`).join(';')))
+    .catch(() => []);
   const lats = stops.map((x) => x.lat), lons = stops.map((x) => x.lon);
   let z = 17;
   while (z > 8) {
@@ -458,9 +461,10 @@ async function openBusMap(ref, detail, alightOrder) {
     const p = tripProgress(full, { boardingPlatformIds: [], alightOrder });
     const at = stops.map((x) => px(x.lat, x.lon, z)).map(([x, y]) => [x - ox, y - oy]);
     const pos = Math.min(p.position, stops.length - 1), i = Math.floor(pos), f = pos - i, j = Math.min(i + 1, stops.length - 1);
-    const bus = [at[i][0] + (at[j][0] - at[i][0]) * f, at[i][1] + (at[j][1] - at[i][1]) * f];
+    const road = (k) => (roads[k] || []).map(([lat, lon]) => px(lat, lon, z)).map(([x, y]) => [x - ox, y - oy]);
+    const bus = along([at[i], ...(j > i ? road(i) : []), at[j]], f);
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    svg.innerHTML = `<polyline points="${at.map((q) => q.join(',')).join(' ')}" />
+    svg.innerHTML = `<polyline points="${at.flatMap((q, k) => [q, ...road(k)]).map((q) => q.join(',')).join(' ')}" />
       ${at.map((q, k) => `<circle class="${k <= pos ? 'passed' : ''} ${stops[k].order === alightOrder ? 'alight' : ''}" cx="${q[0]}" cy="${q[1]}" r="${stops[k].order === alightOrder ? 8 : 5}"><title>${esc(stops[k].name)}</title></circle>`).join('')}
       <g class="bus" transform="translate(${bus[0]},${bus[1]})"><circle r="14"/><text y="5">${esc(ref.line)}</text></g>
       ${people().map(([name, q]) => { const [x, y] = px(q.lat, q.lon, z); return `<g class="person" transform="translate(${x - ox},${y - oy})"><circle r="9"/><text y="-14">${esc(name)}</text></g>`; }).join('')}`;
@@ -496,6 +500,20 @@ async function openBusMap(ref, detail, alightOrder) {
   const timer = setInterval(() => (document.body.contains(box) ? draw() : clearInterval(timer)), 15000);
 }
 
+/** The point a fraction f of the way along a path of [x, y], by length. */
+function along(path, f) {
+  const lengths = path.slice(1).map((q, k) => Math.hypot(q[0] - path[k][0], q[1] - path[k][1]));
+  let left = lengths.reduce((a, b) => a + b, 0) * f;
+  for (let k = 0; k < lengths.length; k++) {
+    if (left <= lengths[k] && lengths[k] > 0) {
+      const t2 = left / lengths[k];
+      return [path[k][0] + (path[k + 1][0] - path[k][0]) * t2, path[k][1] + (path[k + 1][1] - path[k][1]) * t2];
+    }
+    left -= lengths[k];
+  }
+  return path[path.length - 1];
+}
+
 function renderTripSheet(body = $('#sheet .sheet-body')) {
   if (!body || !sheetTrip) return;
   const s = sheetTrip;
@@ -511,13 +529,15 @@ function renderTripSheet(body = $('#sheet .sheet-body')) {
   else if (s.error || !detail?.stops?.length) timeline = `<div class="empty"><p>${t('trip_unavailable')}</p></div>`;
   else {
     const p = tripProgress(detail, { boardingPlatformIds: s.boardingPlatformIds, alightOrder: alight });
+    // EM-0057: where you get on is marked too (the timetable says it, or the platform the board was opened at).
+    const board = detail.boardingOrder ?? detail.stops.find((x) => (s.boardingPlatformIds || []).includes(x.platformId))?.order;
     timeline = `<ol class="timeline">${detail.stops.map((stop, i) => {
-      const passed = i < p.nextIndex, next = i === p.nextIndex, isAlight = stop.order === alight;
+      const passed = i < p.nextIndex, next = i === p.nextIndex, isAlight = stop.order === alight, isBoard = !isAlight && stop.order === board;
       const exp = p.expected[i];
       const shift = (stop.actualMs != null || detail.delaySeconds != null) && clock(exp) !== clock(stop.scheduledMs);
-      return `<li class="${passed ? 'passed' : ''} ${next ? 'next' : ''} ${isAlight ? 'alight' : ''}">
+      return `<li class="${passed ? 'passed' : ''} ${next ? 'next' : ''} ${isAlight ? 'alight' : ''} ${isBoard ? 'board' : ''}">
         <button ${!passed ? `data-alight="${stop.order}"` : 'disabled'}>
-          <span class="dot"></span><span class="stop-name">${esc(stop.name)}${isAlight ? `<small>${t('your_stop')}</small>` : ''}${stop.platform ? `<small class="stop-pf">${esc(t('platform', stop.platform))}</small>` : ''}</span>
+          <span class="dot"></span><span class="stop-name">${esc(stop.name)}${isAlight ? `<small>${t('your_stop')}</small>` : ''}${isBoard ? `<small>${t('your_board')}</small>` : ''}${stop.platform ? `<small class="stop-pf">${esc(t('platform', stop.platform))}</small>` : ''}</span>
           <span class="stop-time">${shift ? `<s>${clock(stop.scheduledMs)}</s>${clock(exp)}` : clock(stop.scheduledMs)}</span></button></li>`;
     }).join('')}</ol>`;
   }
@@ -540,7 +560,7 @@ function renderTripSheet(body = $('#sheet .sheet-body')) {
     if (e.target.closest('[data-unfollow]')) stopFollow();
     if (e.target.closest('[data-map]')) return openBusMap(s.ref, detail, alight);
     if (e.target.closest('[data-share]')) return shareTrip({ ref: s.ref, boardingPlatformIds: following ? follow.boardingPlatformIds : s.boardingPlatformIds, alightOrder: alight }, detail?.destination || s.ref.destination);
-    if (e.target.closest('[data-add-journey]')) addToDraft({ ref: s.ref, boardingPlatformIds: s.boardingPlatformIds, alightOrder: s.alightOrder });
+    if (e.target.closest('[data-add-journey]')) addToDraft({ ref: s.ref, boardingPlatformIds: s.boardingPlatformIds, alightOrder: s.alightOrder, ...legStops(s, detail, alight) });
     const a = e.target.closest('[data-alight]');
     if (a && following) setAlight(Number(a.dataset.alight));
     else if (a) s.alightOrder = s.alightOrder === Number(a.dataset.alight) ? null : Number(a.dataset.alight);
@@ -575,6 +595,17 @@ let draft = store.get('journeyDraft', []); // [{ ref, boardingPlatformIds, aligh
 function setDraft(list) { draft = list; store.set('journeyDraft', list); renderJourneyBars(); }
 function addToDraft(leg) { setDraft([...draft.filter((x) => !sameRef(x.ref, leg.ref)), leg]); }
 
+/** Where the user gets on and off an opened bus and when, for the journey's list (EM-0066, EM-0067). */
+function legStops(s, detail, alight) {
+  const stops = detail?.stops || [];
+  if (stops.length < 2) return {};
+  let b = stops.findIndex((x) => (detail.boardingOrder != null ? x.order === detail.boardingOrder : (s.boardingPlatformIds || []).includes(x.platformId)));
+  if (b < 0) b = 0;
+  let a = stops.findIndex((x) => x.order === (alight ?? detail.alightOrder));
+  if (a <= b) a = stops.length - 1;
+  return { fromStop: stops[b].name, toStop: stops[a].name, leaves: clock(stops[b].scheduledMs), arrives: clock(stops[a].scheduledMs) };
+}
+
 /** Follows [legs] as one journey: each bus until the user's stop, then the next one. */
 export function startJourney(legs) {
   if (!legs.length) return;
@@ -584,8 +615,16 @@ export function startJourney(legs) {
 
 function journeyBarHtml() {
   if (!draft.length) return '';
-  return `<div class="journey-bar"><span>${esc(t('journey_draft', draft.map((l) => l.ref.line).join(' → ')))}</span>
+  const legs = draft.filter((l) => l.fromStop).map((l) => `<li>${esc(`${l.ref.line}  ${l.leaves} ${l.fromStop} → ${l.arrives} ${l.toStop}`)}</li>`).join('');
+  return `<div class="journey-bar"><details><summary>${esc(t('journey_draft', draft.map((l) => l.ref.line).join(' → ')))}</summary>
+    ${legs ? `<ul class="hint small">${legs}</ul>` : ''}</details>
     <button class="text-btn" data-journey-clear>${t('journey_clear')}</button><button class="btn" data-journey-start>${t('journey_start')}</button></div>`;
+}
+/** The journey being put together, on Home too (EM-0066). */
+export function renderJourneyBar(el) {
+  if (!el) return;
+  el.innerHTML = journeyBarHtml();
+  bindJourneyBar(el);
 }
 function bindJourneyBar(el) {
   if (!el) return;
@@ -598,7 +637,7 @@ function renderJourneyBars() {
   document.querySelectorAll('#journey-bar-dep, [data-journey-bar]').forEach((el) => { el.innerHTML = journeyBarHtml(); bindJourneyBar(el); });
 }
 
-export function startFollow({ ref, boardingPlatformIds, alightOrder, detail, nextLegs = [] }) {
+export function startFollow({ ref, boardingPlatformIds, alightOrder, detail, nextLegs = [], toStop = null, arrives = null }) {
   if (follow?.pushId) api('/api/unfollow', { id: follow.pushId });
   stopPass = stopPassDetector();
   lastArrivalStop = -1;
@@ -606,7 +645,7 @@ export function startFollow({ ref, boardingPlatformIds, alightOrder, detail, nex
   lastRiderReportAt = 0;
   lastRiderIndex = -1;
   follow = {
-    ref, boardingPlatformIds, alightOrder, detail, nextLegs,
+    ref, boardingPlatformIds, alightOrder, detail, nextLegs, toStop, arrives,
     // New random id per bus, so reports can't be linked across trips. (randomUUID is missing on older iOS.)
     reporter: [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join(''),
     localDelay: null, pushId: null, startedAt: Date.now(), note: '',
@@ -960,6 +999,10 @@ function followCardHtml() {
     <div class="follow-top">${plate(f.ref.line)}<span class="follow-dest">${esc(d.destination)}</span><strong class="follow-big">${esc(big)}</strong></div>
     <p class="follow-title">${esc(title)}</p>
     ${sub ? `<p class="follow-sub">${esc(sub)}</p>` : ''}
+    ${f.nextLegs?.length ? `<ul class="follow-legs">${[
+      f.toStop && f.arrives ? `<li><strong>${esc(t('journey_get_off', f.toStop, f.arrives))}</strong></li>` : '',
+      ...f.nextLegs.map((l) => `<li>${esc(t('journey_next_leg', l.ref.line, [l.leaves && `${l.leaves} ${l.fromStop || ''}`.trim(), l.toStop && `${l.toStop} ${l.arrives || ''}`.trim()].filter(Boolean).join(' → ')))}</li>`),
+    ].join('')}</ul>` : ''}
     <div class="follow-delay">${delay}</div>
     ${catchLine(d, p)}
     ${progressTrack(d, p)}

@@ -332,6 +332,22 @@ fun ArrivalAlertSetting() {
             }
         )
     }
+    // EM-0054: a bus followed long before it leaves gets its live notification only this long before.
+    var lead by remember { mutableStateOf(prefs.getFollowLeadMinutes()) }
+    SectionLabel(stringResource(R.string.follow_lead_title))
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.follow_lead_label), style = MaterialTheme.typography.bodyMedium)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(15, 30, 60, 120).forEach { m ->
+                FilterChip(
+                    selected = lead == m,
+                    onClick = { lead = m; prefs.saveFollowLeadMinutes(m) },
+                    label = { Text(stringResource(R.string.arrival_alert_minutes, m)) },
+                    leadingIcon = if (lead == m) ({ Icon(Icons.Outlined.Check, null, Modifier.size(18.dp)) }) else null
+                )
+            }
+        }
+    }
     SectionLabel(stringResource(R.string.arrival_alert_title))
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.arrival_alert_label), style = MaterialTheme.typography.bodyMedium)
@@ -430,8 +446,15 @@ fun BugReportForm(viewModel: AppViewModel, onDone: () -> Unit, feature: Boolean 
     // Signed-in users get their name and email filled in; they can change or clear both.
     // Only while unlocked: the name and email belong to the protected account.
     val known = app.anyAccount && app.isAppUnlocked
-    var name by rememberSaveable { mutableStateOf(draft?.name ?: if (known) ticket.userName else "") }
-    var email by rememberSaveable { mutableStateOf(draft?.email ?: if (known) app.contactEmail else "") }  // the primary account's (EM-0037)
+    var name by rememberSaveable { mutableStateOf(draft?.name.orEmpty()) }
+    var email by rememberSaveable { mutableStateOf(draft?.email.orEmpty()) }  // the primary account's (EM-0037)
+    // EM-0058: filled in whenever the app is (or gets) unlocked and the field is still empty, also for a draft
+    // started while locked; what the rider typed is kept.
+    LaunchedEffect(known, ticket.userName, app.contactEmail) {
+        if (!known) return@LaunchedEffect
+        if (name.isBlank()) name = ticket.userName
+        if (email.isBlank()) email = app.contactEmail
+    }
     // A suggestion needs no logs.
     var attachLogs by rememberSaveable { mutableStateOf(draft?.attachLogs ?: !feature) }
     var showLogs by rememberSaveable { mutableStateOf(false) }

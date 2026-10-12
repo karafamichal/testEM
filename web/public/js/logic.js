@@ -15,12 +15,18 @@ export const readableStop = (name) =>
  * bus by its timetable trip link, which knows the user's stops itself.
  */
 export function plannerLeg(segment) {
+  const stops = { fromStop: readableStop(segment.departureStop), toStop: readableStop(segment.arrivalStop),
+    leaves: segment.departureTime || '', arrives: segment.arrivalTime || '' };
+  return { ...plannerLegOf(segment), ...stops };
+}
+
+function plannerLegOf(segment) {
   const url = String(segment.routeUrl || '');
   if (url.startsWith('sadzv:trip?')) {
     const q = new URLSearchParams(url.slice('sadzv:trip?'.length));
     // sadzv only knows today's run: a city bus on another day comes from the timetable, with that day's times.
     if (q.get('tt') && segment.serviceDate && segment.serviceDate !== isoDate(todayLocal())) {
-      return plannerLeg({ ...segment, routeUrl: q.get('tt') });
+      return plannerLegOf({ ...segment, routeUrl: q.get('tt') });
     }
     const n = (k) => Number(q.get(k)) || 0;
     return {
@@ -104,8 +110,9 @@ export function snapToRoute(lat, lon, coords, maxMeters, expectedIndex = null) {
     const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
     const t = len2 === 0 ? 0 : Math.min(1, Math.max(0, -(ax * dx + ay * dy) / len2));
     const d = Math.hypot(ax + t * dx, ay + t * dy);
-    // Roads bend away from the straight line between stops km apart: allow 10 % of the hop.
-    if (d > Math.max(maxMeters, Math.sqrt(len2) * 0.1)) continue;
+    // Roads bend away from the straight line between stops km apart: allow 10 % of the hop, but only beside it
+    // (EM-0063: 1.5 km past a stop counted as standing at it).
+    if (d > (t > 0 && t < 1 ? Math.max(maxMeters, Math.sqrt(len2) * 0.1) : maxMeters)) continue;
     const index = i + t;
     const cost = d + (expectedIndex == null ? 0 : Math.max(0, Math.abs(index - expectedIndex) - 2) * 150);
     if (!best || cost < best.cost) best = { index, meters: d, cost };
@@ -167,7 +174,11 @@ export function tripProgress(detail, trip, now = Date.now()) {
     position = nextIndex - 1 + fraction;
   }
   const boardingMs = boardingIndex != null ? expected[boardingIndex] : 0;
-  const nextMs = expected[nextIndex] ?? expected[expected.length - 1] ?? now;
+  // EM-0059: from a minute before the bus is due at a stop, that stop is "now" and the one after it "next" (only the
+  // names; alerts keep going by nextIndex). Before, the stop before stayed "now" until the bus had left.
+  const atIndex = nextIndex < stops.length && now >= expected[nextIndex] - 60000 ? nextIndex : null;
+  const shownNext = atIndex != null ? atIndex + 1 : nextIndex;
+  const nextMs = expected[shownNext] ?? expected[expected.length - 1] ?? now;
   return {
     onBoard,
     finished: nextIndex > endIndex,
@@ -177,8 +188,8 @@ export function tripProgress(detail, trip, now = Date.now()) {
     boardingStopName: boardingIndex != null ? stops[boardingIndex].name : '',
     boardingExpectedMs: boardingMs,
     secondsToBoarding: Math.trunc((boardingMs - now) / 1000),
-    currentStopName: stops[nextIndex - 1]?.name ?? null,
-    nextStopName: stops[nextIndex]?.name ?? null,
+    currentStopName: stops[atIndex ?? nextIndex - 1]?.name ?? null,
+    nextStopName: stops[shownNext]?.name ?? null,
     nextExpectedMs: nextMs,
     secondsToNext: Math.max(0, Math.trunc((nextMs - now) / 1000)),
     alightIndex,

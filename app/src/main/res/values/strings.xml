@@ -539,7 +539,7 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="feature_sent_title">Suggestion %1$s sent</string>
     <string name="feature_sent_body">Thanks for the idea. If you left an email, we’ll write when there’s news.</string>
     <!-- Update for every release (shown once after updating, when the user opted in). -->
-    <string name="whats_new_body">• A new look: Plan&amp;Ride green, a new P&amp;R icon and a floating bar at the bottom that grows to show where you are.\n• Departures has a clock and the planner a bus, so they are easy to tell apart.\n• Home shows your favourite stop\'s next buses as cards under the ticket.\n• Change every colour: themes Plan&amp;Ride, Sage, Dark green and Ink &amp; mint, and each part of the app in Account → Appearance.\n• Delays: on time stays calm, small delays orange, 5 minutes or more red.</string>
+    <string name="whats_new_body">• Blue is back: Zastávka is the default theme again, with a slate bottom bar and a blue P&amp;R icon (EM-0056). The green themes stay in Account → Appearance.\n• The bottom bar always fits the screen; opening a tab no longer squeezes the last icon (EM-0052).\n• The followed bus on Home has a softly moving background in your theme\'s colour.\n• Follow the whole journey: the button now shows when the journey is followed, and stops it with a tap (EM-0055).\n• A bus\'s stops show where you get on, not only where you get off (EM-0057).\n• Reporting a bug: your name and email are filled in once the app is unlocked, also for a report you started while it was locked (EM-0058).\n• Following a bus: when it reaches a stop, the notification says you\'re at that stop, not at the one before (EM-0059).</string>
     <string name="topup_button">Add credit</string>
     <string name="topup_title">Add credit to your card</string>
     <string name="topup_card">Card %1$s · credit now %2$s</string>
@@ -686,4 +686,29 @@ On the next screen, choose “Allow all the time”.</string>
     <string name="color_role_reset">Back to the theme\'s colour</string>
     <string name="theme_reset">Reset this theme</string>
     <string name="home_all_departures">All</string>
+    <string name="journey_following">Following this journey</string>
+    <string name="journey_following_stop">Stop</string>
+    <string name="track_board_stop">You get on here</string>
+    <string name="watch_install_title">Plan&amp;Ride on your watch</string>
+    <string name="watch_install_body">Your watch doesn\'t have Plan&amp;Ride yet. Open it in the Play Store on the watch and tap Install.</string>
+    <string name="watch_install_button">Open on watch</string>
+    <string name="watch_install_later">Not now</string>
+    <string name="watch_install_sent">Look at your watch: Plan&amp;Ride is open in the Play Store there.</string>
+    <string name="watch_install_failed">The watch didn\'t respond. Open the Play Store on the watch and search for Plan&amp;Ride.</string>
+    <string name="planner_arrive_by">Arrive by</string>
+    <string name="planner_arrive_at_time">There by %1$s</string>
+    <string name="follow_planned_channel">Followed buses later on</string>
+    <string name="follow_planned_title">Following line %1$s at %2$s</string>
+    <string name="follow_planned_tomorrow">tomorrow %1$s</string>
+    <string name="follow_planned_body">→ %1$s · live from %2$s</string>
+    <string name="follow_planned_due">Your bus leaves soon. Tap to follow it live.</string>
+    <string name="follow_planned_card">Leaves at %1$s</string>
+    <string name="follow_planned_card_live">Followed live from %1$s</string>
+    <string name="follow_lead_title">Following a later bus</string>
+    <string name="follow_lead_label">Show the live notification this long before it leaves</string>
+    <string name="trip_stops_missing">The operator data leaves out some stops of this bus, so fewer stops are shown than it really has.</string>
+    <string name="journey_get_off">Get off at %1$s, %2$s</string>
+    <string name="journey_next_leg">Then line %1$s: %2$s</string>
+    <string name="planner_nearest_stop">Nearest stop</string>
+    <string name="planner_no_stop_near">No stop found near you</string>
 </resources>

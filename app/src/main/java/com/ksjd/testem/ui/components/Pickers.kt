@@ -87,8 +87,9 @@ fun TimePickDialog(initial: LocalTime, onPick: (LocalTime) -> Unit, onDismiss: (
 @Composable
 fun DatePickDialog(initial: LocalDate, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit, earliest: LocalDate? = null) {
     val utc = { d: LocalDate -> d.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
+    // Never opened on a day it doesn't let you pick (EM-0069).
     val state = rememberDatePickerState(
-        initialSelectedDateMillis = utc(initial),
+        initialSelectedDateMillis = utc(if (earliest != null && initial.isBefore(earliest)) earliest else initial),
         selectableDates = object : SelectableDates {
             override fun isSelectableDate(utcTimeMillis: Long) = earliest == null || utcTimeMillis >= utc(earliest)
             override fun isSelectableYear(year: Int) = earliest == null || year >= earliest.year

@@ -19,6 +19,7 @@ import hmac
 import html
 import ipaddress
 import json
+import math
 import os
 import queue
 import re
@@ -47,7 +48,7 @@ from pathlib import Path
 import sadzv
 import timetable
 
-VERSION = "1.18.0"
+VERSION = "1.24.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -289,11 +290,34 @@ def clean_lines(value):
     return [one_line(x, 12) for x in items if one_line(x, 12)][:200]
 
 
+def clean_directions(p):
+    """
+    A place's or sub-station's directions [{"name", "lines", "towards"}]: which lines leave from it, and the towns they
+    head for (a bus that ends there or passes it later). One without directions keeps its lines as its only one.
+    """
+    out = []
+    for d in (p.get("directions") or [])[:20]:
+        lines = clean_lines(d.get("lines"))
+        # Towns or stops it heads for, separated by ";" (a stop's name has commas: "Zvolen, Západ").
+        towards = [one_line(x, 60) for x in (d.get("towards") if isinstance(d.get("towards"), list) else str(d.get("towards") or "").split(";"))]
+        towards = [x for x in towards if x][:30]
+        if lines or towards:
+            out.append({"name": one_line(d.get("name"), 60), "lines": lines, "towards": towards})
+    return out
+
+
+def platform_fields(p):
+    """Label, platform number, directions, and all their lines (what older apps and the map's tooltips read)."""
+    directions = clean_directions(p)
+    lines = list(dict.fromkeys(x for d in directions for x in d["lines"])) if directions else clean_lines(p.get("lines"))
+    return {"label": one_line(p.get("label"), 60), "platform": one_line(p.get("platform"), 12), "lines": lines, "directions": directions}
+
+
 def clean_place(p):
     lat, lon = float(p["lat"]), float(p["lon"])
     if not (47 < lat < 51 and 16 < lon < 23.5):
         raise ValueError("A place is outside Slovakia")
-    return {"label": one_line(p.get("label"), 60), "lat": round(lat, 6), "lon": round(lon, 6), "lines": clean_lines(p.get("lines"))}
+    return {"lat": round(lat, 6), "lon": round(lon, 6), **platform_fields(p)}
 
 
 def clean_zone(z):
@@ -310,16 +334,123 @@ def clean_zone(z):
 
 
 OSRM_URL = ENV("HUB_OSRM_URL", "https://router.project-osrm.org")
+# Valhalla's bus profile knows bus-only roads and lanes (a bus station's own exit), which OSRM's car profile doesn't:
+# it goes round the block instead. "off" leaves only OSRM.
+VALHALLA_URL = ENV("HUB_VALHALLA_URL", "https://valhalla1.openstreetmap.de")
 
 
-def snap_segment(a, b):
-    """The road between two points ([lat, lon] each) from OSRM, without its ends; None if it found none."""
+def polyline6(text):
+    """Valhalla's encoded shape: [[lat, lon]]."""
+    out, index, lat, lon = [], 0, 0, 0
+    while index < len(text):
+        for which in (0, 1):
+            shift = result = 0
+            while True:
+                c = ord(text[index]) - 63
+                index += 1
+                result |= (c & 0x1f) << shift
+                shift += 5
+                if c < 0x20:
+                    break
+            delta = ~(result >> 1) if result & 1 else result >> 1
+            if which == 0:
+                lat += delta
+            else:
+                lon += delta
+        out.append([round(lat / 1e6, 6), round(lon / 1e6, 6)])
+    return out
+
+
+def valhalla_route(a, b, curb=True):
+    """Like osrm_route, by bus. With `curb`, the bus leaves and arrives on the stop's side of the road."""
+    side = {"preferred_side": "same"} if curb else {}
+    body = {"locations": [{"lat": a[0], "lon": a[1], "type": "break", **side}, {"lat": b[0], "lon": b[1], "type": "break", **side}],
+            "costing": "bus", "directions_type": "none"}
+    trip = http_json(VALHALLA_URL.rstrip("/") + "/route", json.dumps(body).encode(), {"Content-Type": "application/json"}).get("trip") or {}
+    legs = trip.get("legs") or []
+    if not legs:
+        return None
+    return polyline6(legs[0]["shape"])[1:-1], float((legs[0].get("summary") or {}).get("length") or 0) * 1000
+
+
+def road(a, b, curb=True):
+    """The way by bus from Valhalla, else by car from OSRM: (points without the ends, metres) or None."""
+    if VALHALLA_URL != "off":
+        try:
+            route = valhalla_route(a, b, curb)
+            if route:
+                return route
+        except ProviderError:
+            pass  # e.g. too busy: OSRM instead
+    return osrm_route(a, b, curb)
+
+
+def osrm_route(a, b, curb=True):
+    """
+    The road from a to b ([lat, lon] each) from OSRM: (points without the ends, metres), or None. With `curb`, the bus
+    leaves and arrives on the kerb side of the road (the stop's side), so on a dual carriageway it starts on the right one.
+    """
     url = f"{OSRM_URL}/route/v1/driving/{a[1]},{a[0]};{b[1]},{b[0]}?overview=full&geometries=geojson"
-    route = (http_json(url).get("routes") or [None])[0]
+    route = (http_json(url + ("&approaches=curb;curb" if curb else "")).get("routes") or [None])[0]
     if not route:
         return None
     coords = [[round(lat, 6), round(lon, 6)] for lon, lat in route["geometry"]["coordinates"]]
-    return coords[1:-1]
+    return coords[1:-1], float(route.get("distance") or 0)
+
+
+def u_turns(points, window=20.0):
+    """How often a way turns back on itself (more than 120 degrees within about 20 m each side): a bus between two stops doesn't."""
+    run = [0.0]
+    for p, q in zip(points, points[1:]):
+        run.append(run[-1] + timetable.meters(p[0], p[1], q[0], q[1]))
+
+    def heading(a, b):
+        return math.atan2((b[1] - a[1]) * math.cos(math.radians(a[0])), b[0] - a[0])
+    count, i = 0, 1
+    while i < len(points) - 1:
+        a = max((k for k in range(i) if run[i] - run[k] >= window), default=0)
+        b = next((k for k in range(i + 1, len(points)) if run[k] - run[i] >= window), len(points) - 1)
+        if run[i] - run[a] >= 8 and run[b] - run[i] >= 8:
+            turn = abs((heading(points[i], points[b]) - heading(points[a], points[i]) + math.pi) % (2 * math.pi) - math.pi)
+            if turn > math.radians(120):
+                count, i = count + 1, b
+                continue
+        i += 1
+    return count
+
+
+def snap_segment(a, b, pause=1.0, other_ends=()):
+    """
+    The road between two stops (without its ends), or None. From the bus's own platform at a: leaving and arriving on
+    the kerb side, and the plain way. The kerb rule keeps a bus on its side of a dual carriageway, but where a stop's
+    point is on the other side it loops round to reach it (line 1, Partizanska cesta in Banska Bystrica). Each turn back
+    counts as 300 m; the kerb way wins a near tie. other_ends: b's other free spots; the one reached most directly wins
+    (the trip then stops there: Timetable.traced_spot). `pause`: the routing servers ask for one request a second.
+    """
+    tried = [(snap_one(a, end, pause), end) for end in [tuple(b), *map(tuple, other_ends)]]
+    tried = [(way, end) for way, end in tried if way]
+    if not tried:
+        return None
+    return min(tried, key=lambda x: x[0][1] + 300 * u_turns([tuple(a), *x[0][0], x[1]]))[0][0]
+
+
+def snap_one(a, b, pause):
+    """The best way from a to b: (points, metres), or None (no way, or a way three times the distance)."""
+    kerb = road(a, b)
+    time.sleep(pause)
+    plain = road(a, b, curb=False)
+    if not kerb or not plain:
+        kerb = plain = kerb or plain
+        if not kerb:
+            return None
+
+    def cost(route):
+        return route[1] + 300 * u_turns([tuple(a), *route[0], tuple(b)])
+    best = plain if cost(plain) < cost(kerb) * 0.9 - 50 else kerb
+    # A way three times the distance (4.8 km for 0.9 km into Zvolen AS) is the router lost, not the bus: none.
+    if best[1] > timetable.meters(a[0], a[1], b[0], b[1]) * 3 + 1000:
+        return None
+    return best
 
 
 # ------------------------------------------------------------------ settings
@@ -605,6 +736,50 @@ class WebSocket:
                 if isinstance(message, dict):
                     yield message
         self.open = False
+
+
+class MapRoom:
+    """
+    Everyone with the dashboard's map open, each over a WebSocket: who is on which stop or trip, and every edit pushed
+    to the others as it's saved. A stop someone else has open can't be saved (two people overwriting each other).
+    """
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.people = {}  # WebSocket -> {"name", "tab", "station", "trip"}
+
+    def join(self, ws, name, tab):
+        with self.lock:
+            self.people[ws] = {"name": name, "tab": tab, "station": None, "trip": None}
+
+    def leave(self, ws):
+        with self.lock:
+            self.people.pop(ws, None)
+
+    def focus(self, ws, station, trip):
+        with self.lock:
+            if ws in self.people:
+                self.people[ws].update(station=station, trip=trip)
+
+    def editors(self):
+        with self.lock:
+            return [dict(p) for p in self.people.values()]
+
+    def busy(self, station, tab):
+        """The name of someone else (another tab) who has the stop open, or None."""
+        with self.lock:
+            return next((p["name"] for p in self.people.values() if p["station"] == station and p["tab"] != tab), None)
+
+    def push(self, message, skip_tab=None):
+        with self.lock:
+            targets = [ws for ws, p in self.people.items() if p["tab"] != skip_tab]
+        for ws in targets:
+            ws.send_json(message)
+
+    def presence(self):
+        self.push({"type": "presence", "editors": self.editors()})
+
+
+map_room = MapRoom()
 
 
 def position_of(data):
@@ -984,9 +1159,13 @@ def trip_delay(conn, trip_key):
         (trip_key, now() - COMMUNITY_WINDOW_S),
     )]
     gps = [r for r in rows if r["kind"] in PHONE_KINDS and now() - r["created_at"] <= GPS_WINDOW_S]
-    result = aggregate_delay(gps or rows, now())
+    used = gps or rows
+    result = aggregate_delay(used, now())
     if result:
-        result["source"] = "gps" if gps else "riders"
+        # "gps" when what it's made of came from phones on the bus (automatic mode), also once those reports are
+        # older than 3 minutes (the bus between two far-apart stops); "riders" only when taps are in it. The apps
+        # still rank it first only while it's fresh (they check updatedAt).
+        result["source"] = "gps" if all(r["kind"] in PHONE_KINDS for r in used) else "riders"
     return result
 
 
@@ -1134,6 +1313,10 @@ def walk_leg(a, b, at_ms, arriving):
             "to": {k: b[k] for k in ("id", "name", "lat", "lon") if k in b}, "departure": start, "arrival": start + ms}
 
 
+# "Arrive by": how far before the wanted arrival connections are searched.
+ARRIVE_WINDOW_S = 4 * 3600
+
+
 def merge_live(journeys, live):
     """Timetable and live (sadzv) connections by departure; the live copy of the same bus wins, it can be followed live."""
     def same_bus(j, leg):
@@ -1171,6 +1354,18 @@ def timetable_query(route, query):
         return 200, {"departures": t.departures(stations, when_param(query.get("time")), limit(30, 200), exclude,
                                                 ending=query.get("ending") in ("1", "true")),
                      "stops": [t.station_json(s) for s in stations]}
+    if route == "path":
+        # EM-0064: the roads between a trip's stops for the apps' maps, as drawn or snapped in the dashboard. Stops come
+        # as positions (a live S.A.D. bus doesn't know the timetable's stations): of the stations near each, a pair with
+        # a road trace between them. A hop without one is [] (a straight line).
+        try:
+            stops = [tuple(float(x) for x in p.split(",")[:2]) for p in (query.get("stops") or "").split(";") if p][:80]
+        except ValueError:
+            return 400, {"error": "stops: lat,lon;lat,lon;..."}
+        traces = timetable.edits["segments"]
+        near = [[s["id"] for s in t.near(lat, lon, 300, 3)] for lat, lon in stops]
+        return 200, {"hops": [next((traces[f"{x}>{y}"] for x in a for y in b if f"{x}>{y}" in traces), [])
+                              for a, b in zip(near, near[1:])]}
     if route == "trip":
         trip = t.trip(query.get("id") or "") if re.fullmatch(r"[^:]+:.+:\d{8}", query.get("id") or "") else None
         return (200, trip) if trip else (404, {"error": "No such trip"})
@@ -1179,15 +1374,21 @@ def timetable_query(route, query):
         if origin is None or target is None:
             return 404, {"error": "Stop not found", "from": origin is not None, "to": target is not None}
         when, count = when_param(query.get("time")), limit(5, 10)
+        # EM-0053, "arrive by": `time` is when the rider wants to be there. Connections are searched from a few hours
+        # before it and only those arriving in time are kept: the ones that leave latest.
+        arrive_by = when if query.get("arrive") in ("1", "true") else None
+        if arrive_by is not None:
+            when = arrive_by - ARRIVE_WINDOW_S
+        found = count * 4 if arrive_by is not None else count
         # SAD Zvolen's live data is asked at the same time as the timetable is searched (about 1 s each).
         a = (t.lat[origin], t.lon[origin]) if t.lat[origin] is not None else sadzv.locate(t.names[origin], t.town_center(origin))
         b = (t.lat[target], t.lon[target]) if t.lat[target] is not None else sadzv.locate(t.names[target], t.town_center(target))
         name_of = lambda lat, lon: next((s["name"] for s in t.near(lat, lon, 120, 1)), None)  # noqa: E731
-        live_job = LIVE_POOL.submit(sadzv.journeys, a, b, when, count, name_of) if a and b else None
+        live_job = LIVE_POOL.submit(sadzv.journeys, a, b, when, found, name_of) if a and b else None
         # change: the rider's least time between two buses in minutes (app setting; 0 = any), 1 by default.
         raw = str(query.get("change") or "")
         change = min(30, int(raw)) * 60 if raw.isdigit() else timetable.CHANGE_S
-        journeys = t.plan(origin, target, when, count, query.get("direct") in ("1", "true"), change,
+        journeys = t.plan(origin, target, when, found, query.get("direct") in ("1", "true"), change,
                           walk_start=query.get("walkstart") not in ("0", "false"))
         if live_job:
             # City buses aren't in the open timetables: SAD Zvolen's live data adds its direct buses.
@@ -1200,8 +1401,10 @@ def timetable_query(route, query):
                 after = walk_leg(bus["to"], t.station_json(target), bus["arrival"], arriving=False)
                 j["legs"] = [leg for leg in (before, bus, after) if leg]
                 j["departure"], j["arrival"] = j["legs"][0]["departure"], j["legs"][-1]["arrival"]
-            journeys = merge_live(journeys, live)[:count]
-        return 200, {"from": t.station_json(origin), "to": t.station_json(target), "connections": journeys}
+            journeys = merge_live(journeys, live)
+        if arrive_by is not None:
+            journeys = [j for j in journeys if j["arrival"] <= arrive_by * 1000][-count:]
+        return 200, {"from": t.station_json(origin), "to": t.station_json(target), "connections": journeys[:count]}
     return 404, {"error": "Not found"}
 
 
@@ -1584,6 +1787,29 @@ class Handler(BaseHTTPRequestHandler):
                 shares.push(share, "claim" if side == "owner" else "owner", {"type": "position", "position": pos})
         finally:
             shares.detach(share["id"], side, ws)
+            self.close_connection = True
+
+    def map_socket(self, user, query):
+        """
+        The map's live channel: GET /admin/api/map/live?tab=<id> as a WebSocket (signed in, from our own pages). The
+        client says what it has open ({"type": "focus", "station", "trip"}); the server sends who is where
+        ({"type": "presence"}) and what others saved ({"type": "changed"}).
+        """
+        origin = (self.headers.get("Origin") or "").rstrip("/")
+        if origin not in ORIGINS or "websocket" not in (self.headers.get("Upgrade") or "").lower() or not self.headers.get("Sec-WebSocket-Key"):
+            return self.error(400, "Not a WebSocket request from the dashboard")
+        ws = WebSocket.accept(self)
+        map_room.join(ws, user["oidc_name"] or user["username"], str(query.get("tab") or "")[:40])
+        try:
+            map_room.presence()
+            for message in ws.messages():
+                if message.get("type") == "focus":
+                    station, trip = message.get("station"), message.get("trip")
+                    map_room.focus(ws, str(station)[:200] if station else None, str(trip)[:300] if trip else None)
+                    map_room.presence()
+        finally:
+            map_room.leave(ws)
+            map_room.presence()
             self.close_connection = True
 
     def share_api(self, method, route, query):
@@ -2059,15 +2285,28 @@ class Handler(BaseHTTPRequestHandler):
 
     def map_api(self, user, method, route, query):
         """The dashboard's map: stops, buses now, a trip's way; moving stops and drawing or snapping road traces."""
+        if method == "GET" and route == "live":
+            return self.map_socket(user, query)
         t = timetable.current
         if t is None:
             return self.error(503, "Timetable is loading, try again in a minute")
+        tab = self.headers.get("X-Map-Tab") or ""
+
+        def changed(**what):
+            """Tell the others on the map (not this tab) what was just saved."""
+            map_room.push({"type": "changed", "by": user["oidc_name"] or user["username"], **what}, skip_tab=tab)
+
+        def taken(sid):
+            """Who else has this stop open in the map, or None."""
+            return map_room.busy(sid, tab)
 
         def box():
             south, west, north, east = (float(x) for x in (query.get("bbox") or "").split(","))
             return south, west, north, east
         if method == "GET" and route == "stations":
             return self.send(200, {"stations": t.stations_in(*box())})
+        if method == "GET" and route == "lines":
+            return self.send(200, {"routes": t.line_routes(query.get("q") or "")})
         if method == "GET" and route == "vehicles":
             with db() as conn:
                 reported = {r[0] for r in conn.execute("SELECT DISTINCT trip_key FROM community_reports WHERE created_at>=?",
@@ -2082,7 +2321,7 @@ class Handler(BaseHTTPRequestHandler):
                             if cache[key]:
                                 return cache[key]
                     return None
-                return self.send(200, {"vehicles": t.vehicles(int(time.time()), box(), delay_of), "at": now()})
+                return self.send(200, {"vehicles": t.vehicles(int(time.time()), box(), delay_of, sadzv.vehicles()), "at": now()})
         if method == "GET" and route == "station":
             s = t.by_id.get(query.get("id") or "")
             return self.send(200, t.station_detail(s)) if s is not None else self.error(404, "No such stop")
@@ -2097,6 +2336,8 @@ class Handler(BaseHTTPRequestHandler):
             if s is None:
                 return self.error(404, "No such stop")
             sid = t.station_ids[s]
+            if taken(sid):
+                return self.error(409, f"{taken(sid)} is editing this stop right now")
             with db() as conn:
                 if route == "stop/reset":
                     old = conn.execute("SELECT orig_lat, orig_lon FROM map_stops WHERE station_id=?", (sid,)).fetchone()
@@ -2115,6 +2356,7 @@ class Handler(BaseHTTPRequestHandler):
                                  (sid, t.names[s], lat, lon, orig[0], orig[1], user["username"], now()))
                     t.lat[s], t.lon[s] = lat, lon  # in use right away; the rebuild keeps it
             load_map_edits()
+            changed(station=sid)
             return self.send(200, t.station_json(s))
         if route == "station":
             # A station's extra places, zone and central flag; fields left out stay as they are.
@@ -2122,6 +2364,8 @@ class Handler(BaseHTTPRequestHandler):
             if s is None:
                 return self.error(404, "No such stop")
             sid = t.station_ids[s]
+            if taken(sid):
+                return self.error(409, f"{taken(sid)} is editing this stop right now")
             with db() as conn:
                 row = conn.execute("SELECT data FROM map_stations WHERE station_id=?", (sid,)).fetchone()
                 current = json.loads(row["data"]) if row else {}
@@ -2141,6 +2385,7 @@ class Handler(BaseHTTPRequestHandler):
                                     updated_at=excluded.updated_at""", (sid, t.names[s], json.dumps(current), user["username"], now()))
             load_map_edits()
             t.apply_station_edits()
+            changed(station=sid)
             return self.send(200, t.station_detail(s))
         if route in ("child", "child/remove"):
             # A central station's sub-station: another stop that is its platform for some lines.
@@ -2162,9 +2407,11 @@ class Handler(BaseHTTPRequestHandler):
                                     ON CONFLICT(child_id) DO UPDATE SET parent_id=excluded.parent_id, data=excluded.data,
                                     updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
                                  (t.station_ids[child], t.names[child], t.station_ids[parent],
-                                  json.dumps({"label": one_line(data.get("label"), 60), "lines": clean_lines(data.get("lines"))}), user["username"], now()))
+                                  json.dumps(platform_fields(data)), user["username"], now()))
             load_map_edits()
             t.apply_station_edits()
+            changed(station=t.station_ids[t.parent_of[child][0]] if child in t.parent_of else str(data.get("parent") or ""),
+                    child=t.station_ids[child])
             return self.send(200, t.station_detail(t.parent_of[child][0]) if child in t.parent_of else t.station_detail(child))
         if route in ("segment", "segment/reset"):
             key = f"{data.get('from')}>{data.get('to')}"
@@ -2180,6 +2427,7 @@ class Handler(BaseHTTPRequestHandler):
                                     updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
                                  (key, json.dumps(points), "manual", user["username"], now()))
             load_map_edits()
+            changed(segment=key)
             return self.send(200, {"ok": True})
         if route == "snap":
             # Every stop-to-stop part of the trip along the roads (OSRM), except parts drawn by hand.
@@ -2197,10 +2445,14 @@ class Handler(BaseHTTPRequestHandler):
                     if key in manual or len(seg["points"]) < 2 or (data.get("keep") and seg["traced"]):
                         continue
                     try:
-                        points = snap_segment(seg["points"][0], seg["points"][-1])
+                        points = snap_segment(seg["points"][0], seg["points"][-1],
+                                              other_ends=[p[:2] for p in t.free_spots(t.by_id[seg["to"]])])
                     except ProviderError:
-                        points = None
-                    if points is None:
+                        points = False  # the router not answering: what was there stays
+                    if not points:
+                        if points is None:
+                            # No sensible way: an earlier snap that went wrong goes too (a straight line until drawn by hand).
+                            conn.execute("DELETE FROM map_segments WHERE segment=? AND source='osrm'", (key,))
                         failed += 1
                         continue
                     conn.execute("""INSERT INTO map_segments(segment, points, source, updated_by, updated_at) VALUES (?,?,?,?,?)
@@ -2210,6 +2462,8 @@ class Handler(BaseHTTPRequestHandler):
                     done += 1
                     time.sleep(1)  # the public OSRM server asks for at most one request a second
             load_map_edits()
+            if done or failed:
+                changed(trip=str(data.get("id")), segment=f"{data.get('from')}>{data.get('to')}" if data.get("from") else None)
             return self.send(200, {"snapped": done, "failed": failed, "trip": t.trip_shape(str(data.get("id")))})
         return self.error(404, "Not found")
 

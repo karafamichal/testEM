@@ -188,9 +188,13 @@
   .viewer .v-next { right: 14px; top: 50%; margin-top: -22px; }
   .viewer .v-count { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: #cfd6dd; font-size: 13px; }
   /* the map */
-  .map-wrap { display: grid; grid-template-columns: 1fr 340px; height: calc(100dvh - 76px); border-top: 1px solid var(--line); }
+  .map-wrap { display: grid; grid-template-columns: 1fr 390px; height: calc(100dvh - 76px); border-top: 1px solid var(--line); }
   #map { height: 100%; }
+  .busy-note { background: #5a3a00; color: #ffd28a; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
   .map-side { border-left: 1px solid var(--line); overflow-y: auto; padding: 14px 16px; background: var(--surface); font-size: 14px; }
+  .line-routes { list-style: none; padding: 0; margin: 8px 0; }
+  .line-routes button { width: 100%; text-align: left; margin: 0 0 6px; white-space: normal; }
+  #line-find input { flex: 1; min-width: 0; }
   .map-side h2 { font-size: 20px; margin: 0 0 6px; }
   .map-side .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
   .map-side button { border: 1px solid var(--line); background: var(--surface); border-radius: 3px; padding: 5px 10px; cursor: pointer; }
@@ -220,6 +224,7 @@
     .map-wrap { display: block; height: auto; }
     #map { position: sticky; top: 0; z-index: 6; height: 46dvh; border-bottom: 2px solid var(--line); }
     .map-side { border-left: 0; overflow: visible; min-height: 60dvh; }
+    .map-panel { border-left: 0; }
     .page-head .legend { display: flex; flex-wrap: wrap; gap: 4px 0; }
     .map-side .row { flex-wrap: wrap; }
     .map-side button { padding: 8px 12px; }
@@ -227,6 +232,33 @@
     .leaflet-touch .leaflet-control-zoom a { width: 36px; height: 36px; line-height: 36px; }
   }
   .child-row p { margin: 4px 0; }
+  /* 1.19: the panel closes for a full-screen map; places and sub-stations are numbered cards with their directions. */
+  .map-wrap.closed { grid-template-columns: 1fr; }
+  .map-wrap.closed .map-panel { display: none; }
+  .map-panel { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--surface); }
+  .map-panel .map-side { border-left: 0; flex: 1; min-height: 0; }
+  .side-x { position: absolute; top: 10px; right: 10px; z-index: 2; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; font-size: 15px; }
+  .map-side h2 { padding-right: 40px; }
+  .map-toggle { width: 40px; height: 40px; border-radius: 50%; border: 2px solid #6EE7A8; background: #0C1A14; color: #6EE7A8; font: 700 20px/1 var(--display); cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+  .spot { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin: 8px 0; display: grid; gap: 8px; background: var(--paper); }
+  .spot.on { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+  .spot-head { display: flex; gap: 6px; align-items: center; }
+  .pnum-badge { flex: none; min-width: 26px; height: 26px; border-radius: 13px; background: #7C3AED; color: #fff; font: 700 14px/26px var(--display); text-align: center; padding: 0 6px; cursor: pointer; border: 0; }
+  .child-row .pnum-badge { background: #0F766E; }
+  .pnum { background: #7C3AED; color: #fff; border: 2px solid #fff; border-radius: 50%; font: 700 12px/18px var(--display, sans-serif); text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  .pnum.child { background: #0F766E; }
+  .pnum.on { background: #6EE7A8; color: #0B3D1C; outline: 3px solid #6EE7A8; outline-offset: 2px; }
+  .dir { border-left: 3px solid var(--line); padding-left: 8px; display: grid; gap: 6px; }
+  .map-side { overflow-x: hidden; }
+  .spot, .dir, .dirs, .lines-pick { min-width: 0; }
+  .spot, .dir { grid-template-columns: minmax(0, 1fr); }
+  .spot select.input { width: 100%; }
+  .dirs { display: grid; gap: 12px; }
+  .spot .input { box-sizing: border-box; max-width: 100%; }
+  .dir > .input, .lines-pick > .input, .child-row > .input { width: 100%; }
+  .spot-head .input { min-width: 0; }
+  .dir .row { margin: 0; }
+  .unassigned { color: var(--late); }
 </style>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -268,9 +300,11 @@ const label = (s) => s.replace("_", " ").replace(/^./, (c) => c.toUpperCase());
 let me = null;
 let bugFilter = { status: "open", q: "" };
 
+const MAP_TAB = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
 async function api(path, body) {
-  const res = await fetch("/admin/api/" + path, body === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  const res = await fetch("/admin/api/" + path, body === undefined ? { headers: { "X-Map-Tab": MAP_TAB } } : {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Map-Tab": MAP_TAB }, body: JSON.stringify(body),
   });
   if (res.status === 401) { location.href = "/login"; throw new Error("signed out"); }
   const data = await res.json().catch(() => ({}));
@@ -575,24 +609,82 @@ function renderMap(stationId = null) {
   clearInterval(mapState?.timer);
   view.innerHTML = `
     <div class="page-head"><h1>Map</h1><span class="muted small legend">
-      <span><i class="dot" style="background:#1E8A4C"></i>live (riders' phones or reports)</span>
+      <span><i class="dot" style="background:#1E8A4C"></i>live (the bus's GPS, riders' phones or reports)</span>
       <span><i class="dot" style="background:#5f6b7a"></i>by the timetable</span>
       <span><i class="dot" style="background:#C77700"></i>late</span>
       <span><i class="dot" style="background:#1D4FB8"></i>stop (mint: moved by hand)</span></span></div>
-    <div class="map-wrap"><div id="map"></div><aside class="map-side" id="map-side"></aside></div>`;
+    <p class="muted small" id="map-people"></p>
+    <div class="map-wrap" id="map-wrap"><div id="map"></div>
+      <aside class="map-panel"><button class="side-x" id="side-x" type="button" title="Close the panel (full-screen map)" aria-label="Close the panel">✕</button>
+      <div class="map-side" id="map-side"></div></aside></div>`;
   const map = L.map("map", { preferCanvas: true }).setView([48.736, 19.146], 13);
   // OpenStreetMap's tile servers refuse requests without a Referer (403): send our origin with them.
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors",
     referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
   mapState = { map, stops: L.layerGroup().addTo(map), buses: L.layerGroup().addTo(map), trip: L.layerGroup().addTo(map), tripId: null, edit: null };
+  // The panel closes for a full-screen map; the ? button on the map opens it again (help, or the stop being edited).
+  const Toggle = L.Control.extend({ onAdd() {
+    const b = L.DomUtil.create("button", "map-toggle");
+    b.type = "button"; b.textContent = "?"; b.title = "Show or hide the panel (help, the stop you're editing)"; b.setAttribute("aria-label", b.title);
+    L.DomEvent.disableClickPropagation(b);
+    b.onclick = () => sidePanel($("#map-wrap").classList.contains("closed"));
+    return b;
+  } });
+  new Toggle({ position: "topright" }).addTo(map);
+  $("#side-x").onclick = () => sidePanel(false);
   sideHelp();
   const load = () => { loadStops(); loadBuses(); };
   map.on("moveend", load);
   if (stationId) showStation(stationId, true);
   map.on("click", (e) => mapState.mapClick?.(e));
   load();
+  mapLive();
   // Buses move: refresh while the map is the page shown.
   mapState.timer = setInterval(() => { if (location.hash.startsWith("#map")) loadBuses(); else clearInterval(mapState.timer); }, 10000);
+}
+
+/**
+ * Everyone on the map over a WebSocket: who has which stop or trip open (a stop open elsewhere can't be saved here),
+ * and the others' edits shown as soon as they're saved. Comes back by itself if the connection drops.
+ */
+function mapLive() {
+  const state = mapState;
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/admin/api/map/live?tab=${MAP_TAB}`);
+  state.ws = ws;
+  ws.onopen = () => sendFocus();
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === "presence") { state.editors = m.editors.filter((p) => p.tab !== MAP_TAB); showPeople(); }
+    if (m.type === "changed") othersSaved(m);
+  };
+  ws.onclose = () => { if (mapState === state && location.hash.startsWith("#map")) setTimeout(() => { if (mapState === state) mapLive(); }, 3000); };
+}
+
+/** Tell the others what this tab has open. */
+function sendFocus() {
+  const ws = mapState?.ws;
+  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: "focus", station: mapState.stationId || null, trip: mapState.tripId || null }));
+  setTimeout(showPeople); // once the panel just opened is drawn
+}
+
+function showPeople() {
+  const people = mapState.editors || [];
+  const el = $("#map-people");
+  if (el) el.textContent = people.length ? "Also on the map: " + people.map((p) => p.name + (p.station ? ` (stop ${p.station})` : p.trip ? " (a trip)" : "")).join(", ") : "";
+  const warn = $("#st-busy");
+  if (warn) {
+    const who = people.find((p) => p.station && p.station === mapState.stationId);
+    warn.hidden = !who;
+    if (who) warn.textContent = `${who.name} is editing this stop right now: wait until they're done, or your changes won't be saved.`;
+  }
+}
+
+/** Someone else saved: show it here too, keeping the map where it is. */
+function othersSaved(m) {
+  toast(`${m.by} saved ${m.station ? "a stop" : "a road trace"}`);
+  loadStops();
+  if (m.station && m.station === mapState.stationId) showStation(m.station);
+  if ((m.segment || m.trip) && mapState.tripId) showTripOnMap(mapState.tripId);
 }
 
 function bbox() {
@@ -600,12 +692,50 @@ function bbox() {
   return [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map((x) => x.toFixed(5)).join(",");
 }
 
+/** Open or close the map's side panel; closed, the map takes the whole width. */
+function sidePanel(open) {
+  $("#map-wrap")?.classList.toggle("closed", !open);
+  setTimeout(() => mapState?.map.invalidateSize(), 0);
+}
+
 function sideHelp() {
+  if (mapState && (mapState.stationId || mapState.tripId)) { mapState.stationId = null; sendFocus(); }
   $("#map-side").innerHTML = `<h2>Map</h2>
+    <form id="line-find" class="row"><input id="line-q" placeholder="Line, e.g. 34 or 60101" inputmode="numeric" aria-label="Find a line">
+      <button class="primary">Find line</button></form>
+    <div id="line-routes"></div>
     <p class="muted">Buses on the road now: green ones are where riders' phones or reports put them, grey ones where the timetable does. Stops show from zoom 14.</p>
     <p class="muted"><b>A stop:</b> click it to move it, give it more places (with the lines that stop at each), a zone (circle or shape), or make it a central station whose platforms are other stops. All of it is kept through every timetable update.</p>
     <p class="muted small">Purple dots: extra places. Green ring: central station; green dots and dashed lines: its platforms. Shaded: zones.</p>
-    <p class="muted"><b>Road traces:</b> click a bus to see its trip. Snap it to the roads (OpenStreetMap routing), or click a part between two stops to draw it by hand: drag the points, click the map to add one, right-click a point to remove it.</p>`;
+    <p class="muted"><b>Platforms:</b> a stop's places and sub-stations are numbered on the map and in this panel (the one you're editing lights up). Each has a platform number and its directions: which lines leave from it and the towns they head for. A bus goes to the one whose direction fits it best, so one line can leave from different platforms each way.</p>
+    <p class="muted small">✕ closes this panel for a full-screen map; the ? button on the map opens it again.</p>
+    <p class="muted"><b>Road traces:</b> click a bus to see its trip, or find a line above to get every way it goes, also when none of its buses is on the road. Snap it to the roads (OpenStreetMap routing), or click a part between two stops to draw it by hand: drag the points, click the map to add one, right-click a point to remove it.</p>`;
+  bindLineFind();
+}
+
+function bindLineFind() {
+  const form = $("#line-find");
+  if (form) form.onsubmit = (e) => { e.preventDefault(); const q = $("#line-q").value.trim(); if (q) findLine(q); };
+}
+
+/** Every way a line goes (one trip each); opening one shows it like a bus on the road. */
+async function findLine(q) {
+  const box = $("#line-routes");
+  box.innerHTML = `<p class="muted small">Looking…</p>`;
+  const r = await api("map/lines?q=" + encodeURIComponent(q));
+  if (!r.routes.length) { box.innerHTML = `<p class="muted small">No line ${esc(q)} in the timetable.</p>`; return; }
+  box.innerHTML = `<ul class="line-routes">${r.routes.map((x, i) => `<li><button type="button" data-route="${i}">
+    <b>${esc(x.line)}</b> ${esc(x.from)} → ${esc(x.to)}<br><span class="muted small">${x.stops} stops · ${x.trips} trip${x.trips === 1 ? "" : "s"} · ${esc(x.operator)}</span></button></li>`).join("")}</ul>`;
+  box.onclick = (e) => {
+    const b = e.target.closest("[data-route]");
+    if (b) showTripOnMap(r.routes[Number(b.dataset.route)].tripId).then(fitTrip);
+  };
+}
+
+/** Moves the map to the trip just opened (a line found by number may run far from where the map is). */
+function fitTrip() {
+  const layers = mapState.trip.getLayers();
+  if (layers.length) mapState.map.fitBounds(L.featureGroup(layers).getBounds().pad(0.15));
 }
 
 async function loadStops() {
@@ -652,19 +782,25 @@ async function showStation(id, center = false) {
   endEditing();
   const st = await api("map/station?id=" + encodeURIComponent(id));
   if (center) map.setView([st.lat, st.lon], 17);
+  mapState.stationId = st.id;
+  sendFocus();
   // The address names the station: a link to it, and reload keeps it open.
   history.replaceState(null, "", "#map/" + encodeURIComponent(st.id));
   const layer = L.layerGroup().addTo(map);
   mapState.editing = { layer, cleanup: [] };
   const side = $("#map-side");
+  sidePanel(true);
   const lines = (l) => (l || []).join(", ");
   side.innerHTML = `<h2>${esc(st.name)}</h2>
+    <p class="busy-note" id="st-busy" hidden></p>
     <p class="muted small">${esc(st.id)}${st.moved ? " · moved by hand" : ""}${st.central ? " · central station" : ""}${st.parent ? ` · platform of <a href="#" data-open="${esc(st.parent.id)}">${esc(st.parent.name)}</a>` : ""}</p>
     <h3>Position</h3>
     <div class="row"><button id="st-move">Move</button>${st.moved ? '<button id="st-unmove">Back to the timetable\'s place</button>' : ""}</div>
-    <h3>Places</h3>
-    <p class="muted small">More places for this station (e.g. each side of the road, or a stand further away). Lines: which buses stop there (empty: just another place).</p>
-    <datalist id="dir-options">${directionOptions(st.serving)}</datalist>
+    <h3>Places and platforms</h3>
+    <p class="muted small">Numbered spots where buses stop (each side of the road, a stand further away). Give each a platform number and its directions: the lines that leave from it and the towns they head for (where they end, or pass on the way). A bus goes to the one whose direction fits it best.</p>
+    ${unassignedNote(st)}
+    <datalist id="dir-options">${directionOptions(st.serving, ...st.children.map((c) => c.serving))}</datalist>
+    <datalist id="pf-options">${platformNumbers(st.serving, ...st.children.map((c) => c.serving))}</datalist>
     <div id="st-places">${st.places.map((p, i) => placeRow(p, i, st.serving)).join("")}</div>
     <div class="row"><button id="st-add-place">Add a place (click the map)</button><button class="primary" id="st-save-places">Save places</button></div>
     <h3>Zone</h3>
@@ -673,18 +809,56 @@ async function showStation(id, center = false) {
     <div id="st-zone-edit"></div>
     <h3>Central station</h3>
     <label class="row"><input type="checkbox" id="st-central" ${st.central ? "checked" : ""} ${st.parent ? "disabled" : ""}> Central station: other stops are its platforms</label>
-    <div id="st-children">${st.central ? `<p class="muted small">${st.children.length} sub-station(s)</p>${st.children.map((c) => childRow(c, st.serving)).join("") || '<p class="muted small">No sub-stations yet.</p>'}
+    <div id="st-children">${st.central ? `<p class="muted small">${st.children.length} sub-station(s), numbered in green on the map</p>${st.children.map((c, n) => childRow(c, n, st.serving)).join("") || '<p class="muted small">No sub-stations yet.</p>'}
       <div class="row"><button id="st-add-child">Add a sub-station (click a stop on the map)</button></div>` : ""}</div>
     <div class="row"><button id="st-close">Close</button></div>`;
 
   // Draw what's set up, editable.
+  // Numbered markers, the same numbers as the cards; a click on either lights both up.
+  const numIcon = (n, kind = "") => L.divIcon({ className: "pnum " + kind, html: String(n), iconSize: [22, 22] });
   const placeMarkers = [];
   const addPlaceMarker = (p) => {
-    const m = L.marker([p.lat, p.lng ?? p.lon], { draggable: true, icon: L.divIcon({ className: "vertex", iconSize: [14, 14] }) }).addTo(layer);
+    const i = placeMarkers.length;
+    const m = L.marker([p.lat, p.lng ?? p.lon], { draggable: true, icon: numIcon(i + 1) }).addTo(layer);
+    m.on("click", () => select("place", i));
     placeMarkers.push(m);
     return m;
   };
   st.places.forEach((p) => addPlaceMarker(p));
+  const childMarkers = st.children.map((c, n) => c.lat == null ? null
+    : L.marker([c.lat, c.lon], { icon: numIcon(n + 1, "child") }).addTo(layer).on("click", () => select("child", n)));
+  const select = (kind, i) => {
+    side.querySelectorAll(".spot.on").forEach((x) => x.classList.remove("on"));
+    [...placeMarkers, ...childMarkers].forEach((m) => m?.getElement()?.classList.remove("on"));
+    const card = side.querySelector(kind === "place" ? `.place-row[data-i="${i}"]` : `.child-row[data-n="${i}"]`);
+    const m = kind === "place" ? placeMarkers[i] : childMarkers[i];
+    card?.classList.add("on");
+    card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    m?.getElement()?.classList.add("on");
+    if (m) map.panTo(m.getLatLng());
+  };
+  const servingOf = (spot) => {
+    if (!spot.classList.contains("child-row")) return st.serving;
+    const c = st.children[Number(spot.dataset.n)];
+    return c.serving.lines.length ? c.serving : st.serving;
+  };
+  // Directions: add one (empty, or a suggested way out), remove one; a number badge shows its spot on the map.
+  // One handler each (the panel is reused for every stop, so listeners would pile up).
+  side.onclick = (e) => {
+    const badge = e.target.closest("[data-select]");
+    if (badge) { const spot = badge.closest(".spot"); select(spot.classList.contains("child-row") ? "child" : "place", Number(spot.dataset.i ?? spot.dataset.n)); }
+    const add = e.target.closest("[data-add-dir]");
+    if (add) { const spot = add.closest(".spot"); $(".dirs", spot).insertAdjacentHTML("beforeend", dirRow({ name: "", lines: [], towards: [] }, servingOf(spot))); }
+    const del = e.target.closest("[data-del-dir]");
+    if (del) del.closest(".dir").remove();
+  };
+  side.onchange = (e) => {
+    if (!e.target.matches("[data-suggest]") || e.target.value === "") return;
+    const spot = e.target.closest(".spot");
+    const way = (servingOf(spot).directions || [])[Number(e.target.value)];
+    if (way) $(".dirs", spot).insertAdjacentHTML("beforeend", dirRow({ name: wayName(way), lines: way.lines, towards: way.headsigns }, servingOf(spot)));
+    e.target.value = "";
+  };
   if (st.zone) layer.addLayer(zoneLayer(st.zone));
   L.circleMarker([st.lat, st.lon], { radius: 10, color: "#6EE7A8", weight: 3, fill: false }).addTo(layer);
 
@@ -718,6 +892,7 @@ async function showStation(id, center = false) {
       const i = placeMarkers.length;
       addPlaceMarker(e.latlng);
       placesBox.insertAdjacentHTML("beforeend", placeRow({ label: "", lines: [] }, i, st.serving));
+      select("place", i);
     };
   };
   $("#st-save-places").onclick = async () => {
@@ -726,7 +901,7 @@ async function showStation(id, center = false) {
       const m = placeMarkers[Number(row.dataset.i)];
       if (!m) return;
       const p = m.getLatLng();
-      places.push({ lat: p.lat, lon: p.lng, label: $("[data-label]", row).value, lines: $("[data-lines]", row).value });
+      places.push({ lat: p.lat, lon: p.lng, ...readSpot(row) });
     });
     await api("map/station", { id: st.id, places });
     toast("Places saved"); loadStops(); showStation(st.id);
@@ -755,7 +930,7 @@ async function showStation(id, center = false) {
       const row = e.target.closest(".child-row");
       if (!row) return;
       if (e.target.closest("[data-child-save]")) {
-        await api("map/child", { parent: st.id, child: row.dataset.id, label: $("[data-label]", row).value, lines: $("[data-lines]", row).value });
+        await api("map/child", { parent: st.id, child: row.dataset.id, ...readSpot(row) });
         toast("Saved"); loadStops();
       }
       if (e.target.closest("[data-child-remove]")) { await api("map/child/remove", { child: row.dataset.id }); loadStops(); showStation(st.id); }
@@ -782,6 +957,8 @@ function linesPicker(chosen, serving) {
 
 /** Keeps a lines picker's field and ticks in step (one handler for the whole panel). */
 function bindLinePickers(root) {
+  if (root.dataset.pickers) return; // once per panel: it is reused for every stop
+  root.dataset.pickers = "1";
   const sync = (box) => {
     const field = $("[data-lines]", box);
     const typed = field.value.split(/[,\s]+/).filter(Boolean);
@@ -805,32 +982,86 @@ function bindLinePickers(root) {
   });
 }
 
-/** Suggestions for a place's name: "Smer <where its buses go>". */
-function directionOptions(serving) {
-  const towns = new Set();
-  serving.lines.forEach((l) => l.headsigns.forEach((h) => towns.add(h)));
-  return [...towns].sort().map((h) => `<option value="Smer ${esc(h)}">`).join("");
+/** A way out of the stop, as a direction's name: "Smer Krupina / Dudince / Babina" ("Smer Zvolen: Západ / Tulská" in a town). */
+function wayName(w) {
+  const heads = w.headsigns.slice(0, 3);
+  const town = heads[0]?.split(",")[0];
+  if (heads.length > 1 && heads.every((h) => h.startsWith(town + ","))) return `Smer ${town}: ` + heads.map((h) => h.slice(town.length + 1).trim()).join(" / ");
+  return "Smer " + heads.join(" / ");
 }
 
-/** Platform suggestions: the timetable's platform numbers here, then 1 to 30. */
-function platformOptions(...servings) {
+/** Suggestions for a direction's name: the ways out grouped by the next stop, then each destination. */
+function directionOptions(...servings) {
+  const names = new Set();
+  servings.forEach((x) => (x.directions || []).forEach((w) => names.add(wayName(w))));
+  servings.forEach((x) => x.lines.forEach((l) => l.headsigns.forEach((h) => names.add("Smer " + h))));
+  return [...names].map((n) => `<option value="${esc(n)}">`).join("");
+}
+
+/** Platform number suggestions: the timetable's platform numbers here, then 1 to 30. */
+function platformNumbers(...servings) {
   const codes = new Set(servings.flatMap((x) => x.platforms));
   for (let n = 1; n <= 30; n++) codes.add(String(n));
-  return [...codes].sort((a, b) => a.padStart(4, "0").localeCompare(b.padStart(4, "0"))).map((c) => `<option value="Nástupište ${esc(c)}">`).join("");
+  return [...codes].sort((a, b) => a.padStart(4, "0").localeCompare(b.padStart(4, "0"))).map((c) => `<option value="${esc(c)}">`).join("");
+}
+
+/** A place's or sub-station's directions; one set up before directions existed has its lines as its only one. */
+function spotDirections(p) {
+  return p.directions?.length ? p.directions : p.lines?.length ? [{ name: p.label || "", lines: p.lines, towards: [] }] : [];
+}
+
+/** Lines that stop here but aren't in any direction yet (only once something is set up). */
+function unassignedNote(st) {
+  const spots = [...st.places, ...st.children];
+  if (!spots.length) return "";
+  const lines = new Set([...st.serving.lines, ...st.children.flatMap((c) => c.serving.lines)].map((l) => l.line));
+  const done = new Set(spots.flatMap((p) => spotDirections(p).flatMap((d) => d.lines)));
+  const left = [...lines].filter((l) => !done.has(l));
+  return left.length ? `<p class="small unassigned">Lines here without a platform yet: ${esc(left.join(", "))}</p>`
+    : '<p class="small muted">Every line here has a platform.</p>';
+}
+
+/** What a card says: its label, platform number and directions (for saving). */
+function readSpot(row) {
+  return {
+    label: $("[data-label]", row).value,
+    platform: $("[data-platform]", row).value,
+    directions: [...row.querySelectorAll(".dir")].map((d) => ({ name: $("[data-dname]", d).value, lines: $("[data-lines]", d).value, towards: $("[data-towards]", d).value })),
+  };
+}
+
+function dirRow(d, serving) {
+  return `<div class="dir"><div class="row"><input class="input" data-dname list="dir-options" placeholder="Direction (e.g. Smer Krupina)" value="${esc(d.name || "")}" style="flex:1">
+      <button type="button" data-del-dir title="Remove this direction" aria-label="Remove this direction">✕</button></div>
+    ${linesPicker(d.lines, serving)}
+    <input class="input" data-towards placeholder="Towards: towns or stops, separated by ; (Krupina; Dudince)" value="${esc((d.towards || []).join("; "))}"></div>`;
+}
+
+/** A card's directions, with buttons to add one, empty or one of the ways out of the stop. */
+function spotFields(p, serving) {
+  const ways = serving.directions || [];
+  return `<div class="dirs">${spotDirections(p).map((d) => dirRow(d, serving)).join("")}</div>
+    <div class="row"><button type="button" data-add-dir>+ Direction</button>
+      ${ways.length ? `<select class="input" data-suggest style="flex:1;min-width:0"><option value="">Add a way out of the stop…</option>
+        ${ways.map((w, k) => `<option value="${k}">${esc(wayName(w))} (next: ${esc(w.next)}; ${esc(w.lines.join(", "))})</option>`).join("")}</select>` : ""}</div>`;
 }
 
 function placeRow(p, i, serving) {
-  return `<div class="place-row" data-i="${i}">
-    <div class="row"><input class="input" data-label list="dir-options" placeholder="Name (e.g. Smer centrum)" value="${esc(p.label)}" style="flex:1">
-      <button data-del-place="${i}" title="Remove this place">✕</button></div>
-    ${linesPicker(p.lines, serving)}</div>`;
+  return `<div class="spot place-row" data-i="${i}">
+    <div class="spot-head"><button type="button" class="pnum-badge" data-select title="Show it on the map">${i + 1}</button>
+      <input class="input" data-platform list="pf-options" placeholder="Platform" aria-label="Platform number" value="${esc(p.platform || "")}" style="width:84px">
+      <input class="input" data-label placeholder="Name (optional)" aria-label="Name" value="${esc(p.label || "")}" style="flex:1;min-width:0">
+      <button type="button" data-del-place="${i}" title="Remove this place" aria-label="Remove this place">✕</button></div>
+    ${spotFields(p, serving)}</div>`;
 }
 
-function childRow(c, parentServing) {
-  return `<div class="child-row" data-id="${esc(c.id)}"><p><a href="#" data-open>${esc(c.name)}</a></p>
-    <input class="input" data-label list="pf-${esc(c.id)}" placeholder="Platform (e.g. Nástupište 5)" value="${esc(c.label)}">
-    <datalist id="pf-${esc(c.id)}">${platformOptions(c.serving, parentServing)}</datalist>
-    ${linesPicker(c.lines, c.serving.lines.length ? c.serving : parentServing)}
+function childRow(c, n, parentServing) {
+  return `<div class="spot child-row" data-id="${esc(c.id)}" data-n="${n}">
+    <div class="spot-head"><button type="button" class="pnum-badge" data-select title="Show it on the map">${n + 1}</button>
+      <input class="input" data-platform list="pf-options" placeholder="Platform" aria-label="Platform number" value="${esc(c.platform || "")}" style="width:84px">
+      <a href="#" data-open style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}</a></div>
+    <input class="input" data-label placeholder="Label shown to riders (optional)" aria-label="Label" value="${esc(c.label)}">
+    ${spotFields(c, c.serving.lines.length ? c.serving : parentServing)}
     <div class="row"><button class="primary" data-child-save>Save</button><button data-child-remove>Remove</button></div></div>`;
 }
 
@@ -898,7 +1129,7 @@ async function loadBuses() {
     const icon = L.divIcon({ className: "", html: `<div class="bus-icon ${v.live ? "live" : ""} ${late}">${esc(v.line)}</div>`, iconSize: null });
     const m = L.marker([v.lat, v.lon], { icon });
     const d = delayText(v.delay);
-    m.bindTooltip(`${esc(v.line)} → ${esc(v.headsign)}<br>next: ${esc(v.next)}<br>${v.live ? `${d.text} (${v.source === "gps" ? "riders' phones" : "reports"})` : "timetable"}`);
+    m.bindTooltip(`${esc(v.line)} → ${esc(v.headsign)}<br>next: ${esc(v.next)}<br>${v.live ? `${d.text} (${v.source === "gps" ? "riders' phones" : v.source === "bus" ? "the bus's own GPS" : "reports"})` : "timetable"}`);
     m.on("click", () => showTripOnMap(v.tripId));
     buses.addLayer(m);
   }
@@ -906,9 +1137,13 @@ async function loadBuses() {
 
 async function showTripOnMap(tripId) {
   const t = await api("map/trip?id=" + encodeURIComponent(tripId));
+  const opened = mapState.tripId !== tripId;
   mapState.tripId = tripId;
-  drawTrip(t);
+  mapState.stationId = null;
+  if (opened) sendFocus();
+  drawTrip(t, opened);
   const side = $("#map-side");
+  sidePanel(true);
   side.innerHTML = `<h2>${esc(t.line)} → ${esc(t.headsign)}</h2><p class="muted small">${esc(t.operator)} · ${esc(tripId)}</p>
     <p class="muted">${t.segments.filter((s) => s.traced).length} of ${t.segments.length} parts follow the roads. Click a part to draw it by hand.</p>
     <div class="row"><button class="primary" id="snap">Snap to roads</button><button id="snap-missing">Snap only the straight parts</button><button id="trip-close">Close</button></div>
@@ -935,7 +1170,7 @@ async function showTripOnMap(tripId) {
   };
   $("#snap").onclick = () => snap(false);
   $("#snap-missing").onclick = () => snap(true);
-  $("#trip-close").onclick = () => { mapState.trip.clearLayers(); mapState.tripId = null; sideHelp(); };
+  $("#trip-close").onclick = () => { mapState.trip.clearLayers(); mapState.tripId = null; sendFocus(); sideHelp(); };
 }
 
 function drawTrip(t, fit = true) {
@@ -984,6 +1219,7 @@ function editSegment(t, seg) {
   trip.eachLayer((l) => l.setStyle && l.setStyle({ opacity: 0.3 }));
   redraw();
   const side = $("#map-side");
+  sidePanel(true);
   side.innerHTML = `<h2>Drawing a part by hand</h2><p class="muted">Drag the points along the road; click the map to add one; right-click a point to remove it.</p>
     <div class="row"><button class="primary" id="seg-save">Save</button><button id="seg-reset">Straight line again</button><button id="seg-cancel">Cancel</button></div>`;
   const end = () => { map.off("click", add); map.removeLayer(layer); showTripOnMap(mapState.tripId); };

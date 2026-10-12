@@ -183,6 +183,10 @@ class CredentialsManager(context: Context) {
         return builtIn + custom
     }
 
+    /** The "Install Plan&Ride on your watch" card on Home was put away. */
+    fun isWatchInstallHidden(): Boolean = prefs.getBoolean("watch_install_hidden", false)
+    fun setWatchInstallHidden(hidden: Boolean) = prefs.edit().putBoolean("watch_install_hidden", hidden).apply()
+
     fun saveSelectedThemeId(id: String) = prefs.edit().putString("selected_theme_id", id).apply()
     fun getSelectedThemeId(defaultId: String): String =
         prefs.getString("selected_theme_id", defaultId)?.takeIf { it !in LEGACY_PRESET_IDS } ?: defaultId
@@ -289,6 +293,10 @@ class CredentialsManager(context: Context) {
     // ------------------------------------------------------- following a bus
 
     /** How many minutes before the bus reaches the user's stop to alert them (1–60). */
+    /** EM-0054: how long before a followed bus leaves its live notification starts. */
+    fun getFollowLeadMinutes(): Int = prefs.getInt("follow_lead_minutes", 30)
+    fun saveFollowLeadMinutes(minutes: Int) = prefs.edit().putInt("follow_lead_minutes", minutes).apply()
+
     fun getArrivalAlertMinutes(): Int = prefs.getInt("arrival_alert_minutes", 2).coerceIn(1, MAX_ARRIVAL_ALERT_MINUTES)
     fun saveArrivalAlertMinutes(minutes: Int) =
         prefs.edit().putInt("arrival_alert_minutes", minutes.coerceIn(1, MAX_ARRIVAL_ALERT_MINUTES)).apply()

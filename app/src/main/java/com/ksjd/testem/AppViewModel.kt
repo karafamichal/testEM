@@ -785,6 +785,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setTimetableDirectOnly(directOnly: Boolean) = _timetableState.update { it.copy(directOnly = directOnly) }
 
+    /** EM-0053: the chosen time is when to be there. */
+    fun setTimetableArriveBy(arriveBy: Boolean) = _timetableState.update { it.copy(arriveBy = arriveBy) }
+
     fun updateTimetableFromInput(fromInput: String) {
         _timetableState.update {
             it.copy(
@@ -945,6 +948,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             val time = state.timeInput.ifBlank { currentTimeText() }
+            // EM-0069: a date already past (left from a starred journey opened yesterday) means today.
+            val date = state.dateInput.takeIf { d ->
+                runCatching { !java.time.LocalDate.parse(d).isBefore(java.time.LocalDate.now(SK_ZONE)) }.getOrDefault(false)
+            }.orEmpty()
+            if (date != state.dateInput) _timetableState.update { it.copy(dateInput = date) }
             val result = withContext(Dispatchers.IO) {
                 timetableService.searchConnections(
                     TimetableService.SearchRequest(
@@ -955,7 +963,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         directOnly = state.directOnly,
                         fromSuggestion = route.from,
                         toSuggestion = route.to,
-                        dateInput = state.dateInput
+                        dateInput = date,
+                        arriveBy = state.arriveBy && state.timeInput.isNotBlank()
                     )
                 )
             }

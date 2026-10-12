@@ -59,6 +59,24 @@ object WatchSync {
         return watchApp
     }
 
+    /** Paired watches that don't have the Plan&Ride watch app yet: their node ids (off the main thread). */
+    fun watchesWithoutApp(context: Context): List<String> = runCatching {
+        val withApp = Tasks.await(Wearable.getCapabilityClient(context).getCapability(CAPABILITY, CapabilityClient.FILTER_ALL)).nodes.map { it.id }.toSet()
+        Tasks.await(Wearable.getNodeClient(context).connectedNodes).filter { it.isNearby && it.id !in withApp }.map { it.id }
+    }.getOrDefault(emptyList())
+
+    /**
+     * Opens Plan&Ride's page in the Play Store on the watch, so the rider only taps Install there. Google Play on
+     * the phone often doesn't offer Wear OS apps at all, so this is the reliable way. False if the watch didn't take it.
+     */
+    fun openPlayOnWatch(context: Context, nodeId: String): Boolean = runCatching {
+        val intent = Intent(Intent.ACTION_VIEW)
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+            .setData(Uri.parse("market://details?id=${context.packageName}"))
+        androidx.wear.remote.interactions.RemoteActivityHelper(context).startRemoteActivity(intent, nodeId).get()
+        true
+    }.getOrDefault(false)
+
     /** Called off the main thread whenever the followed bus or its view changes (TripTracking). */
     fun send(context: Context, active: TrackedTrip?, view: FollowView?) {
         val client = Wearable.getDataClient(context)
@@ -235,7 +253,7 @@ object WatchSync {
             val bg = preset.roles[com.ksjd.testem.ThemeRole.BACKGROUND]?.takeIf { androidx.compose.ui.graphics.Color(it).luminance() < 0.2f }
             dataMap.putInt("background", bg?.toInt() ?: toward(preset.primary, 0.9f))
             dataMap.putInt("surface", preset.roles[com.ksjd.testem.ThemeRole.CARDS]?.takeIf { bg != null }?.toInt() ?: toward(preset.primary, 0.78f))
-            dataMap.putInt("live", (preset.roles[com.ksjd.testem.ThemeRole.LIVE] ?: 0xFF6EE7A8).toInt())
+            dataMap.putInt("live", (preset.roles[com.ksjd.testem.ThemeRole.LIVE] ?: 0xFF8AB4FF).toInt())
         }.asPutDataRequest()
         runCatching { Tasks.await(Wearable.getDataClient(context).putDataItem(request)) }
     }

@@ -64,4 +64,12 @@ class RoutePositionTest {
         // Still at the first stop early: waiting, not early.
         assertEquals(0, RoutePosition.delayAt(0.05f, sched, t0 - 60_000L))
     }
+
+    @Test
+    fun longHop_beyondItsEnd_isOffTheRoute() {
+        // EM-0063: a 15 km hop allows 1.5 km beside it, not 1.5 km past its last stop.
+        val hop = listOf(48.50 to 19.12, 48.635 to 19.12)
+        assertNull(RoutePosition.snap(48.648, 19.12, hop, RoutePosition.RIDER_GPS_MAX_M))
+        assertEquals(1f, RoutePosition.snap(48.6355, 19.12, hop, RoutePosition.RIDER_GPS_MAX_M)!!.first, 0.01f)
+    }
 }

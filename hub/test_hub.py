@@ -2,6 +2,7 @@
 import datetime
 import http.client
 import json
+import math
 import os
 import sqlite3
 import subprocess
@@ -517,6 +518,10 @@ assert tc.plan(tc.resolve("town namestie x"), tc.resolve("town park"), sat, 1) =
 x = tc.resolve("town namestie x")
 assert [(d["line"], hm(d["at"])) for d in tc.departures([x], at("06:00"), 5)][0] == ("9", "30 07:00")
 assert tc.departures([x], at("06:00"), 5, {"sad-zvolen-as"}) == [], "the apps show SAD Zvolen live instead"
+# A city bus sending its GPS (sadzv) is on the map where it is, with its delay; without it, where the timetable says.
+on_map = lambda gps: [v for v in tc.vehicles(at("07:05"), (-90, -180, 90, 180), gps=gps) if v["line"] == "9"]  # noqa: E731
+assert [(v["lat"], v["lon"], v["delay"], v["source"]) for v in on_map({(77, 5): (48.72, 19.13, 60)})] == [(48.72, 19.13, 60, "bus")]
+assert [(v["live"], v["delay"]) for v in on_map({})] == [(False, None)]
 # EM-0014: a city bus that catches the same regional bus further on must not replace that direct bus
 gtfs(os.path.join(folder, "c.zip"), [("X", "Zvolen, Zlatý Potok konečná", 48.58, 19.14), ("M", "Zvolen, Kozáčeka", 48.575, 19.125),
                                      ("Y", "Banská Bystrica, Tajovského školy", 48.74, 19.12)],
@@ -589,8 +594,164 @@ assert a1["stops"][0]["central"]["id"] == "town as" and a1["stops"][0]["platform
 rebuilt = timetable.Timetable({"a": os.path.join(folder, "a.zip"), "b": os.path.join(folder, "b.zip")}, today=datetime.date(2026, 9, 29))
 assert rebuilt.platform_for(rebuilt.by_id["town park"], "101")[2] == "Smer centrum" and rebuilt.by_id["town as"] in rebuilt.central, "kept through a rebuild"
 assert json.loads(call("/admin/api/map/station", {"id": "town as", "central": False}, cookie)[2])["children"] == [], "not central: no sub-stations"
+# Directions: one platform, two ways out for the same line; a bus takes the one heading where it goes (or passes).
+bus_id = now_bus[0]["tripId"]
+bus = tt.trips[tt.trip_index[(bus_id.split(":", 1)[0], bus_id.split(":", 1)[1].rsplit(":", 1)[0])]]
+k_park = bus[7].index(tt.by_id["town park"])
+heading = bus[3] or tt.names[bus[7][-1]]
+two_ways = {"label": "", "platform": "3", "lat": 48.7105, "lon": 19.1215,
+            "directions": [{"name": "Smer Nowhere", "lines": "101", "towards": "Nowhere"}, {"name": "Smer " + heading, "lines": "101", "towards": [heading]}]}
+st_ = json.loads(call("/admin/api/map/station", {"id": "town park", "places": [two_ways]}, cookie)[2])
+assert st_["places"][0]["lines"] == ["101"] and len(st_["places"][0]["directions"]) == 2, st_
+way = tt.serving(bus[7][0])["directions"][0]
+assert way["next"] == tt.names[bus[7][1]] and "101" in way["lines"] and way["headsigns"], "ways out, grouped by the next stop"
+assert tt.platform_for(tt.by_id["town park"], "101", bus, k_park) == (48.7105, 19.1215, "3"), "the direction it heads"
+assert tt.platform_for(tt.by_id["town park"], "101") is None, "without the trip, a direction 'towards' can't be told"
+only_elsewhere = dict(two_ways, directions=[{"name": "Smer Nowhere", "lines": "101", "towards": "Nowhere"}])
+call("/admin/api/map/station", {"id": "town park", "places": [only_elsewhere]}, cookie)
+assert tt.platform_for(tt.by_id["town park"], "101", bus, k_park) is None, "a bus going the other way isn't sent there"
+# Two platforms at the first stop: "towards" where the bus ends beats "towards" a stop it only passes.
+first = bus[7][0]
+passing = {"label": "", "platform": "1", "lat": 48.7, "lon": 19.1, "directions": [{"name": "", "lines": "101", "towards": tt.names[bus[7][1]]}]}
+ending = {"label": "", "platform": "2", "lat": 48.7001, "lon": 19.1001, "directions": [{"name": "", "lines": "101", "towards": heading}]}
+call("/admin/api/map/station", {"id": tt.station_ids[first], "places": [passing, ending]}, cookie)
+assert tt.platform_for(first, "101", bus, 0)[2] == "2", "the bus's own end wins over a stop it passes"
+call("/admin/api/map/station", {"id": tt.station_ids[first], "places": []}, cookie)
+# No directions set up: a platform across the road from the stop's point is used by buses for which it's the right side.
+park = tt.by_id["town park"]
+b4, af = bus[7][max(k_park - 1, 0)], bus[7][min(k_park + 1, len(bus[7]) - 1)]
+north, east = tt.lat[af] - tt.lat[b4], tt.lon[af] - tt.lon[b4]
+size = math.hypot(north, east)
+right = (round(tt.lat[park] - east / size * 0.0002, 6), round(tt.lon[park] + north / size * 0.0002, 6))
+left = (round(tt.lat[park] + east / size * 0.0002, 6), round(tt.lon[park] - north / size * 0.0002, 6))
+for side, want in ((right, right), (left, (tt.lat[park], tt.lon[park]))):
+    call("/admin/api/map/station", {"id": "town park", "places": [{"label": "", "platform": "", "lat": side[0], "lon": side[1]}]}, cookie)
+    assert tt.platform_for(park, "101", bus, k_park)[:2] == want, (side, want, tt.platform_for(park, "101", bus, k_park))
+call("/admin/api/map/station", {"id": "town park", "places": []}, cookie)
+call("/admin/api/map/station", {"id": "town park", "places": [{"label": "", "platform": "", "lat": left[0], "lon": left[1]},
+                                                           {"label": "", "platform": "", "lat": right[0], "lon": right[1]}]}, cookie)
+assert tt.platform_for(park, "101", bus, k_park) is None, "bays of a bus station: no right side to pick"
+call("/admin/api/map/station", {"id": "town park", "places": []}, cookie)
+# The trip stops at the spot its road trace goes to: a spot the snapping chose, so line and stop meet.
+near_spot = (round(tt.lat[park] + 0.0004, 6), round(tt.lon[park], 6))
+call("/admin/api/map/station", {"id": "town park", "places": [{"label": "", "platform": "", "lat": near_spot[0], "lon": near_spot[1]}]}, cookie)
+key_ = f"{tt.station_ids[b4]}>town park"
+timetable.edits["segments"][key_] = [[near_spot[0] + 0.0001, near_spot[1]]]
+assert tt.platform_for(park, "101", bus, k_park)[:2] == near_spot
+del timetable.edits["segments"][key_]
+call("/admin/api/map/station", {"id": "town park", "places": []}, cookie)
 call("/admin/api/map/station", {"id": "town park", "places": [], "zone": None}, cookie)
 assert tt.platform_for(tt.by_id["town park"], "101") is None
+
+# EM-0065: a stop named without its town ("Lipovec" in Zvolen) is found with the town of the stops around it.
+near_town = next(s for s, n in enumerate(tt.names) if "," in n and tt.lat[s] is not None)
+tt.names.append("Lipovec"); tt.words.append(timetable.fold("Lipovec"))
+tt.lat.append(tt.lat[near_town] + 0.003); tt.lon.append(tt.lon[near_town])
+tt.weight.append(0); tt.station_ids.append("lipovec-test")
+tt.by_id["lipovec-test"] = len(tt.names) - 1
+if hasattr(tt, "_search_words"):
+    del tt._search_words
+town = tt.names[near_town].split(",")[0].strip()
+hits = [x["name"] for x in tt.search(town[:1] + " lipo")]
+assert "Lipovec" in hits, (town, hits)
+for lst in (tt.names, tt.words, tt.lat, tt.lon, tt.weight, tt.station_ids):
+    lst.pop()
+del tt.by_id["lipovec-test"], tt._search_words
+
+# The map editor finds a line's ways by its number, also when none of its buses is on the road.
+some_line = tt.trips[0][2]
+ways = tt.line_routes(some_line)
+assert ways and all(w["line"] == some_line for w in ways) and tt.trip_shape(ways[0]["tripId"]), ways
+assert tt.line_routes("") == [] and tt.line_routes("no such") == []
+
+# The map's live channel: who has which stop open; another tab can't save that stop meanwhile.
+class _Sock:
+    def __init__(self): self.sent = []
+    def send_json(self, m): self.sent.append(m)
+room, a_, b_ = hub.MapRoom(), _Sock(), _Sock()
+room.join(a_, "Ann", "tab-a"); room.join(b_, "Ben", "tab-b")
+room.focus(a_, "town park", None)
+assert room.busy("town park", "tab-b") == "Ann" and room.busy("town park", "tab-a") is None and room.busy("town as", "tab-b") is None
+room.push({"type": "changed", "station": "town park"}, skip_tab="tab-a")
+assert b_.sent and not a_.sent, "the one who saved isn't told"
+room.leave(a_)
+assert room.busy("town park", "tab-b") is None
+
+# EM-0064: the apps' maps get the road between stops given by position; a hop without a trace is straight ([]).
+pa, pb = tt.by_id["town park"], tt.by_id["town as"]
+timetable.edits["segments"]["town park>town as"] = [[48.71, 19.13]]
+there = hub.timetable_query("path", {"stops": f"{tt.lat[pa]},{tt.lon[pa]};{tt.lat[pb]},{tt.lon[pb]};{tt.lat[pa]},{tt.lon[pa]}"})[1]["hops"]
+assert there == [[[48.71, 19.13]], []], there
+del timetable.edits["segments"]["town park>town as"]
+assert hub.timetable_query("path", {"stops": "48.7,x"})[0] == 400
+
+# EM-0053, "arrive by": only connections that are there in time, the ones leaving latest.
+route = {"from": "v z p k", "to": "city station"}
+plan_dep = hub.timetable_query("plan", dict(route, time="2026-09-30T05:50", n="3"))[1]["connections"]
+assert plan_dep, "a connection to arrive by"
+want = plan_dep[0]["arrival"] // 1000
+by = hub.timetable_query("plan", dict(route, time=str(want), n="3", arrive="1"))[1]["connections"]
+assert by and all(j["arrival"] <= want * 1000 for j in by), by
+assert by[-1]["arrival"] == plan_dep[0]["arrival"], "the latest one arriving in time is listed"
+early = hub.timetable_query("plan", dict(route, time=str(want - 60), n="3", arrive="1"))[1]["connections"]
+assert all(j["arrival"] <= (want - 60) * 1000 for j in early), "a minute earlier, that one no longer fits"
+
+# Snapping to the roads: the kerb way unless the plain one is clearly better (shorter, or no turning back).
+real_route = hub.road
+hub.road = lambda a, b, curb=True: ([[1, 1]], 1490.0) if curb else ([[2, 2]], 624.0)
+assert hub.snap_segment((48.0, 19.0), (48.0, 19.006), pause=0) == [[2, 2]], "a kerb loop loses to the plain way"
+hub.road = lambda a, b, curb=True: ([[1, 1]], 4825.0)
+assert hub.snap_segment((48.56836, 19.12968), (48.5713, 19.118966), pause=0) is None, "a 4.8 km way for 0.9 km isn't kept"
+hub.road = lambda a, b, curb=True: ([[1, 1]], 900.0) if curb else ([[2, 2]], 850.0)
+assert hub.snap_segment((48.0, 19.0), (48.0, 19.006), pause=0) == [[1, 1]], "about the same: the kerb side stays"
+# Two spots of the next stop (Namestie slobody): the one reached without a loop round the block wins.
+hub.road = lambda a, b, curb=True: ([[48.001, 19.003]], 400.0) if b == (48.0, 19.006) else ([[48.01, 19.0]], 1900.0)
+assert hub.snap_segment((48.0, 19.0), (48.0004, 19.006), pause=0, other_ends=[(48.0, 19.006)]) == [[48.001, 19.003]]
+# Line 1 at Partizanska cesta: the kerb way first heads the wrong way and turns back (saved trace).
+hook = [(48.73968, 19.16086), (48.73972, 19.16102), (48.73977, 19.16089), (48.7398, 19.16081), (48.73983, 19.16066), (48.73967, 19.15989),
+        (48.73949, 19.15998), (48.73945, 19.15977), (48.73932, 19.15919), (48.73915, 19.15844)]
+assert hub.u_turns(hook) == 1 and hub.u_turns(hook[3:]) == 0
+hub.road = lambda a, b, curb=True: (hook[1:-1], 560.0) if curb else (hook[4:-1], 520.0)
+assert hub.snap_segment(hook[0], hook[-1], pause=0) == hook[4:-1], "the way that turns back loses"
+hub.road = real_route
+# Valhalla's shape encoding (precision 6), and the way falls back to OSRM when Valhalla fails.
+assert hub.polyline6("_p~iF~ps|U_ulLnnqC_mqNvxq`@") == [[3.85, -12.02], [4.07, -12.095], [4.3252, -12.6453]]
+real_valhalla, real_osrm = hub.valhalla_route, hub.osrm_route
+def _busy(a, b, curb=True):
+    raise hub.ProviderError("busy")
+hub.valhalla_route, hub.osrm_route = _busy, lambda a, b, curb=True: ([[3, 3]], 10.0)
+assert hub.road((48, 19), (48, 19.01)) == ([[3, 3]], 10.0)
+hub.valhalla_route, hub.osrm_route = real_valhalla, real_osrm
+
+# sadzv: stops a trip lost (platforms that don't list it) come back from its route's whole run, timed as on it.
+import sadzv as _sadzv  # noqa: E402
+run = [(5277, 1000), (5266, 1060), (93, 1240), (5255, 1500), (388, 1740)]
+assert _sadzv.fill_stops([[5277, 43000], [5266, 43060], [5255, 43320]], run) == \
+    [[5277, 43000], [5266, 43060], [93, 43240], [5255, 43320], [388, 43560]], "middle and end stops filled"
+assert _sadzv.fill_stops([[5266, 43060], [5277, 43120]], run) == [[5266, 43060], [5277, 43120]], "another order: unchanged"
+# EM-0062: sadzv's own run leaves out stops 4-11; they come from a whole run of the line, timed within the gap.
+short = [(388, 100, 1), (113, 220, 2), (5255, 340, 3), (5277, 1300, 6)]
+whole = [(5255, 0, 1), (389, 60, 2), (4903, 120, 3), (5277, 600, 4)]
+assert [x[:2] for x in _sadzv.bridge(short, [whole])] == [(388, 100), (113, 220), (5255, 340), (389, 436), (4903, 532), (5277, 1300)]
+assert _sadzv.bridge(short, [whole[:2] + [(4903, 120, 5)] + whole[3:]]) == short, "a run with its own gap isn't used"
+assert _sadzv.bridge(short[:3] + [(5277, 1300, 12)], [whole]) == short[:3] + [(5277, 1300, 12)], "8 missing, 2 known: not bridged"
+# Line 6 towards Zeleznicna stanica: S.A.D. leaves stops out of every run; the way back has them, on its own platforms.
+plat = lambda pid, stop_id, lat: (pid, f"S{stop_id}", lat, 19.1, "1", stop_id)  # noqa: E731
+stop_of = {x[0]: x for x in [plat(1, 100, 48.700), plat(11, 100, 48.7001), plat(2, 101, 48.710), plat(3, 102, 48.720), plat(12, 102, 48.7201),
+                             plat(4, 103, 48.730), plat(13, 103, 48.7301), plat(5, 104, 48.740), plat(6, 104, 48.7401)]}
+way = [(1, 1000, 1), (2, 1060, 2), (5, 1360, 5)]            # A, B, (C and D left out), E
+back = [(6, 0, 1), (13, 100, 2), (12, 200, 3), (11, 400, 4)]  # E, D, C, A on the other side of the road
+assert _sadzv.bridge_back(way, [back], stop_of) == [(1, 1000, 1), (2, 1060, 2), (3, 1210, 0), (4, 1285, 0), (5, 1360, 5)]
+assert _sadzv.bridge_back([(1, 1000, 1), (2, 1060, 2), (5, 1360, 6)], [back], stop_of)[2][0] == 5, "3 missing, 2 there: left as is"
+# A run that ends early (6017 at Nad Moskovskou, "to Zeleznicna stanica") goes on like the line's run that gets there.
+early = [(1, 1000, 1), (2, 1060, 2)]
+there = [(1, 0, 1), (2, 60, 2), (3, 210, 0), (4, 285, 0), (5, 360, 5)]
+assert _sadzv.extend(early, [there], stop_of, "Town, S104") == early + [(3, 1210, 0), (4, 1285, 0), (5, 1360, 0)]
+# ... also from a run that only passes the stop where it ended (same platform: the same way), and abbreviations count.
+assert _sadzv.extend([(9, 900, 1), (2, 1060, 2)], [there], stop_of, "Town, S104")[-1] == (5, 1360, 0)
+assert _sadzv.reaches([(5, 0, 1)], {5: (5, "B.B.Roosevelt.nem.", 0, 0, "", 1)}, "Banská Bystrica, Rooseveltova nemocnica")
+assert _sadzv.extend(early, [there], stop_of, "Town, S101") == early, "already there"
+
 
 # ---- city buses from sadzv live data: direct buses between stops the timetable doesn't serve
 import sadzv  # noqa: E402

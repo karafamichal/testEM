@@ -26,6 +26,11 @@ object ThemeRole {
 
 object DefaultThemePresets {
     val all = listOf(
+        // First = the default. Blue, with the slate floating bar riders asked for (EM-0052, EM-0056).
+        ThemePreset(
+            id = "stop", name = "Zastávka", primary = 0xFF1D4FB8, secondary = 0xFF3E5470, tertiary = 0xFF7FA8F5,
+            roles = mapOf(ThemeRole.BAR to 0xFF1F2935)
+        ),
         ThemePreset(
             id = "planride", name = "Plan&Ride", primary = 0xFF157A38, secondary = 0xFF3E5470, tertiary = 0xFF6EE7A8,
             roles = mapOf(ThemeRole.BACKGROUND to 0xFFF2F5F3, ThemeRole.HIGHLIGHT to 0xFF157A38, ThemeRole.BAR to 0xFF14181D)
@@ -51,7 +56,6 @@ object DefaultThemePresets {
                 ThemeRole.BAR to 0xFF14181D
             )
         ),
-        ThemePreset(id = "stop", name = "Zastávka", primary = 0xFF1D4FB8, secondary = 0xFF3E5470, tertiary = 0xFF6EE7A8),
         ThemePreset(id = "ocean", name = "Ocean", primary = 0xFF136F63, secondary = 0xFF0B4F6C, tertiary = 0xFF177E89)
     )
 }

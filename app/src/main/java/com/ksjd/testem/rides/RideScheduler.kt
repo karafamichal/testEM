@@ -154,6 +154,7 @@ class RideAlarmReceiver : BroadcastReceiver() {
 class RideRescheduleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         RideScheduler.reschedule(context)
+        com.ksjd.testem.live.FollowLater.restore(context)
         // The update killed a followed bus; Android lets this broadcast start it again. If it
         // refuses, the app resumes it when opened.
         if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) com.ksjd.testem.live.TripTracking.resume(context)

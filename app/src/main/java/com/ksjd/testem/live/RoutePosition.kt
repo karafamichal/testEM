@@ -44,8 +44,10 @@ object RoutePosition {
             val py = ay + t * dy
             val d = sqrt(px * px + py * py)
             // Stops are joined by straight lines, but roads bend: between intercity stops km apart
-            // the road can run hundreds of metres off that line. Allow 10 % of the hop.
-            if (d > maxOf(maxMeters, sqrt(len2) * HOP_SLACK)) continue
+            // the road can run hundreds of metres off that line. Allow 10 % of the hop, but only beside it: beyond
+            // its end the rider isn't on this road (EM-0063: 1.5 km past a stop counted as standing at it).
+            val beside = t > 0.0 && t < 1.0
+            if (d > if (beside) maxOf(maxMeters, sqrt(len2) * HOP_SLACK) else maxMeters) continue
             val index = (i + t).toFloat()
             // Being two or more stops away from where the bus should be costs like 150 m per stop.
             val cost = d + (expectedIndex?.let { (abs(index - it) - 2f).coerceAtLeast(0f) * 150.0 } ?: 0.0)

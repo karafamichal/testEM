@@ -19,11 +19,11 @@ data class WatchTheme(
     val live: Int = DEFAULT_LIVE
 ) {
     companion object {
-        const val DEFAULT_BACKGROUND = 0xFF08130E.toInt()
-        const val DEFAULT_SURFACE = 0xFF172A21.toInt()
-        const val DEFAULT_LIVE = 0xFF6EE7A8.toInt()
-        /** Plan&Ride's default theme (green on forest), as the phone sends it, until the phone has sent its own. */
-        val Default = WatchTheme(0xFF62A87A.toInt(), 0xFF8290A2.toInt(), 0xFF8BECB9.toInt())
+        const val DEFAULT_BACKGROUND = 0xFF0B0F14.toInt()
+        const val DEFAULT_SURFACE = 0xFF1F2935.toInt()
+        const val DEFAULT_LIVE = 0xFF8AB4FF.toInt()
+        /** Plan&Ride's default theme (Zastávka blue), as the phone sends it, until the phone has sent its own. */
+        val Default = WatchTheme(0xFF6C8DD1.toInt(), 0xFF8290A2.toInt(), 0xFF8AB4FF.toInt())
     }
 }
 
