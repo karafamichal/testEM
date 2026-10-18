@@ -121,6 +121,16 @@ object FollowLater {
             )
             .setContentIntent(open)
             .addAction(0, context.getString(R.string.track_stop), pending(context, ACTION_CANCEL))
+            .apply {
+                // EM-0075: without "Alarms & reminders" Android (MIUI most of all) may start it up to an hour late.
+                if (!due && !RideScheduler.canScheduleExact(context)) {
+                    setStyle(NotificationCompat.BigTextStyle().bigText(
+                        context.getString(R.string.follow_planned_body, trip.ref.destination, clock(_planned.value ?: departure)) +
+                            "\n" + context.getString(R.string.follow_exact_needed)))
+                    addAction(0, context.getString(R.string.follow_exact_allow), PendingIntent.getActivity(
+                        context, NOTIFICATION_ID + 1, exactAlarmSettings(context), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+                }
+            }
             .setSilent(!due)
             .setOnlyAlertOnce(true)
             .build()
@@ -136,6 +146,10 @@ object FollowLater {
     }
 
     internal const val CANCEL = ACTION_CANCEL
+
+    /** Android's "Alarms & reminders" page for this app (Android 12+); allowing it re-arms the plan exactly (RideRescheduleReceiver). */
+    fun exactAlarmSettings(context: Context): Intent =
+        Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:" + context.packageName))
 }
 
 class FollowLaterReceiver : BroadcastReceiver() {

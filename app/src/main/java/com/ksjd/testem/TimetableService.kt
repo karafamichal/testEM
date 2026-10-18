@@ -44,8 +44,16 @@ class TimetableService {
     suspend fun searchConnections(request: SearchRequest): Result<TimetableSearchResult> = runCatching {
         val date = runCatching { LocalDate.parse(request.dateInput) }.getOrElse { LocalDate.now(SK_ZONE) }
         val (h, m) = request.timeInput.trim().split(":").map { it.toInt() }
-        plan(stopParam(request.fromSuggestion, request.fromInput), stopParam(request.toSuggestion, request.toInput),
-            date.atTime(h, m).atZone(SK_ZONE).toEpochSecond(), request.directOnly, emptyList(), request.arriveBy)
+        val at = date.atTime(h, m).atZone(SK_ZONE).toEpochSecond()
+        try {
+            plan(stopParam(request.fromSuggestion, request.fromInput), stopParam(request.toSuggestion, request.toInput),
+                at, request.directOnly, emptyList(), request.arriveBy)
+        } catch (e: java.io.IOException) {
+            // 2.17.0: no connection to emHUB: the timetables kept on the phone, if they have both stops (leaving from the time).
+            val offline = com.ksjd.testem.offline.OfflineTimetables.search(request.fromSuggestion, request.fromInput,
+                request.toSuggestion, request.toInput, at, changeMinutes) ?: throw e
+            TimetableSearchResult(offline.filter { !request.directOnly || it.isDirect }, null, offline = true)
+        }
     }
 
     /** A stop of a planner leg's bus after where the rider gets on (for editing the change, EM-0026, EM-0030). */
@@ -156,6 +164,12 @@ class TimetableService {
             else HubClient.timetable("stops", mapOf("q" to input.trim())).getAsJsonArray("stops").map { suggestion(it.asJsonObject) }
         }
 
+    /** 2.17.0: rain in the next 3 hours around [lat]/[lon] (emHUB asks Open-Meteo per town), or null. */
+    fun rainy(lat: Double, lon: Double): Boolean? = runCatching {
+        HubClient.timetable("weather", mapOf("lat" to "%.3f".format(java.util.Locale.ROOT, lat), "lon" to "%.3f".format(java.util.Locale.ROOT, lon)))
+            .get("rainy").asBoolean
+    }.getOrNull()
+
     /** EM-0068: the timetable stop nearest to the rider (within 1.5 km), or null. */
     fun nearestStop(lat: Double, lon: Double): CpStopSuggestion? =
         HubClient.timetable("stops", mapOf("lat" to lat.toString(), "lon" to lon.toString(), "radius" to "1500", "n" to "1"))
@@ -239,11 +253,16 @@ class TimetableService {
                         Instant.ofEpochMilli(l.get("departure").asLong).atZone(SK_ZONE).toLocalTime().toSecondOfDay(),
                         timetable = live.get("fromIndex")?.let { tripUrl(l.str("tripId"), it.asInt, live.get("toIndex").asInt) }.orEmpty()))
                 } ?: tripUrl(l.str("tripId"), from.get("seq").asInt, to.get("seq").asInt),
-                serviceDate = Instant.ofEpochMilli(l.get("departure").asLong).atZone(SK_ZONE).toLocalDate().toString()
+                serviceDate = Instant.ofEpochMilli(l.get("departure").asLong).atZone(SK_ZONE).toLocalDate().toString(),
+                transferWorked = l.getAsJsonObject("transfer")?.get("worked")?.asInt ?: 0,
+                transferRuns = l.getAsJsonObject("transfer")?.get("runs")?.asInt ?: 0
             )
         }
         val minutes = ((c.get("arrival").asLong - c.get("departure").asLong) / 60_000L).toInt()
+        val walk = c.getAsJsonArray("legs").map { it.asJsonObject }.filter { it.str("type") == "walk" }
+            .sumOf { w -> ((w.get("arrival")?.asLong ?: 0L) - (w.get("departure")?.asLong ?: 0L)) / 60_000L }.toInt()
         return TimetableConnection(
+            walkMinutes = walk,
             id = trips.joinToString("|") { it.str("tripId") },
             departureTime = segments.firstOrNull()?.departureTime ?: clock(c.get("departure").asLong),
             arrivalTime = segments.lastOrNull()?.arrivalTime ?: clock(c.get("arrival").asLong),

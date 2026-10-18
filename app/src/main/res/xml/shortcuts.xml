@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2.17.0: long-press the app icon, or ask Google Assistant to open the feature ("Take me home" on Plan&Ride). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <capability android:name="actions.intent.OPEN_APP_FEATURE">
+        <intent android:action="android.intent.action.VIEW"
+            android:targetPackage="com.ksjd.testem"
+            android:targetClass="com.ksjd.testem.MainActivity">
+            <parameter android:name="feature" android:key="feature" />
+        </intent>
+    </capability>
+    <shortcut android:shortcutId="home" android:enabled="true" android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_home" android:shortcutLongLabel="@string/shortcut_home_long">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.ksjd.testem"
+            android:targetClass="com.ksjd.testem.MainActivity">
+            <extra android:name="feature" android:value="home" />
+        </intent>
+        <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+            <parameter-binding android:key="feature" android:value="@array/feature_home" />
+        </capability-binding>
+    </shortcut>
+    <shortcut android:shortcutId="work" android:enabled="true" android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_work" android:shortcutLongLabel="@string/shortcut_work_long">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.ksjd.testem"
+            android:targetClass="com.ksjd.testem.MainActivity">
+            <extra android:name="feature" android:value="work" />
+        </intent>
+        <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+            <parameter-binding android:key="feature" android:value="@array/feature_work" />
+        </capability-binding>
+    </shortcut>
+</shortcuts>

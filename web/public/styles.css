@@ -217,6 +217,8 @@ input[type="color"] { width: 32px; height: 32px; border: 0; background: none; pa
 .follow-sub { margin: 0; font-size: 14px; color: var(--muted); }
 .follow-delay { margin-top: 4px; }
 .catch { margin: 8px 0 0; font-weight: 600; font-size: 15px; padding: 7px 10px; border-radius: 10px; background: var(--surface-2); }
+.catch { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.catch .mode-toggle { padding: 4px 10px; font-size: 16px; flex: none; }
 .catch.leaveNow { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
 .catch.miss { background: color-mix(in srgb, var(--bad) 18%, var(--surface)); color: var(--bad); }
 .catch.muted { font-weight: 400; color: var(--muted); }
@@ -442,3 +444,33 @@ html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
 .next-dest { font-size: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .next-time { font: 700 34px/1 var(--display); font-variant-numeric: tabular-nums; }
 .next-card.first .delay.ontime, .next-card.first .delay.early { color: var(--on-highlight); opacity: .8; }
+
+/* 2.17.0: Home and Work, change reliability, how full the bus is, the submission form */
+.places { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 2px; }
+.place { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; text-align: left;
+  border: 1.5px solid var(--line); background: var(--surface); color: var(--text); border-radius: 16px; padding: 10px 14px; font: inherit; cursor: pointer; }
+.place span { font-size: 13px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place.set { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.place.set span { color: var(--text); }
+.transfer-odds { margin: 0 0 4px; color: var(--muted); }
+.transfer-odds.late { color: var(--late); font-weight: 600; }
+.crowd { margin-top: 10px; }
+.crowd p { margin: 0 0 4px; }
+.chip.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+#submit .dialog { max-height: 90dvh; overflow-y: auto; }
+#submit .field { display: flex; flex-direction: column; gap: 4px; font-size: 14px; flex: 1; }
+#submit fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+#submit fieldset .chip { position: relative; padding: 6px 12px; }
+#submit .row { padding: 0; margin: 0; gap: 10px; min-height: 0; align-items: flex-end; }
+
+/* EM-0076: iPhone date and time fields have their own minimum width and ran out of the dialog; now they fit. */
+.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.field { min-width: 0; }
+.field input[type=date], .field input[type=time] { -webkit-appearance: none; appearance: none; min-width: 0; min-height: 50px; display: block; box-sizing: border-box; }
+.field input::-webkit-date-and-time-value { text-align: left; }
+.ride-editor > :not(h2):not(.list):not(.hint) { margin-left: 16px; margin-right: 16px; }
+
+/* Service notices from emHUB on Home */
+.service-notice { position: relative; padding-right: 44px; }
+.service-notice p { margin: 4px 0 0; }
+.service-notice .notice-x { position: absolute; top: 4px; right: 4px; width: 36px; height: 36px; font-size: 16px; }

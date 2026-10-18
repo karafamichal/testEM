@@ -137,6 +137,30 @@ class CredentialsManager(context: Context) {
     fun saveWatchHomeRoute(route: SavedRoute?) =
         prefs.edit().putString("watch_home_route", route?.let { "${it.fromText}|${it.toText}" }.orEmpty()).apply()
 
+    /** 2.17.0: the rider's Home and Work stops ("home", "work") for "Take me home"; null when not set. */
+    fun getPlace(kind: String): CpStopSuggestion? = prefs.getString("place_$kind", null)
+        ?.let { runCatching { com.google.gson.Gson().fromJson(it, CpStopSuggestion::class.java) }.getOrNull() }
+    fun savePlace(kind: String, stop: CpStopSuggestion?) =
+        prefs.edit().apply { if (stop == null) remove("place_$kind") else putString("place_$kind", com.google.gson.Gson().toJson(stop)) }.apply()
+
+    /** 2.17.0: buses ridden while followed, newest last (at most 2000), for the year in numbers. */
+    fun getRideLog(): List<RideLog> = prefs.getString("ride_log", null)?.let {
+        runCatching { com.google.gson.Gson().fromJson<List<RideLog>>(it, object : com.google.gson.reflect.TypeToken<List<RideLog>>() {}.type) }.getOrNull()
+    }.orEmpty()
+    fun addRide(ride: RideLog) = prefs.edit().putString("ride_log", com.google.gson.Gson().toJson((getRideLog() + ride).takeLast(2000))).apply()
+
+    /** 2.17.0: the alerts' sound (see AlertSound): "default" is the phone's own. */
+    fun getAlertSound(): String = prefs.getString("alert_sound", "default").orEmpty()
+    fun saveAlertSound(id: String) = prefs.edit().putString("alert_sound", id).apply()
+
+    /** The name a rider signs their timetable submissions with (asked once, then filled in). */
+    fun getSubmitName(): String = prefs.getString("submit_name", "").orEmpty()
+    fun saveSubmitName(name: String) = prefs.edit().putString("submit_name", name).apply()
+
+    /** The day (ISO) the last-bus warning was given, so it comes once an evening. */
+    fun getLastBusDay(): String = prefs.getString("last_bus_day", "").orEmpty()
+    fun saveLastBusDay(day: String) = prefs.edit().putString("last_bus_day", day).apply()
+
     // ------------------------------------------------------------- appearance
 
     fun saveThemePresets(presets: List<ThemePreset>) {
@@ -336,6 +360,10 @@ class CredentialsManager(context: Context) {
     /** Anonymous usage statistics (Firebase Analytics); on unless the user turns them off. */
     fun getAnalyticsEnabled(): Boolean = prefs.getBoolean("analytics_enabled", true)
     fun saveAnalyticsEnabled(enabled: Boolean) = prefs.edit().putBoolean("analytics_enabled", enabled).apply()
+
+    /** EM-0072: the rider goes to the stop by car: catch estimates and leave-by alerts in driving time. */
+    fun getCatchByCar(): Boolean = prefs.getBoolean("catch_by_car", false)
+    fun saveCatchByCar(byCar: Boolean) = prefs.edit().putBoolean("catch_by_car", byCar).apply()
 
     fun getCatchEnabled(): Boolean = prefs.getBoolean("catch_enabled", false)
     fun saveCatchEnabled(enabled: Boolean) = prefs.edit().putBoolean("catch_enabled", enabled).apply()

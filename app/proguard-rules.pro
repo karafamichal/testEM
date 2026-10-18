@@ -35,6 +35,8 @@
 # Journey legs travel to the tracking service as JSON.
 -keep class com.ksjd.testem.live.TrackedTrip { *; }
 -keep class com.ksjd.testem.live.TripRef { *; }
+# 2.17.0: buses ridden while followed (the year in numbers), kept as JSON.
+-keep class com.ksjd.testem.RideLog { *; }
 -keep class * extends com.google.gson.reflect.TypeToken
 # IDS BBSK account (2.13, EM-0043): stored with Gson, so its classes and generic types must keep their shape,
 # or the saved lists come back as Gson maps and the account screen crashes reading them.

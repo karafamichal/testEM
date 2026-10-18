@@ -48,6 +48,8 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- 2.17.0: "Take me home" / "To work" on the launcher icon, and for Google Assistant. -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
         <!-- "Stop following" from the Plan&Ride watch app (EM-0041). -->
         <service android:name=".live.WatchStopService" android:exported="true">
@@ -89,6 +91,18 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/stop_widget" />
+        </receiver>
+        <!-- 2.17.0: Home and Work, one tap each ("Take me home"). -->
+        <receiver
+            android:name=".widget.PlacesWidgetReceiver"
+            android:exported="true"
+            android:label="@string/places_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/places_widget" />
         </receiver>
         <!-- Starting to follow from the watch, through an exact alarm (EM-0041). -->
         <receiver android:name=".live.WatchStartReceiver" android:exported="false" />

@@ -76,7 +76,11 @@ data class FollowView(
     /** The bus's position is really known (vehicle, riders), not only the timetable. */
     val live: Boolean,
     /** Exactly what the live notification shows (the widget mirrors it). */
-    val shown: Shown = Shown("", "", "")
+    val shown: Shown = Shown("", "", ""),
+    /** 2.17.0: the rider is on the bus past their stop: they can say how full it is (again and again). */
+    val canReportCrowd: Boolean = false,
+    /** Said how full it is in the last few minutes (a thank-you shows). */
+    val crowdSent: Boolean = false
 )
 
 /** Shared between the tracking service and the UI. */
@@ -205,12 +209,33 @@ object TripTracking {
         start(context, first.copy(nextLegs = legs.drop(1).map { it.copy(nextLegs = emptyList()) }))
     }
 
+    /** 2.17.0: "You may miss line X" tapped: the planner searches from the change stop to the journey's end, from the arrival there. */
+    data class Replan(val from: String, val to: String, val atMs: Long)
+    val replan = MutableStateFlow<Replan?>(null)
+    const val EXTRA_REPLAN_FROM = "replan_from"
+    const val EXTRA_REPLAN_TO = "replan_to"
+    const val EXTRA_REPLAN_AT = "replan_at"
+
     /** The follow notification was tapped: the app shows the followed bus's stops over the home tab. */
     const val EXTRA_SHOW_FOLLOWED = "show_followed"
     private val _showRequested = MutableStateFlow(false)
     val showRequested: StateFlow<Boolean> = _showRequested
     fun requestShow() { _showRequested.value = true }
     fun showHandled() { _showRequested.value = false }
+
+    /** 2.17.0: the arrival shared as a link while following (the service keeps it current and ends it on arrival). */
+    val eta = MutableStateFlow<com.ksjd.testem.hub.HubClient.EtaLink?>(null)
+
+    /** 2.17.0: how full the followed bus is (1 seats free, 2 standing, 3 full), from the rider on it. */
+    fun reportCrowd(context: Context, level: Int) {
+        runCatching { context.startService(Intent(context, TripTrackerService::class.java).setAction(TripTrackerService.ACTION_CROWD).putExtra("level", level)) }
+    }
+
+    /** EM-0072: on foot or by car changed on the card: the estimate again now (and the drive asked again). */
+    fun catchModeChanged(context: Context) {
+        if (_view.value == null) return
+        runCatching { context.startService(Intent(context, TripTrackerService::class.java).setAction(TripTrackerService.ACTION_CATCH_MODE)) }
+    }
 
     fun stop(context: Context) {
         val planned = FollowLater.planned.value != null
@@ -248,6 +273,10 @@ class TripTrackerService : Service() {
     private var stopLatLon: Pair<Double, Double>? = null
     private var stopLookupDone = false
     private var lastFix: android.location.Location? = null
+    /** EM-0072: the router's drive to the stop (by car), and where and when it was asked. */
+    private var driveSeconds: Int? = null
+    private var driveFrom: android.location.Location? = null
+    private var driveAt = 0L
     /** Walking to the stop: when to look at the location again (GPS is off in between). */
     private var nextFixAt = 0L
     private var stopPass = StopPassDetector()
@@ -273,6 +302,8 @@ class TripTrackerService : Service() {
     /** The rider said the bus already left ("It already left"): stop holding it at the stop. */
     private var busGone = false
     private var lastRiderReportAt = 0L
+    /** When the rider last said how full the bus is (0: not on this bus). */
+    private var crowdSentAt = 0L
     private var localFromGps = false
     /** Android granted the location service type; without it no GPS arrives while the app is closed. */
     private var hasLocationType = false
@@ -295,12 +326,33 @@ class TripTrackerService : Service() {
             startRide(intent.getStringExtra(EXTRA_RIDE).orEmpty(), intent.getLongExtra(EXTRA_DEPARTURE, 0L))
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_CATCH_MODE) {
+            driveAt = 0L
+            nextFixAt = 0L
+            trip?.let { t -> lastDetail?.let { redraw(t, it) } }
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_GONE) {
             // "It already left": the rider missed it or it went early; follow the timetable/live data again.
             busGone = true
             waitingAtStop = false
             localDelay = null
             trip?.let { t -> lastDetail?.let { redraw(t, it) } }
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_CROWD) {
+            val level = intent.getIntExtra("level", 0)
+            val key = lastDetail?.communityKey
+            val now = System.currentTimeMillis()
+            // ponytail: a tap in the 20 s after the last one is dropped (a double tap is one report)
+            if (level in 1..3 && key != null && now - crowdSentAt > 20_000L) {
+                crowdSentAt = now
+                scope.launch {
+                    val crowd = runCatching { HubClient.reportCrowd(key, reporterId, level) }.getOrNull()
+                    lastDetail = lastDetail?.copy(crowd = crowd ?: com.ksjd.testem.hub.Crowd(level, 0))
+                    trip?.let { t -> lastDetail?.let { redraw(t, it) } }
+                }
+            }
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_REPORT) {
@@ -384,6 +436,7 @@ class TripTrackerService : Service() {
         waitingAtStop = false
         busGone = false
         lastRiderReportAt = 0L
+        crowdSentAt = 0L
         localFromGps = false
         nextFixAt = 0L
         stopPass = StopPassDetector()
@@ -538,7 +591,12 @@ class TripTrackerService : Service() {
         // EM-0033: the rider stands at their stop after the bus was due, so it hasn't passed yet, whatever the
         // timetable says: keep it at the stop (late) and ask in the notification whether it's here or gone.
         val boardIdx = p.boardingIndex
-        if (boardIdx != null && !ridingBus && !busGone && atStop && nearest == boardIdx && !moving &&
+        // EM-0073: at the rider's own stop a wider circle: its recorded point can be tens of metres off and GPS drifts in
+        // a shelter or a bus (74 m in the report), and missing it let the bus run on by the timetable while it stood there.
+        val atBoarding = atStop || (boardIdx != null && nearest == boardIdx && coords.getOrNull(boardIdx)?.let { (lat, lon) ->
+            LiveRepository.distanceMeters(fix.latitude, fix.longitude, lat, lon) <= BOARDING_RADIUS_M
+        } == true)
+        if (boardIdx != null && !ridingBus && !busGone && atBoarding && nearest == boardIdx && !moving &&
             now > scheduled[boardIdx] && (waitingAtStop || p.position > boardIdx + 0.05f)) {
             if (!waitingAtStop) Log.i(GPS_TAG, "rider waits at the stop: the bus hasn't come yet")
             waitingAtStop = true
@@ -547,7 +605,7 @@ class TripTrackerService : Service() {
             redraw(current, detail)
             return
         }
-        if (waitingAtStop && (moving || !atStop)) waitingAtStop = false
+        if (waitingAtStop && (moving || !atBoarding)) waitingAtStop = false
         // Left (after standing there) or drove past a stop: the exact delay there (timetable times are departures).
         val left = stopPass.onFix(index, moving, now, atStop)?.takeIf { it.stop >= boarding.toInt() && it.stop <= detail.stops.lastIndex }
         if (left != null) {
@@ -632,9 +690,31 @@ class TripTrackerService : Service() {
 
     /** The live notification, and the same texts for the home card and the widget (EM-0025: they must match). */
     private fun show(current: TrackedTrip, detail: TripDetail, progress: TripProgress, catch: String?) {
+        shareEta(current, detail, progress)
         val notification = liveNotification(current, detail, progress, catch)
-        TripTracking.publish(this, FollowView(current, detail, progress, catch, positionKnown(detail), shown))
+        TripTracking.publish(this, FollowView(current, detail, progress, catch, positionKnown(detail), shown,
+            canReportCrowd = crowdAllowed(detail, progress), crowdSent = System.currentTimeMillis() - crowdSentAt < 5 * 60_000L))
         NotificationManagerCompat.from(this).notifySafely(NOTIFICATION_ID, notification)
+    }
+
+    private var etaSentAt = 0L
+    private var etaSent: Pair<Long, Int>? = null
+
+    /**
+     * 2.17.0: the shared arrival link: when the rider gets to the end of the journey (this bus's stop, or a later
+     * bus's planned arrival), sent when it changes or every 2 minutes.
+     */
+    private fun shareEta(current: TrackedTrip, detail: TripDetail, p: TripProgress) {
+        val link = TripTracking.eta.value ?: return
+        val stop = detail.stops.getOrNull(p.alightIndex ?: detail.stops.lastIndex) ?: return
+        val arrival = current.nextLegs.lastOrNull()?.arrivesAtMs?.takeIf { it > 0 }
+            ?: stop.actualMs ?: (stop.scheduledMs + (detail.delaySeconds ?: 0) * 1000L)
+        val now = System.currentTimeMillis()
+        val what = arrival to (detail.delaySeconds ?: 0)
+        if (what == etaSent && now - etaSentAt < 2 * 60_000L) return
+        etaSent = what
+        etaSentAt = now
+        scope.launch { HubClient.updateEta(link, arrival, what.second, current.ref.line) }
     }
 
     // ------------------------------------------------------------ catch estimate
@@ -670,6 +750,14 @@ class TripTrackerService : Service() {
         val fix = Locations.current(this, maxAgeMs = 20_000L)
         if (fix != null) lastFix = fix
         val meters = fix?.let { f -> stopLatLon?.let { (lat, lon) -> LiveRepository.distanceMeters(f.latitude, f.longitude, lat, lon) } }
+        // EM-0072: by car, the drive along the roads from the router; asked again after 300 m or 3 min.
+        val stop = stopLatLon
+        if (fix != null && stop != null && prefs.getCatchByCar() && (meters ?: 0) > CatchEstimate.CAR_FROM_M &&
+            (driveFrom?.distanceTo(fix)?.let { it > 300f } != false || now - driveAt > 3 * 60_000L)) {
+            driveSeconds = kotlinx.coroutines.withContext(Dispatchers.IO) { CatchEstimate.driveSeconds(fix.latitude, fix.longitude, stop.first, stop.second) } ?: driveSeconds
+            driveFrom = fix
+            driveAt = now
+        }
         nextFixAt = now + (meters?.let { CatchEstimate.nextCheckMs(it) } ?: CatchEstimate.MIN_RECHECK_MS)
         Log.i(GPS_TAG, "location check: ${meters ?: "?"} m from the stop, next in ${(nextFixAt - now) / 1000} s")
     }
@@ -700,12 +788,16 @@ class TripTrackerService : Service() {
         val fix = lastFix?.takeIf { it.accuracy <= MAX_FIX_ACCURACY_M } ?: return null
         val (lat, lon) = stopLatLon ?: return null
         val meters = LiveRepository.distanceMeters(fix.latitude, fix.longitude, lat, lon)
-        return CatchEstimate.from(meters, seconds)
+        return CatchEstimate.from(meters, seconds, prefs.getCatchByCar(), driveSeconds)
     }
 
     /** Is the bus's real position known (live feed, a rider report or the community)? */
     private fun positionKnown(detail: TripDetail): Boolean =
         (detail.positionSource != PositionSource.Timetable && detail.positionSource != PositionSource.History) || localDelay != null
+
+    /** EM-0072: by car, and far enough that it's a drive (close by it's a walk either way). */
+    private fun car(): Boolean = prefs.getCatchByCar() &&
+        (lastFix?.let { f -> stopLatLon?.let { (lat, lon) -> LiveRepository.distanceMeters(f.latitude, f.longitude, lat, lon) > CatchEstimate.CAR_FROM_M } } ?: false)
 
     private fun catchLine(detail: TripDetail, p: TripProgress): String? {
         if (p.onBoard || !prefs.getCatchEnabled()) return null
@@ -714,9 +806,10 @@ class TripTrackerService : Service() {
         val leaveIn = (estimate.marginSeconds / 60.0).roundToInt()
         val text = when (estimate.verdict) {
             CatchEstimate.Verdict.AtStop -> getString(R.string.catch_at_stop)
-            CatchEstimate.Verdict.Relaxed, CatchEstimate.Verdict.LeaveSoon -> getString(R.string.catch_leave_in, walk, leaveIn)
-            CatchEstimate.Verdict.LeaveNow -> getString(R.string.catch_leave_now, walk)
-            CatchEstimate.Verdict.Miss -> getString(R.string.catch_miss, walk)
+            CatchEstimate.Verdict.Relaxed, CatchEstimate.Verdict.LeaveSoon ->
+                getString(if (car()) R.string.catch_car_leave_in else R.string.catch_leave_in, walk, leaveIn)
+            CatchEstimate.Verdict.LeaveNow -> getString(if (car()) R.string.catch_car_leave_now else R.string.catch_leave_now, walk)
+            CatchEstimate.Verdict.Miss -> getString(if (car()) R.string.catch_car_miss else R.string.catch_miss, walk)
         }
         return if (positionKnown(detail)) text else getString(R.string.catch_by_timetable, text)
     }
@@ -731,11 +824,11 @@ class TripTrackerService : Service() {
         when (estimate.verdict) {
             CatchEstimate.Verdict.LeaveNow -> notifyAlert(
                 "catch_leave", getString(R.string.catch_alert_leave_title, current.ref.line),
-                getString(R.string.catch_alert_leave_body, walk, p.boardingStopName)
+                getString(if (car()) R.string.catch_alert_car_leave_body else R.string.catch_alert_leave_body, walk, p.boardingStopName)
             )
             CatchEstimate.Verdict.Miss -> notifyAlert(
                 "catch_miss", getString(R.string.catch_alert_miss_title, current.ref.line),
-                getString(R.string.catch_alert_miss_body, walk)
+                getString(if (car()) R.string.catch_alert_car_miss_body else R.string.catch_alert_miss_body, walk)
             )
             else -> Unit
         }
@@ -783,6 +876,7 @@ class TripTrackerService : Service() {
                     progress = TripProgress.from(detail, current, standingAt = standingAt.takeIf { it >= 0 })
                 }
                 if (progress.finished || riderOffAt >= (progress.alightIndex ?: detail.stops.lastIndex)) {
+                    logRide(current, detail, progress)
                     val next = current.nextLegs.firstOrNull()
                     if (next != null) {
                         changeTo(next, current.nextLegs.drop(1), progress.lastStopName)
@@ -805,6 +899,28 @@ class TripTrackerService : Service() {
         }
     }
 
+    /**
+     * 2.17.0: how full the bus is can be said only once it has left the rider's stop with them on it: not while it's
+     * coming or standing there, and not when the phone stayed at the stop (missed it) or got off.
+     */
+    private fun crowdAllowed(detail: TripDetail, p: TripProgress): Boolean {
+        if (!HubClient.isConfigured || detail.communityKey == null || !p.onBoard || p.finished || riderOffAt >= 0) return false
+        val fresh = lastFix?.let { System.currentTimeMillis() - it.time <= FRESH_FIX_MS } ?: false
+        val leftBehind = p.boardingIndex != null && fresh && !ridingBus && stopLatLon?.let { (lat, lon) ->
+            LiveRepository.distanceMeters(lastFix!!.latitude, lastFix!!.longitude, lat, lon) < NEAR_STOP_M } == true
+        return !leftBehind
+    }
+
+    /** 2.17.0: a bus ridden to the end of the rider's part, for the year in numbers (only on the phone). */
+    private fun logRide(current: TrackedTrip, detail: TripDetail, p: TripProgress) {
+        val stops = detail.stops
+        fun at(i: Int?) = i?.let { stops.getOrNull(it) }?.let { it.actualMs ?: it.scheduledMs }
+        val start = at(p.boardingIndex ?: 0) ?: return
+        val end = at(p.alightIndex ?: stops.lastIndex) ?: return
+        runCatching { prefs.addRide(com.ksjd.testem.RideLog(start, current.ref.line, p.boardingStopName.ifBlank { stops.first().name },
+            p.lastStopName, ((end - start) / 60_000L).toInt())) }
+    }
+
     /** The rider's phone, fresh, is on this bus before their stop (where the bus really is, whatever the clock says). */
     private fun stillOnBoard(p: TripProgress): Boolean {
         val alight = p.alightIndex ?: return false
@@ -825,10 +941,20 @@ class TripTrackerService : Service() {
         val date = runCatching { java.time.LocalDate.parse(next.ref.serviceDate) }.getOrNull() ?: return
         val departure = date.atStartOfDay(com.ksjd.testem.SK_ZONE).toInstant().toEpochMilli() + next.ref.plannedSecondOfDay * 1000L
         if (arrival + com.ksjd.testem.TimetableService.changeMinutes * 60_000L <= departure) return
+        val changeStop = p.alightStopName ?: stop.name
+        val end = current.nextLegs.last().let { it.toStop ?: it.ref.destination }
+        val replan = PendingIntent.getActivity(
+            this, REQUEST_REPLAN,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(TripTracking.EXTRA_REPLAN_FROM, changeStop).putExtra(TripTracking.EXTRA_REPLAN_TO, end)
+                .putExtra(TripTracking.EXTRA_REPLAN_AT, arrival),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         notifyAlert(
             "transfer_risk", getString(R.string.transfer_risk_title, next.ref.line),
-            getString(R.string.transfer_risk_body, (detail.delaySeconds ?: 0) / 60, p.alightStopName ?: stop.name,
-                com.ksjd.testem.ui.Format.clock(arrival), next.ref.line, com.ksjd.testem.ui.Format.clock(departure))
+            getString(R.string.transfer_risk_body, (detail.delaySeconds ?: 0) / 60, changeStop,
+                com.ksjd.testem.ui.Format.clock(arrival), next.ref.line, com.ksjd.testem.ui.Format.clock(departure)),
+            tap = replan
         )
     }
 
@@ -925,7 +1051,8 @@ class TripTrackerService : Service() {
                 .setContentText(shown.text)
                 .setShortCriticalText(shown.countdown)
                 .setWhen(p.boardingExpectedMs)
-                .setShowWhen(true)
+                // EM-0077: the time is in the text already; Android's own time beside the title showed it twice.
+                .setShowWhen(false)
                 .setUsesChronometer(false)
         } else {
             // On board: time to the next stop, current stop underneath.
@@ -944,7 +1071,7 @@ class TripTrackerService : Service() {
                 .setContentText(shown.text)
                 .setShortCriticalText(shown.countdown)
                 .setWhen(p.nextExpectedMs)
-                .setShowWhen(true)
+                .setShowWhen(false) // EM-0077: "Next: Rákoš at 7:02" already says when
         }
         builder.setStyle(progressStyle(detail, p))
         return builder.build()
@@ -1040,16 +1167,18 @@ class TripTrackerService : Service() {
         }
     }
 
-    private fun notifyAlert(key: String, title: String, body: String) {
+    private fun notifyAlert(key: String, title: String, body: String, tap: PendingIntent? = null) {
         if (!alertsSent.add(key)) return
         TripTracking.recordAlert(this, key, title, body)
-        val notification = NotificationCompat.Builder(this, CHANNEL_ALERTS)
+        val channel = com.ksjd.testem.reminders.AlertSound.channel(this, CHANNEL_ALERTS, getString(R.string.track_channel_alerts))
+        val notification = NotificationCompat.Builder(this, channel)
             .setSmallIcon(R.drawable.ic_stat_bus)
             .setContentTitle(title)
             .setContentText(body)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setContentIntent(contentIntent())
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(tap ?: contentIntent())
             .setAutoCancel(true)
             // Account → Watch: alerts on the phone only. "Get off next" and "Leave now" the watch app announces itself,
             // each with its own vibration.
@@ -1071,9 +1200,6 @@ class TripTrackerService : Service() {
                 enableVibration(false)
             }
         )
-        manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ALERTS, getString(R.string.track_channel_alerts), NotificationManager.IMPORTANCE_HIGH)
-        )
     }
 
     /**
@@ -1089,9 +1215,12 @@ class TripTrackerService : Service() {
     }
 
     private fun finish() {
-        // Sharing by code ends with following.
+        // Sharing by code ends with following; so does a shared arrival link ("Arrived" for whoever has it open).
         val app = applicationContext
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { Shares.stopOutgoing(app) }
+        val link = TripTracking.eta.value
+        TripTracking.eta.value = null
+        etaSent = null
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { Shares.stopOutgoing(app); link?.let { HubClient.endEta(it) } }
         stopRiderTracking()
         loop?.cancel()
         trip = null
@@ -1106,6 +1235,8 @@ class TripTrackerService : Service() {
         const val ACTION_GONE = "com.ksjd.testem.TRACK_GONE"
         const val ACTION_RIDE = "com.ksjd.testem.TRACK_RIDE"
         const val ACTION_PROMOTE = "com.ksjd.testem.TRACK_PROMOTE"
+        const val ACTION_CATCH_MODE = "com.ksjd.testem.TRACK_CATCH_MODE"
+        const val ACTION_CROWD = "com.ksjd.testem.TRACK_CROWD"
         private const val EXTRA_RIDE = "ride"
         private const val EXTRA_DEPARTURE = "departure"
 
@@ -1117,10 +1248,13 @@ class TripTrackerService : Service() {
         private const val REQUEST_REPORT_BEHIND = 12
         private const val REQUEST_REPORT_LEAVING = 13
         private const val REQUEST_GONE = 14
+        private const val REQUEST_REPLAN = 15
         /** Within this of the boarding stop the rider is "at the stop": live GPS on. */
         private const val NEAR_STOP_M = 150
         /** A bus standing this close to a stop is stopped there (timetable stop positions can be tens of metres off). */
         private const val STOP_RADIUS_M = 60
+        /** Standing this close to the rider's own stop counts as waiting there (EM-0073). */
+        private const val BOARDING_RADIUS_M = 120
         /** Slower than this (m/s, about 9 km/h) the bus counts as stopped. */
         private const val MOVING_MPS = 2.5f
         /** Alerts the watch app announces itself (the phone's copy stays off the watch). */

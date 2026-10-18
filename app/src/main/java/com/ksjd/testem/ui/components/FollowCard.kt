@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DirectionsCar
+import androidx.compose.material.icons.automirrored.outlined.DirectionsWalk
 import androidx.compose.material.icons.outlined.DirectionsBus
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,7 +37,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material.icons.outlined.Share
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -122,6 +131,30 @@ fun FollowCard(trip: TrackedTrip, view: FollowView?, now: Long, modifier: Modifi
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LiveBadge(view?.live == true, on)
                 Spacer(Modifier.weight(1f))
+                // 2.17.0: send someone a link with your arrival, live; nobody needs the app to open it.
+                if (p != null && com.ksjd.testem.hub.HubClient.isConfigured) {
+                    val scope = rememberCoroutineScope()
+                    val sharing by TripTracking.eta.collectAsState()
+                    IconButton(onClick = {
+                        haptic(Haptics.TAP)
+                        scope.launch {
+                            val link = TripTracking.eta.value ?: runCatching {
+                                com.ksjd.testem.hub.HubClient.createEta(trip.nextLegs.lastOrNull()?.toStop ?: trip.toStop ?: p.alightStopName ?: view.detail.destination)
+                            }.getOrNull()
+                            if (link == null) {
+                                android.widget.Toast.makeText(context, R.string.eta_failed, android.widget.Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
+                            TripTracking.eta.value = link
+                            TripTracking.catchModeChanged(context) // sends the arrival right away
+                            val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                                .putExtra(android.content.Intent.EXTRA_TEXT, context.getString(R.string.eta_share_text, link.url))
+                            context.startActivity(android.content.Intent.createChooser(send, context.getString(R.string.eta_share)))
+                        }
+                    }) {
+                        Icon(Icons.Outlined.Share, stringResource(if (sharing != null) R.string.eta_sharing else R.string.eta_share), tint = on)
+                    }
+                }
                 IconButton(onClick = { haptic(Haptics.CONFIRM); TripTracking.stop(context) }) {
                     Icon(Icons.Outlined.Close, stringResource(R.string.track_stop), tint = on)
                 }
@@ -143,6 +176,16 @@ fun FollowCard(trip: TrackedTrip, view: FollowView?, now: Long, modifier: Modifi
                     Text(stringResource(R.string.follow_planned_card, clock(leaves)), color = on, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))
                     Text(stringResource(R.string.follow_planned_card_live, clock(plannedAt!!)), color = on.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
+                    // EM-0075: without exact alarms the live notification may come up to an hour late (MIUI): ask here.
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S && !com.ksjd.testem.rides.RideScheduler.canScheduleExact(context)) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(stringResource(R.string.follow_exact_needed), color = on, style = MaterialTheme.typography.bodyMedium)
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = { runCatching { context.startActivity(com.ksjd.testem.live.FollowLater.exactAlarmSettings(context)) } },
+                            border = androidx.compose.foundation.BorderStroke(1.dp, on),
+                            modifier = Modifier.padding(top = 6.dp)
+                        ) { Text(stringResource(R.string.follow_exact_allow), color = on) }
+                    }
                 } else if (p == null) {
                     Text(stringResource(R.string.track_loading), color = on.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyLarge)
                 } else {
@@ -170,10 +213,60 @@ fun FollowCard(trip: TrackedTrip, view: FollowView?, now: Long, modifier: Modifi
                     }
                     view.catchLine?.let {
                         Spacer(Modifier.height(10.dp))
-                        Text(it, color = on, style = MaterialTheme.typography.bodyMedium)
+                        // EM-0072: on foot or driven to the stop today: one tap, no trip to the settings.
+                        val prefs = remember { com.ksjd.testem.CredentialsManager(context) }
+                        var byCar by remember { mutableStateOf(prefs.getCatchByCar()) }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(it, color = on, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                            IconButton(onClick = {
+                                haptic(Haptics.TAP)
+                                byCar = !byCar
+                                prefs.saveCatchByCar(byCar)
+                                TripTracking.catchModeChanged(context)
+                            }) {
+                                Icon(
+                                    if (byCar) Icons.Outlined.DirectionsCar else Icons.AutoMirrored.Outlined.DirectionsWalk,
+                                    stringResource(if (byCar) R.string.catch_mode_car else R.string.catch_mode_walk), tint = on
+                                )
+                            }
+                        }
                     }
                 }
+                if (view != null && p != null) CrowdRow(view, on)
                 if (trip.nextLegs.isNotEmpty()) JourneyLegs(trip, on)
+            }
+        }
+    }
+}
+
+/**
+ * 2.17.0: how full the bus is, from riders on it; on the bus past your stop, one tap says it (again whenever it changes).
+ */
+@Composable
+private fun CrowdRow(view: FollowView, on: Color) {
+    val crowd = view.detail.crowd
+    if (crowd == null && !view.canReportCrowd) return
+    val context = LocalContext.current
+    val haptic = rememberHaptic()
+    val names = listOf(R.string.crowd_1, R.string.crowd_2, R.string.crowd_3)
+    Spacer(Modifier.height(12.dp))
+    crowd?.let {
+        Text(stringResource(R.string.crowd_now, stringResource(names[(it.level - 1).coerceIn(0, 2)]), it.minutesAgo),
+            color = on, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+    }
+    if (!view.canReportCrowd) return
+    Text(stringResource(if (view.crowdSent) R.string.crowd_thanks else R.string.crowd_title), color = on.copy(alpha = 0.9f),
+        style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        names.forEachIndexed { i, name ->
+            val chosen = crowd?.level == i + 1
+            Box(
+                Modifier.clip(RoundedCornerShape(50)).background(if (chosen) on else Color.Transparent)
+                    .border(1.dp, on.copy(alpha = 0.7f), RoundedCornerShape(50))
+                    .clickable { haptic(Haptics.CONFIRM); TripTracking.reportCrowd(context, i + 1) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) {
+                Text(stringResource(name), color = if (chosen) MaterialTheme.colorScheme.primary else on, style = MaterialTheme.typography.labelLarge)
             }
         }
     }

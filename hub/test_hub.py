@@ -518,6 +518,44 @@ assert tc.plan(tc.resolve("town namestie x"), tc.resolve("town park"), sat, 1) =
 x = tc.resolve("town namestie x")
 assert [(d["line"], hm(d["at"])) for d in tc.departures([x], at("06:00"), 5)][0] == ("9", "30 07:00")
 assert tc.departures([x], at("06:00"), 5, {"sad-zvolen-as"}) == [], "the apps show SAD Zvolen live instead"
+# A city way's stops set in the map editor: an added stop is timed by distance between the trip's own stops.
+mid = tc.by_id.get("town as")
+if mid is not None:
+    r0 = [(x, 25200, "501"), (tc.resolve("town park"), 25800, "502")]
+    ids = [tc.station_ids[x], tc.station_ids[mid], tc.station_ids[r0[1][0]]]
+    own = tc._own_stops(r0, ids, {})
+    assert [o[0] for o in own] == [x, mid, r0[1][0]] and 25200 < own[1][1] < 25800, own
+    assert tc._own_stops(r0, list(reversed(ids)), {}) == r0, "another order: S.A.D.'s stops stay"
+    # Line 7: S.A.D. ends the trip early; stops added after its last one go on at its speed (and before its first).
+    far = tc.by_id.get("city station")
+    if far is not None:
+        longer = tc._own_stops(r0, [tc.station_ids[x], tc.station_ids[r0[1][0]], tc.station_ids[far]], {})
+        assert [o[0] for o in longer] == [x, r0[1][0], far] and longer[2][1] > 25800, longer
+        earlier = tc._own_stops(r0, [tc.station_ids[far], tc.station_ids[x], tc.station_ids[r0[1][0]]], {})
+        assert earlier[0][0] == far and earlier[0][1] < 25200, earlier
+# A way's stops set in the editor apply right away, and taking them off goes back to S.A.D.'s stops.
+city_i = next(iter(tc.city))
+key9 = f"{tc.city[city_i][0]}-{tc.city[city_i][1]}"
+own9 = [tc.station_ids[s] for s in tc.trips[city_i][7]] + [tc.station_ids[tc.by_id["city station"]]]
+timetable.edits["routes"][key9] = own9
+tc.apply_routes()
+assert tc.station_ids[tc.trips[city_i][7][-1]] == "city station" and len(tc.trips[city_i][7]) == 3, tc.trips[city_i][7]
+del timetable.edits["routes"][key9]
+tc.apply_routes()
+assert len(tc.trips[city_i][7]) == 2, "removed again"
+# Many requests for a day not built yet (every map tab after a restart): built once, the others wait for it.
+import threading as _th
+built_days = []
+_real_build = tc._build_day
+tc._build_day = lambda d: built_days.append(d) or _real_build(d)
+with tc._lock:
+    tc._days.clear()
+day_ = datetime.date(2026, 9, 30)
+workers = [_th.Thread(target=tc.day, args=(day_,)) for _ in range(8)]
+[w.start() for w in workers]; [w.join() for w in workers]
+assert built_days == [day_], built_days
+tc._build_day = _real_build
+
 # A city bus sending its GPS (sadzv) is on the map where it is, with its delay; without it, where the timetable says.
 on_map = lambda gps: [v for v in tc.vehicles(at("07:05"), (-90, -180, 90, 180), gps=gps) if v["line"] == "9"]  # noqa: E731
 assert [(v["lat"], v["lon"], v["delay"], v["source"]) for v in on_map({(77, 5): (48.72, 19.13, 60)})] == [(48.72, 19.13, 60, "bus")]
@@ -539,6 +577,260 @@ def app_get(path, key="dev-key"):
     return res.status, json.loads(res.read() or b"{}")
 assert app_get("stops?q=t%20as", key="wrong")[0] == 401
 assert app_get("stops?q=t%20as")[1]["stops"][0]["id"] == "town as"
+
+# ==== 2.17.0
+def v1(method, path, data=None, raw=False):
+    req = urllib.request.Request(base + path, method=method, data=None if data is None else json.dumps(data).encode(),
+                                 headers={"Content-Type": "application/json", "X-App-Key": "dev-key"})
+    try:
+        res = opener.open(req)
+    except urllib.error.HTTPError as err:
+        res = err
+    body = res.read()
+    return res.status, (body.decode() if raw else json.loads(body or b"{}"))
+
+# Crowding: a level 1-3 from a rider on the bus, the newest in 20 min shown with the delay; anything else refused.
+assert v1("POST", "/api/v1/community/crowd", {"tripKey": "9|x|1", "reporter": "c1", "level": 7})[0] == 400
+assert v1("POST", "/api/v1/community/crowd", {"tripKey": "9|x|1", "level": 2})[0] == 400, "no reporter"
+assert v1("POST", "/api/v1/community/crowd", {"tripKey": "9|x|1", "reporter": "c1", "level": "2"})[0] == 400, "a string is not a level"
+assert v1("POST", "/api/v1/community/crowd", {"tripKey": "9|x|1", "reporter": "c1", "level": 2})[1]["crowd"]["level"] == 2
+v1("POST", "/api/v1/community/crowd", {"tripKey": "9|x|1", "reporter": "c2", "level": 3})
+assert v1("GET", "/api/v1/community/delay?trip=9%7Cx%7C1")[1]["crowd"]["level"] == 3, "the newest report counts"
+assert v1("GET", "/api/v1/community/delay?trip=9%7Cx%7C2")[1]["crowd"] is None
+
+# How often a change worked on earlier days: the first bus's delay against the time to change.
+def past_key(line, days_ago):
+    d = datetime.datetime.now(hub.LOCAL_ZONE).replace(hour=7, minute=0, second=0, microsecond=0) - datetime.timedelta(days=days_ago)
+    return f"{line}|Stop A|{int(d.timestamp()) * 1000}"
+with hub.db() as conn_:
+    for days_ago, delay in ((7, 60), (14, 300), (21, 600)):
+        conn_.execute("""INSERT INTO community_reports(created_at, trip_key, line, stop_index, stop_name, scheduled_ms, delay_s,
+                         reporter, platform, kind) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                      (hub.now() - days_ago * 86400, past_key("91", days_ago), "91", 1, "Stop A", 0, delay, f"h{days_ago}", "", "passed"))
+    odds = hub.transfer_odds(conn_, past_key("91", 0), past_key("92", 0), 240)
+    assert odds == {"worked": 1, "runs": 3}, odds
+    assert hub.transfer_odds(conn_, past_key("93", 0), past_key("92", 0), 240) is None, "no history: nothing said"
+
+# Riders' submissions: checked on the way in, kept for an admin, used only once approved.
+hub.rebuild_timetable = lambda: None  # the test timetable stays (the real one is rebuilt in the background)
+assert v1("POST", "/api/v1/submissions", {"kind": "stop", "name": "Ann", "stopName": "New", "lat": 40, "lon": 19})[0] == 400, "outside Slovakia"
+assert v1("POST", "/api/v1/submissions", {"kind": "stop", "name": "", "stopName": "New", "lat": 48.7, "lon": 19.1})[0] == 400, "a name"
+assert v1("POST", "/api/v1/submissions", {"kind": "lol", "name": "Ann"})[0] == 400
+assert v1("POST", "/api/v1/submissions", {"kind": "trip", "name": "Ann", "line": "X1", "weekdays": [0],
+                                          "stops": [["town as", "07:00"], ["no such stop zz", "07:10"]]})[0] == 400, "unknown stop"
+assert v1("POST", "/api/v1/submissions", {"kind": "trip", "name": "Ann", "line": "X1", "weekdays": [0],
+                                          "stops": [["town as", "07:10"], ["town park", "07:00"]]})[0] == 400, "times go back"
+assert v1("POST", "/api/v1/submissions", {"kind": "trip", "name": "Ann", "line": "X1", "weekdays": [0],
+                                          "stops": [["town as", "7:x"], ["town park", "07:20"]]})[0] == 400, "a bad time"
+assert v1("POST", "/api/v1/submissions", {"kind": "trip", "name": "Ann", "line": "X1", "weekdays": [],
+                                          "stops": [["town as", "07:00"], ["town park", "07:20"]]})[0] == 400, "no day"
+status, sub_trip = v1("POST", "/api/v1/submissions", {"kind": "trip", "name": "Ann", "email": "a@b.c", "line": "X1",
+                      "weekdays": list(range(7)), "stops": [["town as", "07:00"], ["town park", "07:20"]]})
+assert status == 201, sub_trip
+status, sub_stop = v1("POST", "/api/v1/submissions", {"kind": "stop", "name": "Ben", "stopName": "Town, New Corner", "lat": 48.701, "lon": 19.101})
+assert status == 201
+assert v1("POST", "/api/v1/submissions", {"kind": "problem", "name": "Cy", "station": "town as", "text": "Timetable missing"})[0] == 201
+listed = admin_get("submissions")["submissions"]
+assert {s["kind"] for s in listed} >= {"trip", "stop", "problem"} and all(s["status"] == "new" for s in listed[:3])
+assert [s for s in listed if s["id"] == sub_trip["id"]][0]["data"]["stopNames"][0] == tt.names[tt.by_id["town as"]]
+assert not timetable.edits["extra_trips"], "nothing used before approval"
+call(f"/admin/api/submissions/{sub_trip['id']}/approve", {"note": "checked"}, cookie)
+call(f"/admin/api/submissions/{sub_stop['id']}/approve", {}, cookie)
+assert [x["line"] for x in timetable.edits["extra_trips"]] == ["X1"] and timetable.edits["extra_stations"][0]["name"] == "Town, New Corner"
+tx = timetable.Timetable({"a": os.path.join(folder, "a.zip"), "b": os.path.join(folder, "b.zip")}, today=datetime.date(2026, 9, 29))
+assert tx.resolve("town new corner") is not None, "an approved stop is a stop"
+x_trips = [x for x in tx.trips if x[2] == "X1"]
+assert x_trips and tx.station_ids[x_trips[0][7][0]] == "town as" and x_trips[0][9] == (25200, 26400)
+x1 = tx.departures([tx.by_id["town as"]], int(datetime.datetime(2026, 9, 30, 6, 50, tzinfo=timetable.ZONE).timestamp()), 20)
+assert any(d["line"] == "X1" for d in x1), x1
+call(f"/admin/api/submissions/{sub_trip['id']}/reject", {}, cookie)
+assert not timetable.edits["extra_trips"], "rejected again: gone"
+
+# Lines added in the dashboard: checked, one trip per departure, in the timetable; edited and deleted again.
+def acall(path_, data_, ck=""):
+    st_, _, b_ = call(path_, data_, ck)
+    return st_, json.loads(b_ or b"{}")
+bad_line = {"line": "X9", "weekdays": [0], "stops": [["town as", 0], ["town park", 12]], "departures": ["7:00"]}
+for broken, why in (({**bad_line, "line": ""}, "line"), ({**bad_line, "weekdays": []}, "day"), ({**bad_line, "stops": [["town as", 0]]}, "2 to 80"),
+                    ({**bad_line, "stops": [["town as", 5], ["town park", 12]]}, "start at 0"), ({**bad_line, "stops": [["town as", 0], ["town park", -1]]}, "go back"),
+                    ({**bad_line, "stops": [["town as", 0], ["nope zz", 3]]}, "timetable's stops"), ({**bad_line, "departures": ["25:99"]}, "HH:MM"),
+                    ({**bad_line, "departures": []}, "departures"), ({**bad_line, "stops": "x"}, "")):
+    status_, body_ = acall("/admin/api/lines", broken, cookie)
+    assert status_ == 400 and why in body_.get("error", ""), (broken, status_, body_)
+assert call("/admin/api/lines", bad_line)[0] == 401, "only admins add lines"
+status_, made = acall("/admin/api/lines", {**bad_line, "departures": ["7:30", "7:00", "7:00"]}, cookie)
+assert status_ == 200, made
+listed_ = admin_get("lines")
+mine = [x for x in listed_["lines"] if x["id"] == made["id"]][0]
+assert mine["data"]["departures"] == [25200, 27000] and mine["data"]["headsign"] == tt.names[tt.by_id["town park"]] and listed_["operators"]
+x9 = [x for x in timetable.edits["extra_trips"] if x["line"] == "X9"]
+assert [x["stops"] for x in x9] == [[["town as", 25200], ["town park", 25920]], [["town as", 27000], ["town park", 27720]]], x9
+tl = timetable.Timetable({"a": os.path.join(folder, "a.zip"), "b": os.path.join(folder, "b.zip")}, today=datetime.date(2026, 9, 29))
+on_board = tl.departures([tl.by_id["town as"]], int(datetime.datetime(2026, 9, 28, 6, 50, tzinfo=timetable.ZONE).timestamp()), 30)
+x9_deps = [d for d in on_board if d["line"] == "X9"]
+assert len(x9_deps) == 2 and x9_deps[0]["tripId"].startswith("extra:line-"), x9_deps
+assert tl.trip(x9_deps[0]["tripId"])["stops"][-1]["id"] == "town park", "a line's trip can be opened and followed"
+assert call(f"/admin/api/lines/{made['id']}", {**bad_line, "line": "X10"}, cookie)[0] == 200
+assert {x["line"] for x in timetable.edits["extra_trips"]} >= {"X10"} and not [x for x in timetable.edits["extra_trips"] if x["line"] == "X9"]
+assert call(f"/admin/api/lines/{made['id']}/delete", {}, cookie)[0] == 200
+assert not [x for x in timetable.edits["extra_trips"] if x["line"] == "X10"] and call("/admin/api/lines/999999", bad_line, cookie)[0] == 404
+# A stop placed on the map by an admin: a stop of the timetable at once (after the rebuild).
+status_, new_stop = acall("/admin/api/stops/new", {"name": "Town, Brand New", "lat": 48.7, "lon": 19.1}, cookie)
+assert status_ == 200 and any(s["name"] == "Town, Brand New" for s in timetable.edits["extra_stations"])
+assert call("/admin/api/stops/new", {"name": "x", "lat": 1, "lon": 1}, cookie)[0] == 400
+
+# Weather around the stop, asked by emHUB (cached), never by the phone.
+real_http = hub.http_json
+hub.http_json = lambda url, *a, **k: {"hourly": {"precipitation": [0.2, 0.6, 0.1], "precipitation_probability": [40, 80, 30]}}
+hub._weather.clear()
+status, wx = app_get("weather?lat=48.73&lon=19.15")
+assert status == 200 and wx == {"rainMm": 0.9, "chance": 80, "rainy": True}, wx
+assert app_get("weather?lat=40&lon=19")[0] == 400 and app_get("weather?lat=x&lon=1")[0] == 400
+hub.http_json = real_http
+
+# Offline timetables by region, with a version that changes with each timetable build.
+status, idx = app_get("offline")
+assert status == 200 and idx["version"] == int(tt.built) and {r["id"] for r in idx["regions"]} >= {"bb", "ba", "ke"}
+status, region = app_get("offline/region?id=bb")
+assert status == 200 and region["version"] == idx["version"] and region["stations"] and region["trips"], region.keys()
+st_ids = [s_[0] for s_ in region["stations"]]
+assert all(len(x[3]) == len(x[4]) >= 2 and all(0 <= i < len(st_ids) for i in x[3]) for x in region["trips"])
+assert app_get("offline/region?id=../etc")[0] == 404
+
+# A shared arrival: only its owner updates it; the page shows it to anyone, then that it arrived.
+status, eta = v1("POST", "/api/v1/eta", {"label": "Ann", "stop": "Town, Park"})
+assert status == 201 and eta["url"].endswith("/eta/" + eta["id"])
+assert v1("POST", f"/api/v1/eta/{eta['id']}", {"token": "nope", "arrivalMs": 1})[0] == 404
+assert "Waiting for the bus" in v1("GET", f"/eta/{eta['id']}", raw=True)[1]
+arrive_ms = (hub.now() + 600) * 1000
+assert v1("POST", f"/api/v1/eta/{eta['id']}", {"token": eta["token"], "arrivalMs": arrive_ms, "delaySeconds": 240, "line": "7"})[0] == 200
+page_ = v1("GET", f"/eta/{eta['id']}", raw=True)[1]
+assert "arrives at" in page_ and "4 min late" in page_ and "line 7" in page_, page_
+assert "&lt;script" in v1("GET", "/eta/" + v1("POST", "/api/v1/eta", {"label": "<script>", "stop": "x"})[1]["id"], raw=True)[1]
+v1("POST", f"/api/v1/eta/{eta['id']}/end", {"token": eta["token"]})
+assert "Arrived" in v1("GET", f"/eta/{eta['id']}", raw=True)[1]
+assert "Not shared any more" in v1("GET", "/eta/unknown", raw=True)[1]
+# Making links is limited per address (they live in memory), so a flood is refused.
+assert 429 in [v1("POST", "/api/v1/eta", {"stop": "x"})[0] for _ in range(35)]
+
+# ==== 1.34: reporters' language, saved replies, labels, fixed-in, duplicates, releases, activity log
+sent_mail = []
+real_queue_mail = hub.queue_mail
+hub.queue_mail = lambda to, subject, body, message_id=None, reply_to="": sent_mail.append((to, subject, body))
+hub.bug_limiter.allow = lambda *a, **k: True
+assert hub.guess_lang({"language": "en"}, "", "Autobus mešká") == "en", "the app's own language wins"
+assert hub.guess_lang({}, "Plan&Ride web 2.17.0\nlanguage en, standalone true", "x") == "en", "older web versions: the logs header"
+assert hub.guess_lang({}, "", "Notifikácia chodí o hodinu neskôr") == "sk"
+assert hub.guess_lang({}, "", "There is dual time in the notification and it is the same") == "en"
+st_, sk_bug = app_post({"consent": True, "title": "Notifikácia mešká", "description": "Chodí o hodinu neskôr", "email": "sk@example.com", "language": "sk"})
+assert st_ == 201
+assert any(m[0] == "sk@example.com" and "Vaše hlásenie sme dostali" in m[1] and 'lang="sk"' in m[2] for m in sent_mail), sent_mail[-2:]
+st_, en_bug = app_post({"consent": True, "title": "Dual time in the notification", "description": "Both times are the same", "email": "en@example.com",
+                        "logs": "x\nFATAL EXCEPTION: main\nProcess: com.ksjd.testem, PID: 123\njava.lang.IllegalStateException: boom 42\n"})
+assert any(m[0] == "en@example.com" and "We got your report" in m[1] for m in sent_mail)
+detail = admin_get(f"bugs/{en_bug['id']}")
+assert detail["lang"] == "en" and detail["similar"] == []
+st_, en_bug2 = app_post({"consent": True, "title": "Dual time in notification bar", "description": "Same", "logs":
+                         "y\nFATAL EXCEPTION: main\nProcess: com.ksjd.testem, PID: 999\njava.lang.IllegalStateException: boom 7\n"})
+similar = admin_get(f"bugs/{en_bug2['id']}")["similar"]
+assert similar and similar[0]["id"] == en_bug["id"] and similar[0]["why"] == "same crash", similar
+# Language, labels and fixed-in set by an admin; a bad version is refused; the list filters by label.
+assert call(f"/admin/api/bugs/{en_bug['id']}/meta", {"fixedIn": "two"}, cookie)[0] == 400
+assert call(f"/admin/api/bugs/{en_bug['id']}/meta", {"labels": "Notifications, tracking,notifications", "fixedIn": "2.17.1"}, cookie)[0] == 200
+assert call(f"/admin/api/bugs/{sk_bug['id']}/meta", {"fixedIn": "2.17.1", "lang": "sk"}, cookie)[0] == 200
+assert admin_get(f"bugs/{en_bug['id']}")["labels"] == "notifications,tracking"
+assert admin_get(f"bugs/{en_bug['id']}")["status"] == "awaiting_release", "a version set: waiting for that update"
+assert en_bug["id"] in [b["id"] for b in admin_get("bugs?status=open")], "still open until it's out"
+assert [b["id"] for b in admin_get("bugs?status=open&label=tracking")] == [en_bug["id"]]
+assert ("notifications", 1) in [tuple(x) for x in admin_get("labels")["labels"]]
+# A reply goes in the reporter's language.
+sent_mail.clear()
+call(f"/admin/api/bugs/{sk_bug['id']}/reply", {"body": "Ďakujeme"}, cookie)
+assert sent_mail and 'lang="sk"' in sent_mail[-1][2] and "Dobrý deň" in sent_mail[-1][2]
+# Saved replies: the defaults, then add, edit and delete; a reply needs a title and a text.
+replies = admin_get("replies")["replies"]
+assert any(r["title"] == "Allow alarms and reminders" and "Budíky a pripomienky" in r["body_sk"] for r in replies)
+assert call("/admin/api/replies", {"title": "", "bodySk": "x"}, cookie)[0] == 400
+st_, _, made_ = call("/admin/api/replies", {"title": "Thanks", "bodySk": "Ďakujeme!", "bodyEn": "Thanks!"}, cookie)
+rid = json.loads(made_)["id"]
+assert call(f"/admin/api/replies/{rid}", {"title": "Thanks a lot", "bodySk": "Veľmi ďakujeme!", "bodyEn": ""}, cookie)[0] == 200
+assert [r for r in admin_get("replies")["replies"] if r["id"] == rid][0]["body_sk"] == "Veľmi ďakujeme!"
+assert call(f"/admin/api/replies/{rid}/delete", {}, cookie)[0] == 200 and not [r for r in admin_get("replies")["replies"] if r["id"] == rid]
+assert call("/admin/api/replies/999999", {"title": "x", "bodySk": "y"}, cookie)[0] == 404
+# Releases: the draft lists what's fixed in it; releasing emails each reporter once, in their language.
+draft = admin_get("releases/2.17.1/draft")
+assert {x["id"] for x in draft["items"]} == {en_bug["id"], sk_bug["id"]} and "Dual time in the notification" in draft["en"], draft
+assert call("/admin/api/releases/2.17.1/notes", {"en": "• Fixes", "sk": "• Opravy"}, cookie)[0] == 200
+sent_mail.clear()
+st_, _, out_ = call("/admin/api/releases/2.17.1/release", {}, cookie)
+assert st_ == 200 and json.loads(out_)["emailed"] == 2, out_
+assert {m[0] for m in sent_mail} == {"sk@example.com", "en@example.com"}
+assert any("Opravené vo verzii 2.17.1" in m[1] for m in sent_mail) and any("Fixed in version 2.17.1" in m[1] for m in sent_mail)
+assert admin_get(f"bugs/{sk_bug['id']}")["status"] == "resolved"
+assert call("/admin/api/releases/2.17.1/release", {}, cookie)[0] == 409, "announced once"
+rel = [x for x in admin_get("releases")["releases"] if x["version"] == "2.17.1"][0]
+assert rel["notified"] == 1 and rel["notes_sk"] == "• Opravy" and rel["fixes"] == 2
+# The activity log has the changes (the route, not what was sent).
+entries = admin_get("audit")["entries"]
+assert any(e["action"] == "releases/2.17.1/release" and e["username"] == "karafamichal" for e in entries)
+assert not any("bodySk" in e["action"] for e in entries)
+hub.queue_mail = real_queue_mail
+# ==== 1.36: feed health after each build, what changed since the last one, an email when a feed broke
+sent_mail.clear()
+hub.queue_mail = lambda to, subject, body, message_id=None, reply_to="": sent_mail.append((to, subject, body))
+class _Built:  # just what record_build reads
+    def __init__(self, built, feeds, trips, stations):
+        self.built, self.feeds, self.trips = built, feeds, [(None, None, line, None, op) for op, line in trips]
+        self.station_ids, self.names = list(stations), [f"Stop {x}" for x in stations]
+with hub.db() as conn_:
+    conn_.execute("DELETE FROM feed_history"); conn_.execute("DELETE FROM build_snapshots")
+    yesterday_ = (datetime.datetime.now(hub.LOCAL_ZONE).date() - datetime.timedelta(days=1)).isoformat()
+    conn_.execute("INSERT INTO feed_history(day, feed, trips) VALUES (?, 'zz', 100)", (yesterday_,))
+hub.record_build(_Built(1000, {"zz": 100, "yy": "failed"}, [("Op", "1")] * 10 + [("Op", "2")] * 10, ["a", "b"]))
+assert any("yy: could not be read" in m[2] for m in sent_mail), sent_mail
+sent_mail.clear()
+hub.record_build(_Built(1001, {"zz": 100, "yy": "failed"}, [("Op", "1")] * 30 + [("Op", "3")] * 2, ["a", "c"]))
+assert not sent_mail, "one email a feed a day"
+health = admin_get("feeds/health")
+assert health["feeds"]["zz"] and health["feeds"]["yy"][health["days"][-1]]["trips"] is None
+ch = health["builds"][0]["changes"]
+assert ch["newLines"] == ["Op|3"] and ch["goneLines"] == ["Op|2"] and ch["changedLines"][0] == {"line": "Op|1", "before": 10, "after": 30}, ch
+assert ch["newStops"] == ["Stop c"] and ch["goneStops"] == ["Stop b"]
+with hub.db() as conn_:  # a drop of more than 30 % against an earlier day
+    conn_.execute("DELETE FROM feed_history WHERE day<>?", (yesterday_,))
+hub.record_build(_Built(1002, {"zz": 40}, [("Op", "1")], ["a"]))
+assert any("zz: 40 trips, was 100" in m[2] for m in sent_mail), sent_mail
+hub.queue_mail = real_queue_mail
+# A line runs only between its valid dates.
+st_, _, made_ = call("/admin/api/lines", {**bad_line, "line": "X11", "validFrom": "2026-10-01", "validTo": "2026-09-30"}, cookie)
+assert st_ == 400
+st_, _, made_ = call("/admin/api/lines", {**bad_line, "line": "X11", "weekdays": list(range(7)), "validFrom": "2026-09-30", "validTo": "2026-09-30"}, cookie)
+assert st_ == 200
+tv = timetable.Timetable({"a": os.path.join(folder, "a.zip"), "b": os.path.join(folder, "b.zip")}, today=datetime.date(2026, 9, 29))
+x11 = [x for x in tv.trips if x[2] == "X11"]
+assert x11 and all(tv.services[x[6]] == {(datetime.date(2026, 9, 30) - tv.first_day).days} for x in x11), "only on its one valid day"
+call(f"/admin/api/lines/{json.loads(made_)['id']}/delete", {}, cookie)
+# ==== 1.37: service notices for the apps, written in emHUB; riders' delay and crowding statistics
+assert call("/admin/api/notices", {"body_sk": "x"}, cookie)[0] == 400, "a title"
+assert call("/admin/api/notices", {"title_sk": "x", "starts_at": 200, "ends_at": 100}, cookie)[0] == 400, "ends after it starts"
+st_, _, n1 = call("/admin/api/notices", {"title_sk": "Linka 7 ide obchádzkou", "title_en": "Line 7 detour", "body_sk": "Do piatku.",
+                                         "lines": "7, 8 7", "stops": "Zvolen, AS; Zvolen, Námestie SNP", "level": "warning"}, cookie)
+assert st_ == 200
+st_, _, n2 = call("/admin/api/notices", {"title_en": "Later", "starts_at": hub.now() + 3600}, cookie)
+st_, _, n3 = call("/admin/api/notices", {"title_en": "Over", "starts_at": hub.now() - 7200, "ends_at": hub.now() - 3600}, cookie)
+shown = v1("GET", "/api/v1/notices")[1]["notices"]
+assert [x["title_en"] for x in shown] == ["Line 7 detour"], shown
+assert shown[0]["lines"] == ["7", "8"] and shown[0]["stops"] == ["Zvolen, AS", "Zvolen, Námestie SNP"] and shown[0]["level"] == "warning"
+assert call(f"/admin/api/notices/{json.loads(n1)['id']}", {"title_sk": "Linka 7 opäť normálne", "level": "info"}, cookie)[0] == 200
+assert v1("GET", "/api/v1/notices")[1]["notices"][0]["title_sk"] == "Linka 7 opäť normálne"
+for n_ in (n1, n2, n3):
+    assert call(f"/admin/api/notices/{json.loads(n_)['id']}/delete", {}, cookie)[0] == 200
+assert v1("GET", "/api/v1/notices")[1]["notices"] == [] and call("/admin/api/notices/999999/delete", {}, cookie)[0] == 404
+stats = admin_get("community/stats?days=60")
+assert stats["days"] == 60 and stats["delays"] and {"line", "trips", "avgDelay", "lateShare", "byHour"} <= set(stats["delays"][0]), stats["delays"][:1]
+assert len(stats["delays"][0]["byHour"]) == 24 and any(c["line"] == "9" for c in stats["crowd"]), stats["crowd"]
+assert admin_get("community/stats?days=x")["days"] == 30
+
 status, plan = app_get("plan?from=v%20z%20p%20k&to=city%20station&time=2026-09-30T05:50&n=1")
 assert status == 200 and len(plan["connections"][0]["legs"]) == 2, plan
 assert app_get("plan?from=qqq&to=city")[0] == 404 and app_get("trip?id=junk")[0] == 404
@@ -572,6 +864,46 @@ traced = next(x for x in shape["segments"] if x["from"] == "town as")
 assert traced["traced"] and len(traced["points"]) == 3 and traced["points"][1] == [48.72, 19.11], traced
 assert call("/admin/api/map/segment/reset", {"from": "town as", "to": "town park"}, cookie)[0] == 200
 assert call("/admin/api/map/stop/reset", {"id": "town park"}, cookie)[0] == 200 and tt.lat[tt.by_id["town park"]] == 48.71
+# 1.35: every map edit is in the history and can be undone (newest first; not over a newer change).
+hist = json.loads(call("/admin/api/map/history", cookie=cookie)[2])["history"]
+seg_edits = [h for h in hist if h["tbl"] == "map_segments" and h["key"] == "town as>town park"]
+assert [h["action"] for h in seg_edits[:2]] == ["segment/reset", "segment"] and "Town, Park" in seg_edits[0]["what"], seg_edits
+stop_edits = [h for h in hist if h["tbl"] == "map_stops" and h["key"] == "town park"]
+assert [h["action"] for h in stop_edits[:2]] == ["stop/reset", "stop"], stop_edits
+assert call(f"/admin/api/map/history/{seg_edits[1]['id']}/undo", {}, cookie)[0] == 409, "the newer reset has to be undone first"
+assert call(f"/admin/api/map/history/{seg_edits[0]['id']}/undo", {}, cookie)[0] == 200
+assert timetable.edits["segments"]["town as>town park"][0] == [48.72, 19.11], "the drawn part is back"
+assert call(f"/admin/api/map/history/{seg_edits[0]['id']}/undo", {}, cookie)[0] == 409, "undone once"
+assert call(f"/admin/api/map/history/{seg_edits[1]['id']}/undo", {}, cookie)[0] == 200
+assert "town as>town park" not in timetable.edits["segments"], "before the first save there was nothing"
+assert call(f"/admin/api/map/history/{stop_edits[0]['id']}/undo", {}, cookie)[0] == 200
+with hub.db() as conn_:
+    assert conn_.execute("SELECT lat FROM map_stops WHERE station_id='town park'").fetchone()[0] == 48.7111, "the moved stop is back"
+assert call(f"/admin/api/map/history/{stop_edits[1]['id']}/undo", {}, cookie)[0] == 200
+assert call("/admin/api/map/history/999999/undo", {}, cookie)[0] == 404
+# The to-do list: parts still straight, stops without a place, long detours; each with a trip to open.
+todo = json.loads(call("/admin/api/map/todo", cookie=cookie)[2])
+assert todo["straight"] and all(x["tripId"].count(":") == 2 and x["uses"] >= 1 for x in todo["straight"]), todo["straight"][:2]
+assert todo["counts"]["straight"] >= len(todo["straight"]) and isinstance(todo["unplaced"], list)
+# Bulk snapping an operator: in the background, parts still straight, most used first (router stubbed here).
+real_snap, real_sleep = hub.snap_segment, hub.time.sleep
+hub.snap_segment = lambda a, b, **k: [a, b]
+hub.time.sleep = lambda s_: None
+op_ = next(x[4] for x in tt.trips if x[4])
+assert call("/admin/api/map/bulk", {"operator": "No such company"}, cookie)[0] == 400
+assert call("/admin/api/map/bulk", {"operator": op_}, cookie)[0] == 202
+for _ in range(200):
+    if not hub.bulk.get("running"):
+        break
+    real_sleep(0.05)
+st_bulk = json.loads(call("/admin/api/map/bulk", cookie=cookie)[2])
+assert st_bulk["status"]["done"] >= 1 and not st_bulk["status"]["running"] and op_ in st_bulk["operators"], st_bulk
+with hub.db() as conn_:
+    snapped = conn_.execute("SELECT COUNT(*) FROM map_segments WHERE updated_by LIKE '%(bulk)'").fetchone()[0]
+    assert snapped == st_bulk["status"]["done"]
+    conn_.execute("DELETE FROM map_segments WHERE updated_by LIKE '%(bulk)'")
+hub.load_map_edits()
+hub.snap_segment, hub.time.sleep = real_snap, real_sleep
 assert call("/admin/api/map/vehicles?bbox=48,18,49.5,20.5", cookie=cookie)[0] == 200
 # Stations set up by hand: an extra place where line 101 stops, a zone, and a central station with a sub-station.
 place = {"label": "Smer centrum", "lat": 48.7105, "lon": 19.1215, "lines": "101"}
@@ -632,6 +964,14 @@ call("/admin/api/map/station", {"id": "town park", "places": [{"label": "", "pla
                                                            {"label": "", "platform": "", "lat": right[0], "lon": right[1]}]}, cookie)
 assert tt.platform_for(park, "101", bus, k_park) is None, "bays of a bus station: no right side to pick"
 call("/admin/api/map/station", {"id": "town park", "places": []}, cookie)
+# "Line ends at" in the editor: a trace into the stop ending exactly on one of its spots decides, before directions.
+pin_spot = (round(tt.lat[park] - 0.0003, 6), round(tt.lon[park], 6))
+call("/admin/api/map/station", {"id": "town park", "places": [two_ways, {"label": "", "platform": "7", "lat": pin_spot[0], "lon": pin_spot[1]}]}, cookie)
+pin_key = f"{tt.station_ids[b4]}>town park"
+timetable.edits["segments"][pin_key] = [list(pin_spot)]
+assert tt.platform_for(park, "101", bus, k_park) == (pin_spot[0], pin_spot[1], "7"), tt.platform_for(park, "101", bus, k_park)
+del timetable.edits["segments"][pin_key]
+call("/admin/api/map/station", {"id": "town park", "places": []}, cookie)
 # The trip stops at the spot its road trace goes to: a spot the snapping chose, so line and stop meet.
 near_spot = (round(tt.lat[park] + 0.0004, 6), round(tt.lon[park], 6))
 call("/admin/api/map/station", {"id": "town park", "places": [{"label": "", "platform": "", "lat": near_spot[0], "lon": near_spot[1]}]}, cookie)
@@ -663,6 +1003,29 @@ some_line = tt.trips[0][2]
 ways = tt.line_routes(some_line)
 assert ways and all(w["line"] == some_line for w in ways) and tt.trip_shape(ways[0]["tripId"]), ways
 assert tt.line_routes("") == [] and tt.line_routes("no such") == []
+# ... and by a stop ("zvolen as": the ways through it) or a connection ("a > b": the ways from one to the other).
+g0 = next(i for i, x in enumerate(tt.trips) if x[0] not in (timetable.CITY_FEED, "extra") and len(x[7]) >= 2)
+first_, last_ = tt.names[tt.trips[g0][7][0]], tt.names[tt.trips[g0][7][-1]]
+assert any(w["from"] == first_ for w in tt.line_routes(first_)), tt.line_routes(first_)
+assert any(w["from"] == first_ and w["to"] == last_ for w in tt.line_routes(f"{first_} > {last_}"))
+assert not [w for w in tt.line_routes(f"{last_} > {first_}") if w["from"] == first_ and w["to"] == last_], "the other way round"
+# A regional (GTFS) bus's stops can be set too, kept by its feed, line and stops; removing them restores its own.
+gid = f"{tt.trips[g0][0]}:{tt.trips[g0][1]}:20260930"
+gkey = tt.route_key(gid)
+assert gkey and gkey.startswith("g:"), gkey
+own_g = [tt.station_ids[s] for s in tt.trips[g0][7]]
+extra_st = next(s for s in range(len(tt.names)) if s not in tt.trips[g0][7] and tt.lat[s] is not None)
+timetable.edits["routes"][gkey] = own_g[:1] + [tt.station_ids[extra_st]] + own_g[1:]
+before_g = tt.trips[g0]
+tt.apply_routes()
+assert tt.trips[g0][7][1] == extra_st and len(tt.trips[g0][7]) == len(before_g[7]) + 1 and tt.trips[g0][10][1] == ""
+assert tt.trips[g0][9][0] < tt.trips[g0][9][1] <= tt.trips[g0][9][2] and tt.route_key(gid) == gkey, "same way after the edit"
+assert tt.trip_shape(gid)["ownStops"]
+del timetable.edits["routes"][gkey]
+tt.apply_routes()
+assert tt.trips[g0] == before_g, "back to the feed's own stops"
+for junk in (">", "->", " - ", "a > ", "> b", "→→", "(", "[", "\\", "*", "a" * 300, "x > y > z"):
+    assert isinstance(tt.line_routes(junk), list), junk
 
 # The map's live channel: who has which stop open; another tab can't save that stop meanwhile.
 class _Sock:
@@ -676,6 +1039,29 @@ room.push({"type": "changed", "station": "town park"}, skip_tab="tab-a")
 assert b_.sent and not a_.sent, "the one who saved isn't told"
 room.leave(a_)
 assert room.busy("town park", "tab-b") is None
+
+# A city stop takes the timetable stop with the closest name, not the first that fits (Part.cesta vs Part.cesta ČS PL).
+base_town = tt.names[near_town].split(",")[0].strip()
+for name_ in (f"{base_town}, Part.cesta ČS PL", f"{base_town}, Part.cesta"):
+    tt.names.append(name_); tt.words.append(timetable.fold(name_)); tt.lat.append(None); tt.lon.append(None)
+    tt.weight.append(0); tt.station_ids.append(name_); tt.by_id[name_] = len(tt.names) - 1
+got = tt._city_station("Partizánska cesta", tt.lat[near_town] + 0.002, tt.lon[near_town])
+assert tt.names[got] == f"{base_town}, Part.cesta", tt.names[got]
+for _ in range(2):
+    del tt.by_id[tt.station_ids[-1]]
+    for lst in (tt.names, tt.words, tt.lat, tt.lon, tt.weight, tt.station_ids):
+        lst.pop()
+
+# EM-0072: the drive to the stop, asked of the router once per pair in 10 min; bad positions refused.
+calls = []
+real_http = hub.http_json
+hub.http_json = lambda url, *a, **k: calls.append(url) or {"routes": [{"duration": 412.4}]}
+hub._drives.clear()
+assert hub.timetable_query("drive", {"from": "48.7351,19.1592", "to": "48.7213,19.1203"}) == (200, {"seconds": 412})
+assert hub.timetable_query("drive", {"from": "48.7354,19.1594", "to": "48.7213,19.1203"})[1] == {"seconds": 412} and len(calls) == 1, calls
+assert hub.timetable_query("drive", {"from": "x", "to": "48.7,19.1"})[0] == 400
+assert hub.timetable_query("drive", {"from": "40.0,19.1", "to": "48.7,19.1"})[0] == 400
+hub.http_json = real_http
 
 # EM-0064: the apps' maps get the road between stops given by position; a hop without a trace is straight ([]).
 pa, pb = tt.by_id["town park"], tt.by_id["town as"]
@@ -698,28 +1084,35 @@ assert all(j["arrival"] <= (want - 60) * 1000 for j in early), "a minute earlier
 
 # Snapping to the roads: the kerb way unless the plain one is clearly better (shorter, or no turning back).
 real_route = hub.road
-hub.road = lambda a, b, curb=True: ([[1, 1]], 1490.0) if curb else ([[2, 2]], 624.0)
-assert hub.snap_segment((48.0, 19.0), (48.0, 19.006), pause=0) == [[2, 2]], "a kerb loop loses to the plain way"
-hub.road = lambda a, b, curb=True: ([[1, 1]], 4825.0)
+hub.road = lambda a, b, curb=True, via=(): ([[1, 1]], 1490.0) if curb else ([[2, 2]], 624.0)
+assert hub.snap_segment((48.0, 19.0), (48.0, 19.006), pause=0)[1:-1] == [[2, 2]], "a kerb loop loses to the plain way"
+hub.road = lambda a, b, curb=True, via=(): ([[1, 1]], 4825.0)
 assert hub.snap_segment((48.56836, 19.12968), (48.5713, 19.118966), pause=0) is None, "a 4.8 km way for 0.9 km isn't kept"
-hub.road = lambda a, b, curb=True: ([[1, 1]], 900.0) if curb else ([[2, 2]], 850.0)
-assert hub.snap_segment((48.0, 19.0), (48.0, 19.006), pause=0) == [[1, 1]], "about the same: the kerb side stays"
+hub.road = lambda a, b, curb=True, via=(): ([[1, 1]], 900.0) if curb else ([[2, 2]], 850.0)
+assert hub.snap_segment((48.0, 19.0), (48.0, 19.006), pause=0)[1:-1] == [[1, 1]], "about the same: the kerb side stays"
+# Checkpoints set in the editor: routed stretch by stretch through them; a stretch the router can only do the long way
+# (a turn the map data doesn't allow) is drawn straight between the checkpoints.
+hub.road = lambda a, b, curb=True, via=(): ([[round((a[0] + b[0]) / 2, 6), round((a[1] + b[1]) / 2, 6)]], timetable.meters(a[0], a[1], b[0], b[1]) * 1.1)
+out = hub.snap_segment((48.0, 19.0), (48.0, 19.006), pause=0, via=[(48.001, 19.003)])
+assert [48.001, 19.003] in out and len(out) == 5 and out[0] == [48.0, 19.0] and out[-1] == [48.0, 19.006], out
+hub.road = lambda a, b, curb=True, via=(): ([[49.0, 20.0]], 5000.0)
+assert hub.snap_segment((48.0, 19.0), (48.0, 19.006), pause=0, via=[(48.001, 19.003)])[1:-1] == [[48.001, 19.003]], "straight between checkpoints"
 # Two spots of the next stop (Namestie slobody): the one reached without a loop round the block wins.
-hub.road = lambda a, b, curb=True: ([[48.001, 19.003]], 400.0) if b == (48.0, 19.006) else ([[48.01, 19.0]], 1900.0)
-assert hub.snap_segment((48.0, 19.0), (48.0004, 19.006), pause=0, other_ends=[(48.0, 19.006)]) == [[48.001, 19.003]]
+hub.road = lambda a, b, curb=True, via=(): ([[48.001, 19.003]], 400.0) if b == (48.0, 19.006) else ([[48.01, 19.0]], 1900.0)
+assert hub.snap_segment((48.0, 19.0), (48.0004, 19.006), pause=0, other_ends=[(48.0, 19.006)]) == [[48.0, 19.0], [48.001, 19.003], [48.0, 19.006]], "ends at the spot it chose"
 # Line 1 at Partizanska cesta: the kerb way first heads the wrong way and turns back (saved trace).
 hook = [(48.73968, 19.16086), (48.73972, 19.16102), (48.73977, 19.16089), (48.7398, 19.16081), (48.73983, 19.16066), (48.73967, 19.15989),
         (48.73949, 19.15998), (48.73945, 19.15977), (48.73932, 19.15919), (48.73915, 19.15844)]
 assert hub.u_turns(hook) == 1 and hub.u_turns(hook[3:]) == 0
-hub.road = lambda a, b, curb=True: (hook[1:-1], 560.0) if curb else (hook[4:-1], 520.0)
-assert hub.snap_segment(hook[0], hook[-1], pause=0) == hook[4:-1], "the way that turns back loses"
+hub.road = lambda a, b, curb=True, via=(): (hook[1:-1], 560.0) if curb else (hook[4:-1], 520.0)
+assert hub.snap_segment(hook[0], hook[-1], pause=0)[1:-1] == hook[4:-1], "the way that turns back loses"
 hub.road = real_route
 # Valhalla's shape encoding (precision 6), and the way falls back to OSRM when Valhalla fails.
 assert hub.polyline6("_p~iF~ps|U_ulLnnqC_mqNvxq`@") == [[3.85, -12.02], [4.07, -12.095], [4.3252, -12.6453]]
 real_valhalla, real_osrm = hub.valhalla_route, hub.osrm_route
-def _busy(a, b, curb=True):
+def _busy(a, b, curb=True, via=()):
     raise hub.ProviderError("busy")
-hub.valhalla_route, hub.osrm_route = _busy, lambda a, b, curb=True: ([[3, 3]], 10.0)
+hub.valhalla_route, hub.osrm_route = _busy, lambda a, b, curb=True, via=(): ([[3, 3]], 10.0)
 assert hub.road((48, 19), (48, 19.01)) == ([[3, 3]], 10.0)
 hub.valhalla_route, hub.osrm_route = real_valhalla, real_osrm
 
@@ -743,6 +1136,8 @@ way = [(1, 1000, 1), (2, 1060, 2), (5, 1360, 5)]            # A, B, (C and D lef
 back = [(6, 0, 1), (13, 100, 2), (12, 200, 3), (11, 400, 4)]  # E, D, C, A on the other side of the road
 assert _sadzv.bridge_back(way, [back], stop_of) == [(1, 1000, 1), (2, 1060, 2), (3, 1210, 0), (4, 1285, 0), (5, 1360, 5)]
 assert _sadzv.bridge_back([(1, 1000, 1), (2, 1060, 2), (5, 1360, 6)], [back], stop_of)[2][0] == 5, "3 missing, 2 there: left as is"
+# Line 1 to Zeleznicna stanica: both ends on the way back, more stops there than missing: all of them.
+assert [x[0] for x in _sadzv.bridge_back([(1, 1000, 1), (5, 1360, 3)], [back], stop_of)] == [1, 3, 4, 5]
 # A run that ends early (6017 at Nad Moskovskou, "to Zeleznicna stanica") goes on like the line's run that gets there.
 early = [(1, 1000, 1), (2, 1060, 2)]
 there = [(1, 0, 1), (2, 60, 2), (3, 210, 0), (4, 285, 0), (5, 360, 5)]
@@ -790,6 +1185,26 @@ assert hub.walk_leg(gym, dict(gym, id="x"), base * 1000, arriving=False) is None
 assert hub.walk_leg(gym, dict(gym, lat=48.5790), base * 1000, arriving=False) is None, "another platform of the same stop: no walk"
 walked = {"legs": [walk, dict(leg)], "departure": walk["departure"], "arrival": leg["arrival"]}
 assert hub.merge_live([timetable_leg], [walked]) == [walked], "a live journey starting with a walk still replaces the timetable bus"
+
+# Server page: request times by route (unknown routes not counted), app versions, backups keeping the newest 14
+base = f"http://127.0.0.1:{server.server_port}"  # the sadzv test above reused the name
+hub.BACKUP_DIR = __import__("pathlib").Path(tempfile.mkdtemp())
+assert call("/admin/api/server")[0] == 401 and call("/admin/api/server/backup", {})[0] == 401, "admins only"
+for i in range(16):
+    (hub.BACKUP_DIR / f"hub-2000-01-{i + 1:02d}-000000.db").write_bytes(b"x")
+status_, made = acall("/admin/api/server/backup", {}, cookie)
+assert status_ == 200 and len(made["backups"]) == 14 and made["backups"][0]["name"] == made["name"], made
+copy = sqlite3.connect(hub.BACKUP_DIR / made["name"])
+assert copy.execute("SELECT COUNT(*) FROM users").fetchone()[0] >= 1, "a real copy of the database"
+copy.close()
+req = urllib.request.Request(f"{base}/api/v1/notices", headers={"X-App-Key": "dev-key", "X-App-Version": "android 9.9.9"})
+urllib.request.urlopen(req).read()
+call("/api/v1/no-such-route-" + "x" * 30)
+health = admin_get("server")
+assert health["version"] == hub.VERSION and health["dbSize"] > 0 and health["backups"][0]["name"] == made["name"], health.keys()
+assert any(r["route"] == "app: notices" for r in health["routes"]) and not any("no-such" in r["route"] for r in health["routes"]), health["routes"]
+assert {"version": "android 9.9.9", "requests": 1} in health["appVersions"], health["appVersions"]
+print("ok server")
 
 server.shutdown()
 print("ok")

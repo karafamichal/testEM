@@ -65,6 +65,41 @@ data class HistoryInsights(
 }
 
 /** RFC 4180 CSV of the history list. */
+/** 2.17.0: one bus ridden while following it (kept on the phone for the year in numbers). */
+data class RideLog(val atMs: Long, val line: String, val from: String, val to: String, val minutes: Int)
+
+/** 2.17.0: the rider's year in numbers: paid rides from the card's history, lines and time on board from followed rides. */
+data class YearSummary(
+    val year: Int,
+    val trips: Int,
+    val spentCents: Long,
+    val minutesOnBoard: Int,
+    val topLine: Pair<String, Int>?,
+    val topStop: Pair<String, Int>?,
+    val busiestMonth: Pair<YearMonth, Int>?
+) {
+    val isEmpty: Boolean get() = trips == 0 && minutesOnBoard == 0
+
+    companion object {
+        fun from(items: List<CardHistoryItem>, rides: List<RideLog>, year: Int, zone: ZoneId = ZoneId.systemDefault()): YearSummary {
+            fun at(ms: Long) = Instant.ofEpochMilli(ms).atZone(zone)
+            val paid = items.filter { at(it.timestampMs).year == year && !it.isTopUp && (it.amountCents ?: 0L) < 0L }
+            val tickets = paid.filter { it.sourceType == HistorySourceType.TICKET }
+            val followed = rides.filter { at(it.atMs).year == year }
+            fun <T> top(values: List<T>) = values.groupingBy { it }.eachCount().maxByOrNull { it.value }?.toPair()
+            return YearSummary(
+                year = year,
+                trips = maxOf(tickets.size, followed.size),
+                spentCents = paid.sumOf { -(it.amountCents ?: 0L) },
+                minutesOnBoard = followed.sumOf { it.minutes.coerceIn(0, 300) },
+                topLine = top(followed.map { it.line }.filter { it.isNotBlank() }),
+                topStop = top(tickets.map { it.stopName.trim() }.filter { it.isNotBlank() }),
+                busiestMonth = top(tickets.map { YearMonth.from(at(it.timestampMs)) })
+            )
+        }
+    }
+}
+
 fun historyToCsv(items: List<CardHistoryItem>): String = buildString {
     append("date,type,description,stop,amount_eur\r\n")
     val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")

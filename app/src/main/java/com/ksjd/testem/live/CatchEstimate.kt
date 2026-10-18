@@ -45,10 +45,30 @@ data class CatchEstimate(val walkSeconds: Int, val marginSeconds: Int) {
             return (walkMs * RECHECK_SHARE).toLong().coerceIn(MIN_RECHECK_MS, MAX_RECHECK_MS)
         }
 
-        fun from(distanceMeters: Int, secondsToBoarding: Int): CatchEstimate {
-            val walk = (distanceMeters * DETOUR_FACTOR / WALK_METERS_PER_SECOND).toInt()
+        /** Closer than this the rider walks, car or not. */
+        const val CAR_FROM_M = 300
+        /** EM-0072: by car without the router's answer: roads 40 % longer than the straight line, at 50 km/h. */
+        const val CAR_DETOUR_FACTOR = 1.4
+        const val CAR_FALLBACK_METERS_PER_SECOND = 13.9
+
+        /**
+         * [byCar]: the rider is driven to the stop (dropped off, no parking): [driveSeconds] is the router's time along
+         * the roads at their speeds, else a rough guess. Close to the stop it's a walk either way.
+         */
+        fun from(distanceMeters: Int, secondsToBoarding: Int, byCar: Boolean = false, driveSeconds: Int? = null): CatchEstimate {
+            val walk = if (byCar && distanceMeters > CAR_FROM_M)
+                driveSeconds ?: (distanceMeters * CAR_DETOUR_FACTOR / CAR_FALLBACK_METERS_PER_SECOND).toInt()
+                else (distanceMeters * DETOUR_FACTOR / WALK_METERS_PER_SECOND).toInt()
             return CatchEstimate(walk, secondsToBoarding - walk)
         }
+
+        /** The router's drive from [fromLat]/[fromLon] (sent rounded to ~100 m) to the stop, in seconds, or null. */
+        fun driveSeconds(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double): Int? = runCatching {
+            com.ksjd.testem.hub.HubClient.timetable("drive", mapOf(
+                "from" to "%.3f,%.3f".format(java.util.Locale.ROOT, fromLat, fromLon),
+                "to" to "%.4f,%.4f".format(java.util.Locale.ROOT, toLat, toLon)
+            )).get("seconds").asInt
+        }.getOrNull()
     }
 }
 

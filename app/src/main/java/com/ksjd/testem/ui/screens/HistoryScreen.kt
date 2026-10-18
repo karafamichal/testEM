@@ -167,6 +167,7 @@ fun HistoryScreen(viewModel: AppViewModel) {
             }
             else -> {
                 item { InsightsPanel(insights, card?.currencySymbol ?: "€") { focus = it } }
+                item { YearPanel(items, card?.currencySymbol ?: "€") }
                 grouped.forEach { (month, monthItems) ->
                     item(key = "m-$month") {
                         SectionLabel(monthTitle(month))
@@ -183,6 +184,35 @@ fun HistoryScreen(viewModel: AppViewModel) {
                 }
                 item { Spacer(Modifier.height(24.dp)) }
             }
+        }
+    }
+}
+
+/** 2.17.0: this year in numbers, to look at or share: rides, money, time on board, the favourite line and stop. */
+@Composable
+private fun YearPanel(items: List<CardHistoryItem>, currency: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val year = java.time.LocalDate.now().year
+    val summary = remember(items) { com.ksjd.testem.YearSummary.from(items, com.ksjd.testem.CredentialsManager(context).getRideLog(), year) }
+    if (summary.isEmpty) return
+    val lines = listOfNotNull(
+        pluralStringResource(R.plurals.insights_trips, summary.trips, summary.trips).takeIf { summary.trips > 0 },
+        stringResource(R.string.year_spent, Format.cents(summary.spentCents, currency)).takeIf { summary.spentCents > 0 },
+        stringResource(R.string.year_on_board, summary.minutesOnBoard / 60, summary.minutesOnBoard % 60).takeIf { summary.minutesOnBoard > 0 },
+        summary.topLine?.let { (line, n) -> stringResource(R.string.year_top_line, line, n) },
+        summary.topStop?.let { (stop, n) -> stringResource(R.string.year_top_stop, stop, n) },
+        summary.busiestMonth?.let { (m, n) -> stringResource(R.string.year_busiest_month, monthTitle(m), n) }
+    )
+    SectionLabel(stringResource(R.string.year_title, year))
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            lines.forEach { Text(it, style = MaterialTheme.typography.bodyLarge) }
+            val title = stringResource(R.string.year_title, year)
+            androidx.compose.material3.TextButton(onClick = {
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_TEXT, "$title (Plan&Ride)\n" + lines.joinToString("\n"))
+                context.startActivity(android.content.Intent.createChooser(send, title))
+            }) { Text(stringResource(R.string.year_share)) }
         }
     }
 }

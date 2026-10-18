@@ -198,6 +198,7 @@ fun TicketScreen(
             ) {
                 followed?.let { com.ksjd.testem.ui.components.FollowCard(it, followView?.takeIf { v -> v.trip.ref == it.ref }, now) }
             }
+            if (com.ksjd.testem.hub.HubClient.isConfigured) com.ksjd.testem.ui.components.ServiceNotices()
             if (unlocked && ticket.phase == TicketPhase.SignedOut) {
                 Notice(
                     stringResource(R.string.ticket_signed_out),

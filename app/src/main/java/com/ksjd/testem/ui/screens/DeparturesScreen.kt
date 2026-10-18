@@ -390,6 +390,13 @@ private fun StopBoard(
                         color = colors.boardDim,
                         modifier = Modifier.padding(20.dp)
                     )
+                    // 2.17.0: something wrong here (no timetable, a stop moved, a bus missing): tell us.
+                    var reporting by remember { mutableStateOf(false) }
+                    if (reporting) SubmitDialog(SubmitKind.Problem, stopName = board.stop.name) { reporting = false }
+                    androidx.compose.material3.OutlinedButton(onClick = { reporting = true }, modifier = Modifier.padding(horizontal = 20.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.boardDim)) {
+                        Text(stringResource(R.string.submit_report_stop), color = colors.boardText)
+                    }
                 }
             }
         }

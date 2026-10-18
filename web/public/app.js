@@ -565,8 +565,9 @@ function renderTicket(el) {
   el.innerHTML = `
     <header class="screen-head"><div><h1>${esc(open && s.account?.userName ? s.account.userName.split(' ')[0] : hasAccount() ? t('tab_ticket') : 'Plan&Ride')}</h1><p class="hint small" id="card-type"></p></div></header>
     <div id="banners"></div>
+    <div id="home-notices"></div>
     ${!hasAccount() ? '' : !open
-      ? `<button class="locked-stub" data-unlock><span class="locked-icon" aria-hidden="true">▦</span><span class="row-text"><span class="row-title">${t('ticket_locked_title')}</span><span class="row-sub">${t('ticket_locked_body')}</span></span><span aria-hidden="true">🔒</span></button>`
+      ? `<button class="locked-stub" data-unlock><span class="locked-icon" aria-hidden="true">▦</span><span class="row-text"><span class="row-title">${t('ticket_locked_title')}</span><span class="row-sub">${t('ticket_locked_body')}</span></span><span aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16" style="vertical-align:-3px"><path fill="currentColor" d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM9 6a3 3 0 0 1 6 0v2H9V6zm9 14H6V10h12v10zm-6-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg></span></button>`
       : `${list.length > 1 ? `<div class="segmented" id="wallet-switch" role="radiogroup">${list.map((w) => `<button role="radio" aria-checked="${w === shown}" data-wallet="${w}">${w === 'ids' ? 'IDS BBSK' : 'SAD Zvolen'}</button>`).join('')}</div>
       <p class="hint small pad">${walletForLine(live.followedLine()) === shown && store.get('ticketAuto', true) ? esc(t('ticket_auto_for_line', live.followedLine())) : t('ticket_swipe_hint')}</p>` : ''}
     <div class="passes" id="passes">
@@ -669,6 +670,40 @@ function ridesHtml() {
 function renderPreview() {
   const el = $('#preview');
   if (el) live.renderPreview(el);
+  renderNotices();
+}
+
+/**
+ * Service notices from emHUB (detours, strikes) on Home, in the rider's language (the other one if only that was
+ * written). A notice the rider hid stays hidden; hidden ones that ended are forgotten.
+ */
+let noticesCache = { at: 0, list: [] };
+async function renderNotices() {
+  const el = $('#home-notices');
+  if (!el || !config.hub) return;
+  // Home redraws with every live update: ask emHUB at most every 5 minutes.
+  if (Date.now() - noticesCache.at > 300000) {
+    const r = await api('/api/hub/notices');
+    if (r.ok) noticesCache = { at: Date.now(), list: r.json.notices || [] };
+  }
+  if (!el.isConnected) return;
+  const notices = noticesCache.list;
+  // Hidden ones that ended are forgotten, but only after emHUB answered (a failed request must not unhide anything).
+  const hidden = store.get('noticesHidden', []).filter((id) => !noticesCache.at || notices.some((n) => n.id === id));
+  if (noticesCache.at) store.set('noticesHidden', hidden);
+  const sk = lang() !== 'en';
+  const pick = (n, k) => (sk ? n[k + '_sk'] || n[k + '_en'] : n[k + '_en'] || n[k + '_sk']);
+  el.innerHTML = notices.filter((n) => !hidden.includes(n.id)).map((n) => `<div class="notice ${n.level === 'warning' ? 'warn' : ''} service-notice">
+      <button class="icon-btn notice-x" data-hide-notice="${n.id}" aria-label="${esc(t('notice_hide'))}">✕</button>
+      <b>${esc(pick(n, 'title'))}</b>${pick(n, 'body') ? `<p>${esc(pick(n, 'body'))}</p>` : ''}
+      ${n.lines.length || n.stops.length ? `<p class="hint small">${[n.lines.length && t('notice_lines', n.lines.join(', ')), n.stops.length && n.stops.join('; ')].filter(Boolean).map(esc).join('. ')}</p>` : ''}
+    </div>`).join('');
+  el.onclick = (e) => {
+    const b = e.target.closest('[data-hide-notice]');
+    if (!b) return;
+    store.set('noticesHidden', [...store.get('noticesHidden', []), Number(b.dataset.hideNotice)]);
+    renderNotices();
+  };
 }
 
 function renderBanners() {
@@ -935,7 +970,7 @@ async function openTopUp() {
       <div class="chips">${chips.map((e) => `<button class="chip" data-eur="${e}">${e} €</button>`).join('')}</div>
       <label class="field"><span>${t('topup_amount')}</span><input id="topup-eur" type="number" inputmode="numeric" min="${minCents / 100}" max="${maxCents / 100}" value="${defaultCents / 100}"></label>
       <p class="hint small">${t('topup_range', minCents / 100, maxCents / 100)}</p>
-      <p class="hint small">🔒 ${t('topup_who')}</p>
+      <p class="hint small"><svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16" style="vertical-align:-3px"><path fill="currentColor" d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM9 6a3 3 0 0 1 6 0v2H9V6zm9 14H6V10h12v10zm-6-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg> ${t('topup_who')}</p>
       <p class="hint small">${t('topup_after')}</p>
       <button class="btn wide" id="topup-pay"></button><p class="error-text" hidden></p></div>`;
   const input = $('#topup-eur', body), pay = $('#topup-pay', body);
@@ -1274,7 +1309,7 @@ function communitySettings(body) {
     <ul class="list">${MODES.map(([value, title, hint]) => `<li><label class="row"><span class="row-text"><span class="row-title">${t(title)}</span><span class="row-sub">${t(hint)}</span></span><input type="radio" name="community-mode" value="${value}" ${mode === value ? 'checked' : ''}></label></li>`).join('')}</ul>
     <ul class="list">${switchRow('predict', t('predict_switch'), t('predict_switch_hint'), store.get('predictShift', false))}</ul>
     <p class="hint">${t('privacy_catch_body')}</p>
-    <ul class="list">${switchRow('catch-on', t('catch_switch'), '', catchOn)}${switchRow('catch-tt', t('catch_timetable'), t('catch_timetable_hint'), store.get('catchTimetable', false), !catchOn)}</ul>`;
+    <ul class="list">${switchRow('catch-on', t('catch_switch'), '', catchOn)}${switchRow('catch-car', t('catch_car_switch'), t('catch_car_hint'), store.get('catchCar', false))}${switchRow('catch-tt', t('catch_timetable'), t('catch_timetable_hint'), store.get('catchTimetable', false), !catchOn)}</ul>`;
   body.onchange = (e) => {
     if (e.target.name === 'community-mode') {
       store.set('communityMode', e.target.value);
@@ -1286,6 +1321,7 @@ function communitySettings(body) {
       if (e.target.checked) navigator.geolocation?.getCurrentPosition(() => {}, () => toast(t('catch_location_off')));
     }
     if (e.target.id === 'catch-tt') store.set('catchTimetable', e.target.checked);
+    if (e.target.id === 'catch-car') store.set('catchCar', e.target.checked);
     if (e.target.id === 'predict') store.set('predictShift', e.target.checked);
   };
 }
@@ -1361,7 +1397,7 @@ function bugReport(body, feature = false) {
       const images = await Promise.all([...form.images.files].slice(0, 5).map(shrinkImage));
       const r = await apiJson('/api/hub/bugs', {
         kind: feature ? 'feature' : 'bug', category: feature ? 'feature' : f.category, title: f.title.trim(), description: f.description.trim(), name: f.name.trim(), email: f.email.trim(),
-        appVersion: VERSION, device: navigator.userAgent, logs: withLogs() ? logs : '', consent: true, images,
+        appVersion: VERSION, device: navigator.userAgent, logs: withLogs() ? logs : '', consent: true, images, language: lang(), // emails in the reporter's language
       });
       closeOverlay('page');
       toast(t(feature ? 'feature_sent' : 'bug_sent', r.code));

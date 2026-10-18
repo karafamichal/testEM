@@ -250,9 +250,15 @@ fun CommunitySettings() {
         if (on && !Locations.hasPrecise(context)) location.launch(LOCATION_PERMISSIONS)
         else { catch = on; prefs.saveCatchEnabled(on); TripTracking.refresh(context) }
     }
+    var byCar by remember { mutableStateOf(prefs.getCatchByCar()) }
+    val setCar: (Boolean) -> Unit = { on -> byCar = on; prefs.saveCatchByCar(on); TripTracking.refresh(context) }
     ListGroup {
         ListRow(stringResource(R.string.catch_switch), subtitle = stringResource(R.string.catch_switch_hint), onClick = { setCatch(!catch) },
             trailing = { Switch(catch, setCatch) })
+        GroupDivider()
+        // EM-0072: going to the stop by car, so not "40 min on foot, you'll miss it".
+        ListRow(stringResource(R.string.catch_car_switch), subtitle = stringResource(R.string.catch_car_hint), onClick = { setCar(!byCar) },
+            trailing = { Switch(byCar, setCar) })
         GroupDivider()
         ListRow(
             stringResource(R.string.catch_timetable_switch),
@@ -331,6 +337,19 @@ fun ArrivalAlertSetting() {
                 androidx.compose.material3.Switch(leaveBy, { leaveBy = it; prefs.saveLeaveByEnabled(it); com.ksjd.testem.reminders.LeaveBy.reschedule(context) })
             }
         )
+    }
+    // 2.17.0: the alerts' sound, heard once when chosen.
+    var sound by remember { mutableStateOf(prefs.getAlertSound()) }
+    SectionLabel(stringResource(R.string.sound_title))
+    FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        com.ksjd.testem.reminders.AlertSound.choices.forEach { (id, name) ->
+            FilterChip(
+                selected = sound == id,
+                onClick = { sound = id; prefs.saveAlertSound(id); com.ksjd.testem.reminders.AlertSound.preview(context, id) },
+                label = { Text(stringResource(name)) },
+                leadingIcon = if (sound == id) ({ Icon(Icons.Outlined.Check, null, Modifier.size(18.dp)) }) else null
+            )
+        }
     }
     // EM-0054: a bus followed long before it leaves gets its live notification only this long before.
     var lead by remember { mutableStateOf(prefs.getFollowLeadMinutes()) }

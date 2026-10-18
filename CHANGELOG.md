@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.17.0
+
+### New
+- **Will I make the change?** Under each change in the planner: how often it worked on earlier days ("worked 9 of 10 times"), from how late the first bus really was. Under 80 % it shows in orange.
+- **You'll miss the change**: following a journey, when the bus is late enough that the next one leaves before you can get there, a notification says so. Tap it and the planner searches the rest of the way from the change stop, from when you'll be there.
+- **How full is the bus**: once the bus has left your stop with you on it, the followed bus's card asks *How full is it?* (seats free, standing, full); tap again whenever it changes. Others following that bus see the newest answer (from the last 20 minutes), also on the widget.
+- **Take me home**: *Home* and *Work* above the planner. Pick the stop in *To* and hold the button to keep it; then one tap plans from the stop nearest you, now. Also on the app icon (hold it), as a home-screen widget, and for Google Assistant ("open Take me home").
+- **Last bus home**: in the evening, away from Home, a notification about 45 minutes before the last connection home leaves.
+- **Offline timetables**: *Account → Offline timetables* shows Slovakia's regions on a map; tap one to keep its timetables (next three weeks, about 3 MB) on the phone. Without a connection the planner searches them, with changes, by the timetable. Kept regions update by themselves every day.
+- **Share my arrival**: the share button on the followed bus sends a link anyone can open in a browser, no app needed: when you arrive, live, with the delay. It says *Arrived* when you get there.
+- **Rain**: when rain is expected where your journey starts, connections with less walking come first (weather from Open-Meteo, asked by emHUB; the phone never contacts it).
+- **Tell us what's missing**: *Missing a connection?* under the planner's results, and *Something wrong at this stop?* on a stop's departures: send a missing connection (its stops, times and days), a missing stop (where you stand) or a problem. We check each one in emHUB before the timetable changes.
+- **Your year**: *History* shows this year in numbers (rides, money, time on buses you followed, your line and stop, the busiest month), to share.
+- **Alert sound**: *Account → Reminders → Alert sound*: the phone's sound, or Chime, Ding-dong, Bell or Pulse.
+- **Widgets**: a new *Take me home* widget (Home and Work); the followed bus's widget shows how full it is.
+
+### Changed
+- *Change the transfer*, *Missing a connection?* and the offline *Download* look like buttons now.
+- The planner's on foot / by car switch (EM-0074) shows an icon instead of an emoji.
+
+### Fixed
+- **Waiting at your stop** (EM-0073): standing up to 120 m from your stop (a wide bus station) counts as waiting there, so *Bus is here* isn't asked again.
+
+## 2.16.1
+
+### New
+- **Going to the stop by car** (EM-0072): "Will I catch it?" can count a drive instead of a walk: the time along the real roads at their speeds (town streets, 90 km/h roads, expressways), from emHUB's router, with no parking (someone can drop you off). Close to the stop (under 300 m) it's still a walk. Set it in *Will I catch it?*, or tap the on foot / by car button next to the estimate on the followed bus's card to switch for today. The leave-by reminders for starred journeys use it too. By car, your position goes to the router rounded to about 100 m; on foot it stays on the phone.
+
 ## 2.16.0
 
 ### New

@@ -275,7 +275,7 @@ internal fun RideEditorDialog(
                     Switch(ride.enabled, { ride = ride.copy(enabled = it) })
                 }
                 if (!ride.hasDays) {
-                    Notice(stringResource(R.string.rides_pick_days), tone = NoticeTone.Warning)
+                    Notice(stringResource(R.string.rides_pick_days))
                 }
                 if (!canExact && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     Notice(
@@ -299,8 +299,7 @@ internal fun RideEditorDialog(
         },
         confirmButton = {
             Button(
-                onClick = { withNotifications { onSave(ride) } },
-                enabled = ride.hasDays
+                onClick = { withNotifications { onSave(ride.withDefaultDay(java.time.ZonedDateTime.now(com.ksjd.testem.SK_ZONE))) } }
             ) { Text(stringResource(R.string.rides_save)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }

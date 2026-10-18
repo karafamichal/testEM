@@ -91,6 +91,8 @@ data class TripDetail(
     val fromTimetable: Boolean = false,
     /** Pooled rider reports (when the user opted in). */
     val community: com.ksjd.testem.hub.CommunityDelay? = null,
+    /** 2.17.0: how full the bus is, from riders on it. */
+    val crowd: com.ksjd.testem.hub.Crowd? = null,
     /** How late this trip usually is, from riders' reports on earlier days. */
     val history: com.ksjd.testem.hub.TripHistory? = null,
     /** Same bus, same key on every phone and on the web (see LiveRepository.communityKey). */

@@ -31,7 +31,10 @@ data class TimetableSegment(
     /** Trip link with every stop of this bus (TimetableService.tripUrl). */
     val routeUrl: String = "",
     /** ISO date of [departureTime]. */
-    val serviceDate: String = ""
+    val serviceDate: String = "",
+    /** 2.17.0: how often the change onto this bus worked on earlier days ([transferRuns] 0 = not known). */
+    val transferWorked: Int = 0,
+    val transferRuns: Int = 0
 )
 
 data class TimetableConnection(
@@ -39,7 +42,9 @@ data class TimetableConnection(
     val departureTime: String,
     val arrivalTime: String,
     val totalDuration: String,
-    val segments: List<TimetableSegment>
+    val segments: List<TimetableSegment>,
+    /** Minutes on foot within the connection (to another stop, between changes): fewer first when it rains. */
+    val walkMinutes: Int = 0
 ) {
     val isDirect: Boolean
         get() = segments.size <= 1
@@ -62,7 +67,9 @@ data class TimetablePagingCursor(
 
 data class TimetableSearchResult(
     val connections: List<TimetableConnection>,
-    val pagingCursor: TimetablePagingCursor?
+    val pagingCursor: TimetablePagingCursor?,
+    /** 2.17.0: found in the timetables kept on the phone (emHUB unreachable): by the timetable only. */
+    val offline: Boolean = false
 )
 
 data class TimetableState(
@@ -77,6 +84,10 @@ data class TimetableState(
     val directOnly: Boolean = false,
     /** EM-0053: the time is when to be there, not when to leave. */
     val arriveBy: Boolean = false,
+    /** 2.17.0: rain expected where the journey starts: connections with less walking come first. */
+    val rainy: Boolean = false,
+    /** 2.17.0: these results are from the offline timetables. */
+    val offline: Boolean = false,
     val fromSuggestions: List<CpStopSuggestion> = emptyList(),
     val toSuggestions: List<CpStopSuggestion> = emptyList(),
     val selectedFromSuggestion: CpStopSuggestion? = null,

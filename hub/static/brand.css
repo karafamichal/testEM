@@ -57,6 +57,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   padding: 9px 11px; color: var(--ink); font-size: 15px;
 }
 textarea { resize: vertical; }
+/* Bare fields (a status picker in a sentence, map selects): themed too, never the browser's light box. */
+:where(select, textarea, input:not([type=checkbox], [type=radio], [type=range], [type=file], [type=color])) {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; color: var(--ink);
+}
+:where(select) { cursor: pointer; }
+select option { background: var(--surface); color: var(--ink); }
+input[type=checkbox], input[type=radio], progress { accent-color: var(--sign); }
 
 .muted { color: var(--muted); }
 .small { font-size: 13px; }

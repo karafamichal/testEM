@@ -87,6 +87,8 @@ class MainActivity : AppCompatActivity() {
         TimetableService.changeMinutes = CredentialsManager(this).getChangeMinutes()
         // Cheap, and catches a changed alarm permission or a missed reboot.
         com.ksjd.testem.rides.RideScheduler.reschedule(applicationContext)
+        com.ksjd.testem.reminders.LastBus.reschedule(applicationContext)
+        com.ksjd.testem.offline.OfflineTimetables.schedule(applicationContext)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         handleIntent(intent)
@@ -124,11 +126,26 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
+/** Shortcuts and Google Assistant open a feature by name (res/xml/shortcuts.xml). */
+private const val EXTRA_FEATURE = "feature"
+private val featureRequested = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
 /** Tapping the follow notification: show that bus over the home tab. */
 private fun handleIntent(intent: android.content.Intent?) {
     if (intent?.getBooleanExtra(com.ksjd.testem.live.TripTracking.EXTRA_SHOW_FOLLOWED, false) == true) {
         intent.removeExtra(com.ksjd.testem.live.TripTracking.EXTRA_SHOW_FOLLOWED) // not again after rotation
         com.ksjd.testem.live.TripTracking.requestShow()
+    }
+    // 2.17.0: a launcher shortcut or Google Assistant ("open Take me home"): "home" or "work".
+    intent?.getStringExtra(EXTRA_FEATURE)?.let { feature ->
+        intent.removeExtra(EXTRA_FEATURE)
+        featureRequested.value = feature.lowercase()
+    }
+    // 2.17.0: "You may miss line X": the planner, searching the rest of the journey from the change stop.
+    intent?.getStringExtra(com.ksjd.testem.live.TripTracking.EXTRA_REPLAN_FROM)?.let { from ->
+        val t = com.ksjd.testem.live.TripTracking
+        t.replan.value = com.ksjd.testem.live.TripTracking.Replan(from, intent.getStringExtra(t.EXTRA_REPLAN_TO).orEmpty(), intent.getLongExtra(t.EXTRA_REPLAN_AT, 0L))
+        intent.removeExtra(t.EXTRA_REPLAN_FROM)
     }
     // "Add credit" on the low-credit alert: Account, with the top-up open.
     if (intent?.getBooleanExtra(com.ksjd.testem.reminders.Reminders.EXTRA_TOP_UP, false) == true) {
@@ -226,6 +243,26 @@ private fun MainScaffold(
     LaunchedEffect(reportRequested) { if (reportRequested) selected = AppTab.Account }
     val topUpRequested by com.ksjd.testem.reminders.Reminders.topUpRequested.collectAsState()
     LaunchedEffect(topUpRequested) { if (topUpRequested) selected = AppTab.Account }
+
+    val feature by featureRequested.collectAsState()
+    val featureContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(feature) {
+        val f = feature ?: return@LaunchedEffect
+        featureRequested.value = null
+        selected = AppTab.Planner
+        val kind = if (f.contains("work")) "work" else if (f.contains("home")) "home" else return@LaunchedEffect
+        val place = CredentialsManager(featureContext).getPlace(kind)
+        val toast = { id: Int -> android.widget.Toast.makeText(featureContext, id, android.widget.Toast.LENGTH_LONG).show() }
+        if (place == null) toast(R.string.place_set_first) else viewModel.takeMeTo(place) { toast(R.string.place_no_location) }
+    }
+    val replan by com.ksjd.testem.live.TripTracking.replan.collectAsState()
+    LaunchedEffect(replan) {
+        val r = replan ?: return@LaunchedEffect
+        com.ksjd.testem.live.TripTracking.replan.value = null
+        val at = java.time.Instant.ofEpochMilli(r.atMs.takeIf { it > 0 } ?: System.currentTimeMillis()).atZone(SK_ZONE)
+        selected = AppTab.Planner
+        viewModel.searchAt(SavedRoute(PLANNER_ALL, r.from, r.to), "%02d:%02d".format(at.hour, at.minute), at.toLocalDate().toString())
+    }
 
     // Follow notification tapped: home tab (the ticket is one swipe away) with the bus's stops on top.
     val showFollowed by com.ksjd.testem.live.TripTracking.showRequested.collectAsState()

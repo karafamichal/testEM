@@ -705,6 +705,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _timetableState.update { it.copy(savedJourneys = updated) }
     }
 
+    /**
+     * 2.17.0 "Take me home": from the stop nearest the rider to [place], leaving now. [onNoStop] when the location or a
+     * stop near it isn't known (the From field is then left for the rider).
+     */
+    fun takeMeTo(place: CpStopSuggestion, onNoStop: () -> Unit) {
+        viewModelScope.launch {
+            val stop = com.ksjd.testem.live.Locations.current(app, fallbackToLastKnown = true)?.let { at ->
+                withContext(Dispatchers.IO) { runCatching { timetableService.nearestStop(at.latitude, at.longitude) }.getOrNull() }
+            }
+            _timetableState.update { it.copy(timeInput = "", dateInput = "", arriveBy = false) }
+            if (stop == null) {
+                _timetableState.update { it.copy(toInput = place.selectedText, selectedToSuggestion = place) }
+                onNoStop()
+                return@launch
+            }
+            applyRoute(SavedRoute(PLANNER_ALL, stop.selectedText, place.selectedText, stop, place))
+        }
+    }
+
     /** Opens the planner on a route at a given time and date and searches. */
     fun searchAt(route: SavedRoute, time: String, date: String = "") {
         _timetableState.update { it.copy(timeInput = time, dateInput = date) }
@@ -975,10 +994,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         searchResult.connections
                     }.sortedBy { it.departureSortKey }
+                    // 2.17.0: rain where the journey starts: connections with little walking first (the time order kept within).
+                    val rainy = !searchResult.offline && route.from?.let { f -> f.coorX?.toDoubleOrNull()?.let { lat -> f.coorY?.toDoubleOrNull()?.let { lon ->
+                        withContext(Dispatchers.IO) { timetableService.rainy(lat, lon) } } } } == true
+                    val shown = if (rainy) connections.sortedBy { it.walkMinutes > 3 } else connections
                     _timetableState.update {
                         it.copy(
                             isLoading = false,
-                            connections = connections,
+                            connections = shown,
+                            rainy = rainy,
+                            offline = searchResult.offline,
                             pagingCursor = searchResult.pagingCursor,
                             canLoadMore = searchResult.pagingCursor != null,
                             errorMessage = if (connections.isEmpty()) app.getString(R.string.timetables_no_results) else ""

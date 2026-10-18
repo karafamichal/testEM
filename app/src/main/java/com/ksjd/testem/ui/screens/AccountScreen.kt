@@ -96,7 +96,7 @@ import com.ksjd.testem.ui.components.SectionLabel
 import com.ksjd.testem.ui.components.daysLeftText
 import com.ksjd.testem.ui.theme.TransitTheme
 
-private enum class SettingsPage { Appearance, Security, Reminders, Language, Community, Watch, BugReport, Feature, Developer }
+private enum class SettingsPage { Appearance, Security, Reminders, Language, Community, Watch, Offline, BugReport, Feature, Developer }
 
 @Composable
 fun AccountScreen(viewModel: AppViewModel, onUnlock: () -> Unit, onSignIn: (Wallet) -> Unit) {
@@ -295,6 +295,8 @@ private fun AccountOverview(viewModel: AppViewModel, onUnlock: () -> Unit, onSig
             SettingsLink(stringResource(R.string.language_title), languageName(app.languageCode)) { onOpen(SettingsPage.Language) }
             GroupDivider()
             SettingsLink(stringResource(R.string.settings_community), stringResource(R.string.settings_community_hint)) { onOpen(SettingsPage.Community) }
+            GroupDivider()
+            SettingsLink(stringResource(R.string.offline_title), stringResource(R.string.offline_hint)) { onOpen(SettingsPage.Offline) }
             // Only with the Plan&Ride watch app on a paired watch: without one the page has nothing to set.
             val context = androidx.compose.ui.platform.LocalContext.current
             val hasWatch by androidx.compose.runtime.produceState(com.ksjd.testem.live.WatchSync.watchApp) {
@@ -587,6 +589,7 @@ private fun SettingsPageScreen(page: SettingsPage, viewModel: AppViewModel, onBa
         SettingsPage.Language -> stringResource(R.string.language_title)
         SettingsPage.Community -> stringResource(R.string.settings_community)
         SettingsPage.Watch -> stringResource(R.string.settings_watch)
+        SettingsPage.Offline -> stringResource(R.string.offline_title)
         SettingsPage.BugReport -> stringResource(R.string.bug_title)
         SettingsPage.Feature -> stringResource(R.string.feature_title)
         SettingsPage.Developer -> stringResource(R.string.settings_developer)
@@ -608,6 +611,7 @@ private fun SettingsPageScreen(page: SettingsPage, viewModel: AppViewModel, onBa
             SettingsPage.Language -> LanguageSettings(app, viewModel)
             SettingsPage.Community -> CommunitySettings()
             SettingsPage.Watch -> WatchSettings()
+            SettingsPage.Offline -> OfflineSettings()
             SettingsPage.BugReport -> BugReportForm(viewModel, onDone = onBack)
             SettingsPage.Feature -> BugReportForm(viewModel, onDone = onBack, feature = true)
             SettingsPage.Developer -> DeveloperSettings(viewModel)

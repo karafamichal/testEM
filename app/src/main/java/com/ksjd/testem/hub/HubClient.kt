@@ -26,6 +26,13 @@ data class CommunityDelay(
     val isFreshGps: Boolean get() = source == "gps" && System.currentTimeMillis() - updatedAtMs < 3 * 60_000L
 }
 
+/** A service notice written in emHUB (a detour, a strike): titles and texts in Slovak and English, the lines and stops it's about. */
+data class ServiceNotice(val id: Int, val warning: Boolean, val titleSk: String, val titleEn: String, val bodySk: String, val bodyEn: String,
+                         val lines: List<String>, val stops: List<String>)
+
+/** 2.17.0: how full a bus is from a rider on it: 1 seats free, 2 standing, 3 full; [minutesAgo] since the report. */
+data class Crowd(val level: Int, val minutesAgo: Int)
+
 /** How late this trip usually is: its last [runs] on the same kind of day ([dayType]). */
 data class TripHistory(
     val delaySeconds: Int,
@@ -50,7 +57,9 @@ data class BugReport(
     val images: List<String> = emptyList(),
     /** "android", or "wearos" for a report started on the watch (its logs came through the phone). */
     val platform: String = "android",
-    val appVersion: String = BuildConfig.VERSION_NAME
+    val appVersion: String = BuildConfig.VERSION_NAME,
+    /** The app's language ("sk", "en"): emHUB writes to the reporter in it. */
+    val language: String = java.util.Locale.getDefault().language
 )
 
 /** emhub: timetables (planner, other carriers, stop lists), bug reports and community bus delays. */
@@ -77,6 +86,7 @@ object HubClient {
             addProperty("email", report.email)
             addProperty("platform", report.platform)
             addProperty("appVersion", report.appVersion)
+            addProperty("language", report.language)
             addProperty("device", report.device)
             addProperty("logs", report.logs)
             addProperty("consent", true)
@@ -110,14 +120,25 @@ object HubClient {
     }
 
     /** Live pooled delay and the trip's history, either may be null. */
-    suspend fun communityDelay(tripKey: String): Pair<CommunityDelay?, TripHistory?> = withContext(Dispatchers.IO) {
+    suspend fun communityDelay(tripKey: String): Triple<CommunityDelay?, TripHistory?, Crowd?> = withContext(Dispatchers.IO) {
         val url = "${BuildConfig.HUB_URL}/api/v1/community/delay".toHttpUrl().newBuilder()
             .addQueryParameter("trip", tripKey).build()
         val root = execute(Request.Builder().url(url).get())
         val h = root.get("history")?.takeIf { it.isJsonObject }?.asJsonObject
-        parseDelay(root) to h?.let {
+        Triple(parseDelay(root), h?.let {
             TripHistory(it.get("delaySeconds").asInt, it.get("runs").asInt, it.get("lateRuns").asInt, it.get("dayType").asString)
-        }
+        }, crowd(root))
+    }
+
+    private fun crowd(root: JsonObject): Crowd? = root.get("crowd")?.takeIf { it.isJsonObject }?.asJsonObject?.let {
+        Crowd(it.get("level").asInt, it.get("minutesAgo").asInt)
+    }
+
+    /** 2.17.0: how full the bus is, from a rider on it; returns what others see now. */
+    suspend fun reportCrowd(tripKey: String, reporter: String, level: Int): Crowd? = withContext(Dispatchers.IO) {
+        crowd(post("community/crowd", JsonObject().apply {
+            addProperty("tripKey", tripKey); addProperty("reporter", reporter); addProperty("level", level)
+        }))
     }
 
     /** GET /api/v1/timetable/[path] (stops, departures, trip, plan); blocking, call off the main thread. */
@@ -126,6 +147,18 @@ object HubClient {
             params.forEach { (k, v) -> addQueryParameter(k, v) }
         }.build()
         return execute(Request.Builder().url(url).get())
+    }
+
+    /** 2.17.0: a large timetable answer (an offline region) streamed straight into [target]. */
+    fun timetableToFile(path: String, params: Map<String, String>, target: java.io.File) {
+        val url = "${BuildConfig.HUB_URL}/api/v1/timetable/$path".toHttpUrl().newBuilder().apply {
+            params.forEach { (k, v) -> addQueryParameter(k, v) }
+        }.build()
+        client.newCall(Request.Builder().url(url).header("X-App-Key", BuildConfig.HUB_APP_KEY)
+            .header("X-App-Version", "android ${BuildConfig.VERSION_NAME}").get().build()).execute().use { response ->
+            if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
+            target.outputStream().use { out -> response.body!!.byteStream().copyTo(out) }
+        }
     }
 
     // ------------------------------------------------------------ one-time share codes (hub: Shares)
@@ -251,11 +284,44 @@ object HubClient {
         )
     }
 
+    /** The service notices showing now (emHUB's Notices page). */
+    suspend fun notices(): List<ServiceNotice> = withContext(Dispatchers.IO) {
+        val root = execute(Request.Builder().url("${BuildConfig.HUB_URL}/api/v1/notices").get())
+        root.getAsJsonArray("notices")?.map { it.asJsonObject }?.map { n ->
+            fun str(k: String) = n.get(k)?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+            ServiceNotice(n.get("id").asInt, str("level") == "warning", str("title_sk"), str("title_en"), str("body_sk"), str("body_en"),
+                n.getAsJsonArray("lines")?.map { it.asString }.orEmpty(), n.getAsJsonArray("stops")?.map { it.asString }.orEmpty())
+        }.orEmpty()
+    }
+
+    /** 2.17.0: a missing connection or stop, or a problem at a stop, for an admin to approve (see SubmitDialog). */
+    suspend fun submit(body: JsonObject): JsonObject = withContext(Dispatchers.IO) { post("submissions", body) }
+
+    /** 2.17.0: a live arrival anyone can open in a browser ([url]); [token] lets only this phone update it. */
+    data class EtaLink(val id: String, val token: String, val url: String)
+
+    suspend fun createEta(stop: String): EtaLink = withContext(Dispatchers.IO) {
+        post("eta", JsonObject().apply { addProperty("label", ""); addProperty("stop", stop) })
+            .let { EtaLink(it.get("id").asString, it.get("token").asString, it.get("url").asString) }
+    }
+
+    suspend fun updateEta(link: EtaLink, arrivalMs: Long, delaySeconds: Int, line: String) = withContext(Dispatchers.IO) {
+        runCatching {
+            post("eta/${link.id}", JsonObject().apply {
+                addProperty("token", link.token); addProperty("arrivalMs", arrivalMs); addProperty("delaySeconds", delaySeconds); addProperty("line", line)
+            })
+        }.isSuccess
+    }
+
+    suspend fun endEta(link: EtaLink) = withContext(Dispatchers.IO) {
+        runCatching { post("eta/${link.id}/end", JsonObject().apply { addProperty("token", link.token) }) }
+    }
+
     private fun post(path: String, body: JsonObject): JsonObject =
         execute(Request.Builder().url("${BuildConfig.HUB_URL}/api/v1/$path").post(body.toString().toRequestBody(JSON)))
 
     private fun execute(builder: Request.Builder): JsonObject {
-        val request = builder.header("X-App-Key", BuildConfig.HUB_APP_KEY).build()
+        val request = builder.header("X-App-Key", BuildConfig.HUB_APP_KEY).header("X-App-Version", "android ${BuildConfig.VERSION_NAME}").build()
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             val json = runCatching { JsonParser.parseString(text).asJsonObject }.getOrNull() ?: JsonObject()

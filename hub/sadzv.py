@@ -212,9 +212,9 @@ def bridge_back(run, others, stop_of):
     """
     Gaps no run of this way fills: from the line's way back, read backwards, when exactly as many stops lie before the
     gap's end there as are missing (line 6 towards Zeleznicna stanica misses 10, the way back has 10 between it and
-    Tulska). When the gap's start is on the way back too, exactly as many must lie between the two (line 1 to Zeleznicna
-    stanica misses 8 of the 10 back there: which 2 isn't known, so it stays). Each stop goes on its other platform (this
-    way's side of the road), timed as far apart as on the way back, within the gap.
+    Tulska). When the gap's start is on the way back too, all the stops between the two (line 1 to Zeleznicna stanica
+    misses 8, the way back has 10: which 2 it skips isn't known; the map editor can set a way's stops exactly). Each stop
+    goes on its other platform (this way's side of the road), timed as far apart as on the way back, within the gap.
     run, others: [(platform, time, stop number)]; stop_of: platform -> (id, name, lat, lon, number, stop id).
     """
     def stop(pid):
@@ -240,11 +240,14 @@ def bridge_back(run, others, stop_of):
                 if stop(q) not in stops:
                     continue
                 i = stops.index(stop(q))
-                if stop(p) in stops[:i] and i - stops.index(stop(p)) - 1 != missing:
+                if stop(p) in stops[:i]:
+                    # Both ends on the way back: all its stops between them, also when it has more than are missing
+                    # (line 1 to Zeleznicna stanica: 10 for 8; S.A.D. doesn't say which, the editor can set it exactly).
+                    part = back[stops.index(stop(p)):i + 1]
+                elif i >= missing + 1:
+                    part = back[i - missing - 1:i + 1]  # the stop before them, them, the gap's end
+                else:
                     continue
-                if i < missing + 1:
-                    continue
-                part = back[i - missing - 1:i + 1]  # the stop before them, them, the gap's end
                 gaps = [abs(b[1] - a[1]) for a, b in zip(part, part[1:])]
                 total, run_s = sum(gaps) or 1, 0
                 for x, g in zip(part[1:-1], gaps):

@@ -32,6 +32,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.MyLocation
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.DirectionsCar
+import androidx.compose.material.icons.automirrored.outlined.DirectionsWalk
+import androidx.compose.material.icons.outlined.Work
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.outlined.EventRepeat
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Share
@@ -143,6 +150,7 @@ fun PlannerScreen(
                 subtitle = stringResource(R.string.planner_subtitle)
             )
         }
+        item { PlacesRow(state, viewModel) }
         item { SearchForm(state, viewModel) }
 
         if (state.savedRoutes.isNotEmpty() || state.recentRoutes.isNotEmpty()) {
@@ -158,8 +166,20 @@ fun PlannerScreen(
             }
         }
 
+        // 2.17.0: a connection the planner doesn't know (only cp.sk had line 36 at 13:26): tell us, an admin checks it.
+        if (state.connections.isNotEmpty() || state.errorMessage.isNotBlank()) {
+            item {
+                var reporting by remember { mutableStateOf(false) }
+                if (reporting) SubmitDialog(SubmitKind.Trip, state.selectedFromSuggestion, state.selectedToSuggestion) { reporting = false }
+                androidx.compose.material3.OutlinedButton(onClick = { reporting = true }, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    Text(stringResource(R.string.submit_missing_connection))
+                }
+            }
+        }
         if (state.connections.isNotEmpty()) {
             item { SectionLabel(stringResource(R.string.timetables_results_title)) }
+            if (state.offline) item { Notice(stringResource(R.string.offline_results), modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
+            if (state.rainy) item { Notice(stringResource(R.string.planner_rain), modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
             items(state.connections, key = { it.id }) { connection ->
                 ConnectionCard(
                     connection = connection,
@@ -186,6 +206,68 @@ fun PlannerScreen(
                         state.canLoadMore -> TextButton(onClick = viewModel::loadMoreTimetables) {
                             Text(stringResource(R.string.timetables_load_more))
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 2.17.0 "Take me home": Home and Work, one tap each from the stop nearest you, now. Set (or change) one by holding it
+ * with that stop in To; holding it with To empty forgets it.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun PlacesRow(state: TimetableState, viewModel: AppViewModel) {
+    val context = LocalContext.current
+    val haptic = rememberHaptic()
+    val prefs = remember { com.ksjd.testem.CredentialsManager(context) }
+    var places by remember { mutableStateOf(listOf("home", "work").associateWith { prefs.getPlace(it) }) }
+    var pending by remember { mutableStateOf<com.ksjd.testem.CpStopSuggestion?>(null) }
+    val placesScope = androidx.compose.runtime.rememberCoroutineScope()
+    val go: (com.ksjd.testem.CpStopSuggestion) -> Unit = { place ->
+        viewModel.takeMeTo(place) { android.widget.Toast.makeText(context, R.string.place_no_location, android.widget.Toast.LENGTH_LONG).show() }
+    }
+    val askLocation = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) {
+        pending?.let(go); pending = null
+    }
+    Row(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("home" to R.string.place_home, "work" to R.string.place_work).forEach { (kind, label) ->
+            val place = places[kind]
+            val name = stringResource(label)
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = if (place != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(50)).combinedClickable(
+                    onClick = {
+                        haptic(Haptics.TAP)
+                        when {
+                            place == null -> android.widget.Toast.makeText(context, context.getString(R.string.place_set_hint, name), android.widget.Toast.LENGTH_LONG).show()
+                            com.ksjd.testem.live.Locations.hasPermission(context) -> go(place)
+                            else -> { pending = place; askLocation.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)) }
+                        }
+                    },
+                    onLongClick = {
+                        haptic(Haptics.CONFIRM)
+                        val to = state.selectedToSuggestion?.takeIf { it.selectedText.equals(state.toInput.trim(), true) }
+                        prefs.savePlace(kind, to)
+                        com.ksjd.testem.reminders.LastBus.reschedule(context)
+                        placesScope.launch { com.ksjd.testem.widget.PlacesWidget.refresh(context) }
+                        places = places + (kind to to)
+                        android.widget.Toast.makeText(context,
+                            if (to != null) context.getString(R.string.place_saved, name, to.selectedText) else context.getString(R.string.place_cleared, name),
+                            android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                )
+            ) {
+                Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (kind == "home") Icons.Outlined.Home else Icons.Outlined.Work, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(name, style = MaterialTheme.typography.labelLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                        Text(place?.selectedText ?: stringResource(R.string.place_not_set), style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -329,7 +411,20 @@ private fun SearchForm(state: TimetableState, viewModel: AppViewModel) {
                 }
             )
         }
+        // EM-0074: on foot or by car to the stop (catch estimates and leave-by), right here too.
+        val planPrefs = androidx.compose.ui.platform.LocalContext.current.let { remember { com.ksjd.testem.CredentialsManager(it) } }
+        var byCar by remember { mutableStateOf(planPrefs.getCatchByCar()) }
         Row(verticalAlignment = Alignment.CenterVertically) {
+            FilterChip(
+                selected = byCar,
+                onClick = { haptic(Haptics.TAP); byCar = !byCar; planPrefs.saveCatchByCar(byCar) },
+                label = { Text(stringResource(if (byCar) R.string.planner_to_stop_car else R.string.planner_to_stop_walk)) },
+                leadingIcon = {
+                    Icon(if (byCar) Icons.Outlined.DirectionsCar
+                        else Icons.AutoMirrored.Outlined.DirectionsWalk, null, Modifier.size(18.dp))
+                },
+                modifier = Modifier.padding(end = 12.dp)
+            )
             Text(stringResource(R.string.planner_direct), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             Switch(checked = state.directOnly, onCheckedChange = viewModel::setTimetableDirectOnly)
         }
@@ -522,9 +617,25 @@ private fun ConnectionCard(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(vertical = 2.dp)
                         )
+                        // 2.17.0: how often this change worked on earlier days, from riders' delays.
+                        if (segment.transferRuns > 0) {
+                            val sure = segment.transferWorked * 5 >= segment.transferRuns * 4
+                            Text(
+                                "  " + stringResource(R.string.transfer_odds, segment.transferWorked, segment.transferRuns),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (sure) MaterialTheme.colorScheme.onSurfaceVariant else com.ksjd.testem.ui.theme.LocalTransitColors.current.late
+                            )
+                        }
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { haptic(Haptics.TAP); moving = index }) {
-                            Text(stringResource(R.string.transfer_move), style = MaterialTheme.typography.labelMedium)
+                        // A real button (it was a bare text link, easy to miss).
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = { haptic(Haptics.TAP); moving = index },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier.padding(end = 8.dp).height(34.dp)
+                        ) {
+                            Icon(Icons.Outlined.SwapHoriz, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.transfer_move), style = MaterialTheme.typography.labelLarge)
                         }
                     }
                 }

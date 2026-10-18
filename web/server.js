@@ -8,12 +8,14 @@
 import express from 'express';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as transit from './transit.js';
 import { idsLogin, idsAccount, idsQr, idsHistory } from './ids.js';
 import { startFollowing, stopFollowing, vapidPublicKey, syncRides } from './push.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WEB_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version;
 
 const BASE_URL = process.env.QRBUS_BASE_URL || 'https://sadzv.qrbus.me';
 const PORT = process.env.PORT || 3000;
@@ -775,6 +777,7 @@ app.post('/api/live/trip', wrap(async (req) => {
   // Automatic mode places the rider's phone on the route: it needs stop coordinates.
   return req.body?.withCoordinates ? transit.withCoordinates(trip, !ref.scheduleUrl && !trip.fromTimetable) : trip;
 }));
+app.get('/api/live/drive', wrap((req) => transit.driveSeconds(req.query.from || '', req.query.to || '')));
 app.get('/api/live/path', wrap((req) => transit.roadPath(req.query.stops || '')));
 app.get('/api/live/match', wrap((req) => transit.matchStopByName(String(req.query.name || ''))));
 app.get('/api/cp/suggest', wrap((req) => transit.suggestStops(String(req.query.city || ''), String(req.query.q || '').slice(0, 80))));
@@ -823,7 +826,7 @@ async function hubRequest(route, { method = 'GET', body, clientIp, timeout = 150
   if (!HUB_URL || !HUB_APP_KEY) throw Object.assign(new Error('Bug reports and community delays are not set up on this server'), { status: 503 });
   const res = await fetch(`${HUB_URL}/api/v1/${route}`, {
     method,
-    headers: { 'X-App-Key': HUB_APP_KEY, 'Content-Type': 'application/json', ...(clientIp ? { 'X-Forwarded-For': clientIp } : {}) },
+    headers: { 'X-App-Key': HUB_APP_KEY, 'X-App-Version': `web ${WEB_VERSION}`, 'Content-Type': 'application/json', ...(clientIp ? { 'X-Forwarded-For': clientIp } : {}) },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(timeout),
   });
@@ -844,6 +847,20 @@ app.post('/api/hub/report', wrap((req) =>
   hubRequest('community/reports', { method: 'POST', body: { ...req.body, platform: 'web' }, clientIp: clientIp(req) })));
 app.get('/api/hub/delay', wrap((req) =>
   hubRequest('community/delay?trip=' + encodeURIComponent(String(req.query.trip || '')), { clientIp: clientIp(req) })));
+
+// 2.17.0: how full a bus is, riders' timetable submissions, and a live arrival link (emHUB checks each).
+app.get('/api/hub/notices', wrap((req) => hubRequest('notices', { clientIp: clientIp(req) })));
+app.post('/api/hub/crowd', wrap((req) =>
+  hubRequest('community/crowd', { method: 'POST', body: { tripKey: req.body?.tripKey, reporter: req.body?.reporter, level: Number(req.body?.level) }, clientIp: clientIp(req) })));
+app.post('/api/hub/submissions', wrap((req) =>
+  hubRequest('submissions', { method: 'POST', body: req.body || {}, clientIp: clientIp(req) })));
+app.post('/api/hub/eta', wrap((req) =>
+  hubRequest('eta', { method: 'POST', body: { label: '', stop: String(req.body?.stop || '').slice(0, 80) }, clientIp: clientIp(req) })));
+app.post('/api/hub/eta/:id/end', wrap((req) =>
+  hubRequest(`eta/${shareId(req.params.id)}/end`, { method: 'POST', body: { token: shareId(req.body?.token) }, clientIp: clientIp(req) })));
+app.post('/api/hub/eta/:id', wrap((req) =>
+  hubRequest(`eta/${shareId(req.params.id)}`, { method: 'POST', clientIp: clientIp(req), body: {
+    token: shareId(req.body?.token), arrivalMs: Number(req.body?.arrivalMs) || 0, delaySeconds: Number(req.body?.delaySeconds) || 0, line: String(req.body?.line || '').slice(0, 12) } })));
 
 // One-time share codes (emhub's Shares): ids and tokens are the hub's random strings, passed through as they are.
 const shareId = (v) => { const x = String(v || ''); if (!/^[A-Za-z0-9_-]{1,64}$/.test(x)) throw Object.assign(new Error('Bad id'), { status: 400 }); return x; };
@@ -880,8 +897,9 @@ app.post('/api/logout', (req, res) => {
 app.use(
   express.static(path.join(__dirname, 'public'), {
     setHeaders(res, filePath) {
-      // The service worker must always be revalidated so updates ship.
-      if (filePath.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');
+      // The service worker, pages, scripts and styles are always revalidated (ETag, a 304 when unchanged) so updates
+      // ship at once; with an hour's max-age a new version could keep the old styles (EM-0076). Icons may be cached.
+      if (/\.(js|css|html|webmanifest)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
     },
   })
 );

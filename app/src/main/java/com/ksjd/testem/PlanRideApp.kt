@@ -7,5 +7,6 @@ class PlanRideApp : Application() {
     override fun onCreate() {
         super.onCreate()
         com.ksjd.testem.hub.AppLogs.installCrashRecorder(this)
+        com.ksjd.testem.offline.OfflineTimetables.init(this)
     }
 }

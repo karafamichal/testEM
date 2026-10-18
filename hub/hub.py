@@ -24,6 +24,7 @@ import os
 import queue
 import re
 import secrets
+import shutil
 import smtplib
 import socket
 import sqlite3
@@ -37,7 +38,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import statistics
-from datetime import date, datetime
+from collections import deque
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
@@ -48,7 +50,7 @@ from pathlib import Path
 import sadzv
 import timetable
 
-VERSION = "1.24.0"
+VERSION = "1.38.0"
 HERE = Path(__file__).resolve().parent
 ENV = os.environ.get
 
@@ -80,7 +82,8 @@ INVITE_HOURS = 72
 SECURE_COOKIES = PUBLIC_URL.startswith("https://")
 SESSION_DAYS = 14
 
-BUG_STATUSES = ["new", "triaged", "in_progress", "resolved", "closed"]
+# awaiting_release: fixed, but the version with the fix isn't out yet (Releases marks it resolved and tells the reporter).
+BUG_STATUSES = ["new", "triaged", "in_progress", "awaiting_release", "resolved", "closed"]
 BUG_CATEGORIES = ["crash", "ticket", "departures", "planner", "tracking", "account", "feature", "other"]
 # A report is a bug or a feature suggestion; the dashboard lists them separately.
 BUG_KINDS = ("bug", "feature")
@@ -149,6 +152,107 @@ CREATE TABLE IF NOT EXISTS users (
   oidc_sub TEXT UNIQUE,
   oidc_name TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS crowd_reports (
+  id INTEGER PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  trip_key TEXT NOT NULL,
+  level INTEGER NOT NULL,
+  reporter TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS crowd_trip ON crowd_reports(trip_key, created_at);
+CREATE TABLE IF NOT EXISTS submissions (
+  id INTEGER PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL DEFAULT '',
+  data TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'new',
+  note TEXT NOT NULL DEFAULT '',
+  reviewed_by TEXT NOT NULL DEFAULT '',
+  reviewed_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS saved_replies (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  body_sk TEXT NOT NULL DEFAULT '',
+  body_en TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS releases (
+  version TEXT PRIMARY KEY,
+  released_at INTEGER,
+  notes_en TEXT NOT NULL DEFAULT '',
+  notes_sk TEXT NOT NULL DEFAULT '',
+  notified INTEGER NOT NULL DEFAULT 0,
+  updated_by TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS map_history (
+  id INTEGER PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  username TEXT NOT NULL,
+  action TEXT NOT NULL,
+  tbl TEXT NOT NULL,
+  key_col TEXT NOT NULL,
+  key TEXT NOT NULL,
+  before TEXT,
+  after TEXT,
+  undone_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS feed_history (
+  day TEXT NOT NULL,
+  feed TEXT NOT NULL,
+  trips INTEGER,
+  result TEXT NOT NULL DEFAULT '',
+  alerted INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, feed)
+);
+CREATE TABLE IF NOT EXISTS build_snapshots (
+  built INTEGER PRIMARY KEY,
+  data TEXT NOT NULL,
+  changes TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS notices (
+  id INTEGER PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT '',
+  level TEXT NOT NULL DEFAULT 'info',
+  title_sk TEXT NOT NULL DEFAULT '',
+  title_en TEXT NOT NULL DEFAULT '',
+  body_sk TEXT NOT NULL DEFAULT '',
+  body_en TEXT NOT NULL DEFAULT '',
+  lines TEXT NOT NULL DEFAULT '',
+  stops TEXT NOT NULL DEFAULT '',
+  starts_at INTEGER,
+  ends_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  username TEXT NOT NULL,
+  action TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS admin_lines (
+  id INTEGER PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT NOT NULL,
+  data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS map_vias (
+  segment TEXT PRIMARY KEY,
+  points TEXT NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS map_routes (
+  route_key TEXT PRIMARY KEY,
+  stations TEXT NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
@@ -247,6 +351,25 @@ def db():
     return conn
 
 
+# Saved replies to start with (editable and addable in the dashboard): title, Slovak, English.
+DEFAULT_REPLIES = [
+    ("Update the app",
+     "Ďakujeme za hlásenie. Prosím, aktualizujte si Plan&Ride na najnovšiu verziu v Google Play a dajte nám vedieť, či sa to stále deje.",
+     "Thanks for the report. Please update Plan&Ride to the latest version in Google Play and let us know if it still happens."),
+    ("Allow alarms and reminders",
+     "Ďakujeme, našli sme príčinu. Android 14 a novší spúšťa pripomienky bez povolenia „Budíky a pripomienky“ až s hodinovým oneskorením. "
+     "Povoľte ho v Nastavenia > Aplikácie > Plan&Ride > Budíky a pripomienky. Pomôže aj nastaviť batériu pre Plan&Ride na „Bez obmedzení“.",
+     "Thanks, we found the cause. Android 14 and newer can start reminders up to an hour late without the Alarms and reminders permission. "
+     "Allow it in Settings > Apps > Plan&Ride > Alarms and reminders. Setting Plan&Ride's battery use to Unrestricted helps too."),
+    ("Fixed in the next update",
+     "Ďakujeme, chybu sme opravili. Oprava príde v najbližšej aktualizácii; keď vyjde, dáme vám vedieť.",
+     "Thanks, we fixed it. The fix comes with the next update; we'll let you know when it's out."),
+    ("Need more details",
+     "Ďakujeme za hlásenie. Aby sme to vedeli opraviť, napíšte nám prosím, kedy presne sa to stalo, na akej zastávke alebo linke, a ak môžete, pošlite snímku obrazovky.",
+     "Thanks for the report. To fix it, please tell us when exactly it happened, at which stop or on which line, and send a screenshot if you can."),
+]
+
+
 def init_db():
     with db() as conn:
         conn.executescript(SCHEMA)
@@ -259,6 +382,15 @@ def init_db():
         # 1.1.0: per-admin "sign in with Authentik only".
         if "oidc_only" not in {r[1] for r in conn.execute("PRAGMA table_info(users)")}:
             conn.execute("ALTER TABLE users ADD COLUMN oidc_only INTEGER NOT NULL DEFAULT 0")
+        # 1.34.0: the reporter's language (emails in Slovak or English), labels, the version a fix ships in.
+        bug_cols = {r[1] for r in conn.execute("PRAGMA table_info(bugs)")}
+        for col in ("lang", "labels", "fixed_in"):
+            if col not in bug_cols:
+                conn.execute(f"ALTER TABLE bugs ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+        if not conn.execute("SELECT 1 FROM saved_replies LIMIT 1").fetchone():
+            for title, body_sk, body_en in DEFAULT_REPLIES:
+                conn.execute("INSERT INTO saved_replies(title, body_sk, body_en, updated_at) VALUES (?,?,?,?)",
+                             (title, body_sk, body_en, now()))
         if not conn.execute("SELECT 1 FROM users LIMIT 1").fetchone():
             username = ENV("HUB_BOOTSTRAP_USER", "karafamichal")
             password = ENV("HUB_BOOTSTRAP_PASSWORD", "")
@@ -282,6 +414,494 @@ def load_map_edits():
         timetable.edits["stations"] = {r["station_id"]: dict(json.loads(r["data"]), name=r["name"]) for r in conn.execute("SELECT * FROM map_stations")}
         timetable.edits["children"] = {r["child_id"]: dict(json.loads(r["data"]), name=r["name"], parent=r["parent_id"])
                                        for r in conn.execute("SELECT * FROM map_children")}
+        timetable.edits["routes"] = {r["route_key"]: json.loads(r["stations"]) for r in conn.execute("SELECT * FROM map_routes")}
+        timetable.edits["vias"] = {r["segment"]: json.loads(r["points"]) for r in conn.execute("SELECT * FROM map_vias")}
+        approved = [(r["id"], r["kind"], json.loads(r["data"])) for r in conn.execute(
+            "SELECT id, kind, data FROM submissions WHERE status='approved' AND kind IN ('stop', 'trip') ORDER BY id")]
+        timetable.edits["extra_stations"] = [dict(d, id=f"submitted-{i}") for i, kind, d in approved if kind == "stop"]
+        timetable.edits["extra_trips"] = [dict(d, id=i) for i, kind, d in approved if kind == "trip"]
+        # Lines added in the dashboard: one trip per departure from the first stop, the others at their minutes after it.
+        for r in conn.execute("SELECT id, data FROM admin_lines ORDER BY id"):
+            timetable.edits["extra_trips"].extend(line_trips(r["id"], json.loads(r["data"])))
+
+
+def line_trips(line_id, d):
+    """An admin line's trips for the timetable: each departure with the stops at their minutes after the first."""
+    return [{"id": f"L{line_id}-{k}", "tripId": f"line-{line_id}-{k}", "line": d["line"], "headsign": d.get("headsign", ""),
+             "operator": d.get("operator", ""), "weekdays": d["weekdays"], "validFrom": d.get("validFrom"), "validTo": d.get("validTo"),
+             "stops": [[sid, start + minutes * 60] for sid, minutes in d["stops"]]}
+            for k, start in enumerate(d["departures"])]
+
+
+def clean_admin_line(data, t):
+    """
+    A line as the dashboard sends it, checked: line, headsign, operator, weekdays (0 = Monday), stops [[station id,
+    minutes after the first stop]] in order, departures ["HH:MM", ...] from the first stop. Raises ValueError.
+    """
+    line = one_line(data.get("line"), 12)
+    if not line:
+        raise ValueError("The line needs a number or name")
+    try:
+        weekdays = sorted({int(x) for x in data.get("weekdays") or [] if 0 <= int(x) <= 6})
+        stops = [[str(sid), int(minutes)] for sid, minutes in data.get("stops") or []]
+        departures = []
+        for hhmm in data.get("departures") or []:
+            h, m = (int(x) for x in str(hhmm).strip().split(":"))
+            if not (0 <= h < 30 and 0 <= m < 60):
+                raise ValueError
+            departures.append(h * 3600 + m * 60)
+    except (TypeError, ValueError):
+        raise ValueError("Times are HH:MM and minutes are whole numbers") from None
+    if not weekdays:
+        raise ValueError("Pick at least one day")
+    if not 2 <= len(stops) <= 80:
+        raise ValueError("A line has 2 to 80 stops")
+    if t is None or any(sid not in t.by_id for sid, _ in stops):
+        raise ValueError("Each stop must be one of the timetable's stops")
+    if stops[0][1] != 0 or any(b[1] < a[1] for a, b in zip(stops, stops[1:])) or stops[-1][1] > 24 * 60:
+        raise ValueError("Minutes start at 0 and never go back")
+    if not 1 <= len(departures) <= 300:
+        raise ValueError("Add 1 to 300 departures")
+    valid = [str(data.get(k) or "") for k in ("validFrom", "validTo")]
+    if any(v and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v) for v in valid) or (all(valid) and valid[0] > valid[1]):
+        raise ValueError("Valid from and to are dates, the first not after the second")
+    return {"line": line, "headsign": one_line(data.get("headsign"), 80) or t.names[t.by_id[stops[-1][0]]],
+            "operator": one_line(data.get("operator"), 80), "weekdays": weekdays, "stops": stops,
+            "departures": sorted(set(departures)), "validFrom": valid[0] or None, "validTo": valid[1] or None}
+
+
+# ------------------------------------------------------------------ map: history with undo, to-do list, bulk snapping
+
+MAP_TABLES = {"map_stops": "station_id", "map_stations": "station_id", "map_children": "child_id", "map_segments": "segment",
+              "map_vias": "segment", "map_routes": "route_key"}
+
+
+def history_targets(route, data):
+    """The rows a map edit changes, as (table, key column, key): their before and after go into the history."""
+    seg = f"{data.get('from')}>{data.get('to')}"
+    if route in ("stop", "stop/reset"):
+        return [("map_stops", "station_id", str(data.get("id")))]
+    if route == "station":
+        return [("map_stations", "station_id", str(data.get("id")))]
+    if route in ("child", "child/remove"):
+        return [("map_children", "child_id", str(data.get("child")))]
+    if route in ("segment", "segment/reset") or (route == "snap" and data.get("from")):
+        return [("map_segments", "segment", seg)]
+    if route == "via":
+        return [("map_vias", "segment", seg)]
+    if route == "route" and timetable.current is not None:
+        key = timetable.current.route_key(str(data.get("trip") or ""))
+        return [("map_routes", "route_key", key)] if key else []
+    return []
+
+
+def map_row(table, key_col, key):
+    with db() as conn:
+        row = conn.execute(f"SELECT * FROM {table} WHERE {key_col}=?", (key,)).fetchone()
+    return dict(row) if row else None
+
+
+def undo_map_change(entry):
+    """Puts a map row back as it was before [entry] (removes it when it didn't exist)."""
+    table, key_col = entry["tbl"], entry["key_col"]
+    if MAP_TABLES.get(table) != key_col:
+        raise ValueError("Not a map table")
+    before = json.loads(entry["before"]) if entry["before"] else None
+    with db() as conn:
+        conn.execute(f"DELETE FROM {table} WHERE {key_col}=?", (entry["key"],))
+        if before:
+            cols = [c for c in before if re.fullmatch(r"[a-z_]+", c)]
+            conn.execute(f"INSERT INTO {table}({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", [before[c] for c in cols])
+        conn.execute("UPDATE map_history SET undone_at=? WHERE id=?", (now(), entry["id"]))
+
+
+_todo = {}
+
+
+def map_todo(t):
+    """
+    What's still wrong on the map, most used first: stops without a place, parts still drawn straight, and traces far
+    longer than the way between their stops (loops, wrong roads). Cached for 10 minutes per timetable build.
+    """
+    key = int(t.built)
+    if key in _todo and time.time() - _todo[key][0] < 600:
+        return _todo[key][1]
+    traced = timetable.edits.get("segments", {})
+    today = (datetime.now(timetable.ZONE).date() - t.first_day).days
+    uses, first_trip, unplaced = {}, {}, {}
+    for i, trip in enumerate(t.trips):
+        st = trip[7]
+        for k, a in enumerate(st):
+            if t.lat[a] is None:
+                unplaced[a] = unplaced.get(a, 0) + 1
+                first_trip.setdefault(("stop", a), i)
+        for a, b in zip(st, st[1:]):
+            if t.lat[a] is None or t.lat[b] is None:
+                continue
+            pair = (a, b)
+            uses[pair] = uses.get(pair, 0) + 1
+            first_trip.setdefault(pair, i)
+
+    def trip_ref(i):
+        trip = t.trips[i]
+        days = t.services.get(trip[6], ())
+        day = t.first_day + timedelta(days=min((d for d in days if d >= today), default=max(days, default=today)))
+        return {"tripId": f"{trip[0]}:{trip[1]}:{day:%Y%m%d}", "line": trip[2], "operator": trip[4]}
+
+    straight = sorted(((n, pair) for pair, n in uses.items() if f"{t.station_ids[pair[0]]}>{t.station_ids[pair[1]]}" not in traced), reverse=True)[:150]
+    detours = []
+    for seg, points in traced.items():
+        if len(points) < 2 or ">" not in seg:
+            continue
+        a, b = (t.by_id.get(x) for x in seg.split(">", 1))
+        if a is None or b is None or t.lat[a] is None or t.lat[b] is None:
+            continue
+        direct = timetable.meters(t.lat[a], t.lon[a], t.lat[b], t.lon[b])
+        length = sum(timetable.meters(p[0], p[1], q[0], q[1]) for p, q in zip(points, points[1:]))
+        if length > 3 * direct + 400:
+            detours.append((round(length / max(direct, 1), 1), a, b, uses.get((a, b), 0), int(length)))
+    detours.sort(key=lambda x: -x[3])
+    result = {
+        "unplaced": [dict(id=t.station_ids[s], name=t.names[s], uses=n, **trip_ref(first_trip[("stop", s)]))
+                     for s, n in sorted(unplaced.items(), key=lambda kv: -kv[1])[:100]],
+        "straight": [dict(**{"from": t.station_ids[a], "to": t.station_ids[b]}, fromName=t.names[a], toName=t.names[b], uses=n,
+                          **trip_ref(first_trip[(a, b)])) for n, (a, b) in straight],
+        "detours": [dict(**{"from": t.station_ids[a], "to": t.station_ids[b]}, fromName=t.names[a], toName=t.names[b], uses=n,
+                         times=ratio, meters=length, **(trip_ref(first_trip[(a, b)]) if (a, b) in first_trip else {}))
+                    for ratio, a, b, n, length in detours[:100]],
+        "counts": {"unplaced": len(unplaced), "straight": sum(1 for pair in uses if f"{t.station_ids[pair[0]]}>{t.station_ids[pair[1]]}" not in traced),
+                   "detours": len(detours)},
+    }
+    _todo.clear()
+    _todo[key] = (time.time(), result)
+    return result
+
+
+bulk = {"running": False}
+
+
+def bulk_snap(operator, username, limit=600):
+    """
+    Snaps an operator's parts still drawn straight, most used first, one a second (the public routers ask for that),
+    at most [limit] a run. Progress and the result are in [bulk] for the dashboard.
+    """
+    t = timetable.current
+    if t is None or bulk.get("running"):
+        return
+    traced = timetable.edits.get("segments", {})
+    uses = {}
+    for trip in t.trips:
+        if trip[4] != operator:
+            continue
+        for a, b in zip(trip[7], trip[7][1:]):
+            if t.lat[a] is not None and t.lat[b] is not None and f"{t.station_ids[a]}>{t.station_ids[b]}" not in traced:
+                uses[(a, b)] = uses.get((a, b), 0) + 1
+    todo = [pair for pair, _ in sorted(uses.items(), key=lambda kv: -kv[1])][:limit]
+    bulk.clear()
+    bulk.update(running=True, operator=operator, by=username, started=now(), total=len(todo), done=0, failed=0, remaining=len(uses))
+
+    def run():
+        try:
+            for a, b in todo:
+                if not bulk.get("running"):
+                    break
+                key = f"{t.station_ids[a]}>{t.station_ids[b]}"
+                try:
+                    points = snap_segment([t.lat[a], t.lon[a]], [t.lat[b], t.lon[b]], other_ends=[p[:2] for p in t.free_spots(b)],
+                                          via=timetable.edits.get("vias", {}).get(key, ()))
+                except Exception:  # noqa: BLE001 - one bad part doesn't stop the run
+                    points = None
+                if points:
+                    with db() as conn:
+                        conn.execute("""INSERT INTO map_segments(segment, points, source, updated_by, updated_at) VALUES (?,?,?,?,?)
+                                        ON CONFLICT(segment) DO NOTHING""", (key, json.dumps(points), "osrm", f"{username} (bulk)", now()))
+                    bulk["done"] += 1
+                else:
+                    bulk["failed"] += 1
+                time.sleep(1)
+            load_map_edits()
+        finally:
+            bulk.update(running=False, finished=now(), remaining=max(0, bulk["remaining"] - bulk["done"]))
+    threading.Thread(target=run, daemon=True).start()
+
+
+# ------------------------------------------------------------------ timetable builds: feed health and what changed
+
+def build_summary(t):
+    """What a build has, to compare with the next: each operator's line with its trips, and every stop."""
+    lines = {}
+    for trip in t.trips:
+        key = f"{trip[4]}|{trip[2]}"
+        lines[key] = lines.get(key, 0) + 1
+    return {"lines": lines, "stops": {t.station_ids[s]: t.names[s] for s in range(len(t.names))}}
+
+
+def build_changes(old, new):
+    """Lines and stops that came or went, and lines with far fewer or more trips (30 % and at least 5)."""
+    ol, nl = old["lines"], new["lines"]
+    changed = [{"line": k, "before": ol[k], "after": nl[k]} for k in ol.keys() & nl.keys()
+               if abs(nl[k] - ol[k]) >= max(5, 0.3 * ol[k])]
+    return {
+        "newLines": sorted(nl.keys() - ol.keys()), "goneLines": sorted(ol.keys() - nl.keys()),
+        "changedLines": sorted(changed, key=lambda x: -abs(x["after"] - x["before"]))[:200],
+        "newStops": sorted(new["stops"][s] for s in new["stops"].keys() - old["stops"].keys())[:500],
+        "goneStops": sorted(old["stops"][s] for s in old["stops"].keys() - new["stops"].keys())[:500],
+    }
+
+
+def record_build(t):
+    """After each timetable build: each feed's trips today, what changed since the last build, an email when a feed broke."""
+    day = datetime.now(timetable.ZONE).date().isoformat()
+    alerts = []
+    with db() as conn:
+        for feed, trips in t.feeds.items():
+            result = (timetable.downloads.get(feed) or {}).get("result", "")
+            failed = trips == "failed"
+            prev = conn.execute("SELECT trips FROM feed_history WHERE feed=? AND day<? AND trips IS NOT NULL ORDER BY day DESC LIMIT 1",
+                                (feed, day)).fetchone()
+            dropped = not failed and prev and prev["trips"] >= 20 and trips < 0.7 * prev["trips"]
+            row = conn.execute("SELECT alerted FROM feed_history WHERE day=? AND feed=?", (day, feed)).fetchone()
+            conn.execute("""INSERT INTO feed_history(day, feed, trips, result) VALUES (?,?,?,?)
+                            ON CONFLICT(day, feed) DO UPDATE SET trips=excluded.trips, result=excluded.result""",
+                         (day, feed, None if failed else trips, result[:200]))
+            if (failed or dropped) and not (row and row["alerted"]):
+                alerts.append(f"{feed}: " + ("could not be read" if failed else f"{trips} trips, was {prev['trips']}"))
+                conn.execute("UPDATE feed_history SET alerted=1 WHERE day=? AND feed=?", (day, feed))
+        summary = build_summary(t)
+        last = conn.execute("SELECT data FROM build_snapshots ORDER BY built DESC LIMIT 1").fetchone()
+        changes = build_changes(json.loads(last["data"]), summary) if last else {}
+        conn.execute("INSERT OR REPLACE INTO build_snapshots(built, data, changes) VALUES (?,?,?)",
+                     (int(t.built), json.dumps(summary), json.dumps(changes)))
+        conn.execute("DELETE FROM build_snapshots WHERE built NOT IN (SELECT built FROM build_snapshots ORDER BY built DESC LIMIT 15)")
+        conn.execute("DELETE FROM feed_history WHERE day < ?", ((datetime.now(timetable.ZONE).date() - timedelta(days=90)).isoformat(),))
+    if alerts:
+        to = setting("admin_email") or ",".join(r["email"] for r in db().execute("SELECT email FROM users WHERE email<>''"))
+        body = "<p>A timetable feed looks broken after today's update:</p><ul>" + "".join(f"<li>{html.escape(a)}</li>" for a in alerts) + \
+               f"</ul><p><a href=\"{PUBLIC_URL}/dashboard#timetable\">Open the timetable in emHUB</a></p>"
+        queue_mail(to, "emHUB: a timetable feed looks broken", body)
+
+
+timetable.on_loaded.append(record_build)
+
+
+# ------------------------------------------------------------------ service notices and riders' statistics
+
+def clean_notice(data):
+    """A notice as the dashboard sends it, checked: Slovak and/or English text, optional lines, stops and time window."""
+    out = {"level": data.get("level") if data.get("level") in ("info", "warning") else "info"}
+    for k in ("title_sk", "title_en"):
+        out[k] = one_line(data.get(k), 120)
+    for k in ("body_sk", "body_en"):
+        out[k] = clean(data.get(k), 2000)
+    if not (out["title_sk"] or out["title_en"]):
+        raise ValueError("A notice needs a title in Slovak or English")
+    out["lines"] = ",".join(dict.fromkeys(x.strip() for x in re.split(r"[,\s]+", str(data.get("lines") or "")) if x.strip()))[:300]
+    out["stops"] = clean(str(data.get("stops") or ""), 1000)
+    for k in ("starts_at", "ends_at"):
+        v = data.get(k)
+        out[k] = int(v) if isinstance(v, (int, float)) and v > 0 else None
+    if out["starts_at"] and out["ends_at"] and out["ends_at"] <= out["starts_at"]:
+        raise ValueError("A notice has to end after it starts")
+    return out
+
+
+def active_notices(conn, at=None):
+    """Notices showing now: started (or no start) and not ended (or no end)."""
+    at = at or now()
+    rows = conn.execute("""SELECT id, level, title_sk, title_en, body_sk, body_en, lines, stops, starts_at, ends_at, updated_at FROM notices
+                           WHERE (starts_at IS NULL OR starts_at<=?) AND (ends_at IS NULL OR ends_at>?) ORDER BY level='warning' DESC, id DESC""",
+                        (at, at)).fetchall()
+    return [dict(r, lines=[x for x in r["lines"].split(",") if x], stops=[x.strip() for x in r["stops"].split(";") if x.strip()]) for r in rows]
+
+
+def rider_stats(conn, days=30):
+    """
+    Per line, from riders' reports of the last [days]: trips reported, the usual delay (each trip's last report), how many
+    were 3+ minutes late, by hour of the planned departure; and how full riders said the buses were.
+    """
+    since = now() - days * 86400
+    last = conn.execute("""SELECT line, trip_key, delay_s, scheduled_ms FROM community_reports c
+                           WHERE created_at>=? AND id=(SELECT MAX(id) FROM community_reports WHERE trip_key=c.trip_key)""", (since,)).fetchall()
+    lines = {}
+    for r in last:
+        x = lines.setdefault(r["line"] or "?", {"line": r["line"] or "?", "trips": 0, "late": 0, "sum": 0, "hours": [[0, 0] for _ in range(24)]})
+        x["trips"] += 1
+        x["sum"] += r["delay_s"]
+        x["late"] += r["delay_s"] >= 180
+        if r["scheduled_ms"]:
+            h = datetime.fromtimestamp(r["scheduled_ms"] / 1000, timetable.ZONE).hour
+            x["hours"][h][0] += 1
+            x["hours"][h][1] += r["delay_s"]
+    delays = sorted(({"line": x["line"], "trips": x["trips"], "avgDelay": round(x["sum"] / x["trips"]), "lateShare": round(x["late"] / x["trips"], 2),
+                      "byHour": [round(s_ / n) if n else None for n, s_ in x["hours"]]} for x in lines.values()),
+                    key=lambda x: (-x["avgDelay"], -x["trips"]))
+    crowd = {}
+    for r in conn.execute("SELECT trip_key, level FROM crowd_reports WHERE created_at>=?", (since,)):
+        line = r["trip_key"].split("|")[0] if not r["trip_key"].startswith("sadzv|") else r["trip_key"].split("|")[4] if r["trip_key"].count("|") >= 4 else "?"
+        c = crowd.setdefault(line, [0, 0, 0])
+        c[r["level"] - 1] += 1
+    return {"days": days, "delays": delays[:200],
+            "crowd": sorted(({"line": k, "seats": v[0], "standing": v[1], "full": v[2]} for k, v in crowd.items()), key=lambda x: -(x["full"] * 2 + x["standing"]))[:100]}
+
+
+def audit(username, action):
+    """One line in the admin activity log; the oldest go after 20 000."""
+    with db() as conn:
+        conn.execute("INSERT INTO audit_log(created_at, username, action) VALUES (?,?,?)", (now(), username, action[:200]))
+        conn.execute("DELETE FROM audit_log WHERE id <= (SELECT MAX(id) FROM audit_log) - 20000")
+
+
+class Etas:
+    """Live arrival times shared as a link (2.17.0). In memory: they matter for a few hours only."""
+    KEEP_S = 6 * 3600
+    MAX = 20_000  # a flood can't fill the memory: past this, new links are refused until old ones expire
+
+    def __init__(self):
+        self.items, self.lock = {}, threading.Lock()
+
+    def create(self, label, stop):
+        with self.lock:
+            t = now()
+            for key in [k for k, v in self.items.items() if t - v["created"] > self.KEEP_S]:
+                del self.items[key]
+            if len(self.items) >= self.MAX:
+                return None
+            item = dict(id=secrets.token_urlsafe(9), token=secrets.token_urlsafe(24), label=label, stop=stop, created=t,
+                        updated=0, arrivalMs=0, delaySeconds=0, line="", ended=False)
+            self.items[item["id"]] = item
+            return item
+
+    def owned(self, item_id, token):
+        with self.lock:
+            item = self.items.get(item_id)
+            return item if item and hmac.compare_digest(item["token"], str(token or "")) else None
+
+    def get(self, item_id):
+        with self.lock:
+            item = self.items.get(item_id)
+            return dict(item) if item and now() - item["created"] <= self.KEEP_S else None
+
+    def end(self, item_id):
+        with self.lock:
+            if item_id in self.items:
+                self.items[item_id]["ended"] = True
+
+
+etas = Etas()
+
+
+def eta_page(item):
+    """The shared arrival as a small page that refreshes itself: no app, no account."""
+    head = ('<!doctype html><html lang="sk"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<meta name="robots" content="noindex"><title>Plan&amp;Ride · arrival</title>'
+            '<style>:root{color-scheme:light dark;--bg:#F4F6FA;--card:#fff;--text:#0E1726;--muted:#5B6678;--accent:#1D4FB8}'
+            '@media (prefers-color-scheme:dark){:root{--bg:#0B0F14;--card:#141B24;--text:#E8EDF5;--muted:#93A0B4;--accent:#8AB4FF}}'
+            'body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);'
+            'font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}main{background:var(--card);border-radius:24px;'
+            'padding:28px 26px;margin:16px;max-width:380px;width:calc(100% - 32px);box-shadow:0 10px 40px rgba(0,0,0,.12)}'
+            '.k{color:var(--muted);font-size:14px;margin:0}.t{font-size:56px;font-weight:800;letter-spacing:-.02em;margin:6px 0;'
+            'color:var(--accent)}.s{margin:4px 0 0}.f{color:var(--muted);font-size:12px;margin-top:18px}</style>')
+    if not item:
+        return head + "<main><p class=t style='font-size:28px'>Not shared any more</p><p class=s>This arrival link has ended.</p></main>"
+    if item["ended"]:
+        return head + f"<main><p class=k>{html.escape(item['label'])}</p><p class=t style='font-size:30px'>Arrived</p></main>"
+    if not item["arrivalMs"]:
+        return head + (f"<meta http-equiv=refresh content=20><main><p class=k>{html.escape(item['label'])} is on the way to "
+                       f"{html.escape(item['stop'])}</p><p class=t style='font-size:28px'>Waiting for the bus…</p></main>")
+    at = datetime.fromtimestamp(item["arrivalMs"] / 1000, LOCAL_ZONE)
+    minutes = max(0, round((item["arrivalMs"] / 1000 - time.time()) / 60))
+    late = item["delaySeconds"] // 60
+    status = f"{late} min late" if late >= 2 else "on time" if late > -2 else f"{-late} min early"
+    return head + (f"<meta http-equiv=refresh content=20><main><p class=k>{html.escape(item['label'])} arrives at "
+                   f"{html.escape(item['stop'])}</p><p class=t>{at:%H:%M}</p><p class=s>in {minutes} min · line "
+                   f"{html.escape(item['line'])} · {status}</p><p class=f>Updated {max(0, (now() - item['updated']) // 60)} min ago"
+                   f" · Plan&amp;Ride</p></main>")
+
+
+_weather = {}
+
+
+def weather_at(lat, lon):
+    """2.17.0: rain in the next 3 hours around a town (Open-Meteo, asked by emHUB, cached 30 min per ~10 km)."""
+    key = (round(lat, 1), round(lon, 1))
+    hit = _weather.get(key)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    try:
+        data = http_json(f"https://api.open-meteo.com/v1/forecast?latitude={key[0]}&longitude={key[1]}"
+                         "&hourly=precipitation,precipitation_probability&forecast_hours=3&timezone=Europe%2FBratislava")
+    except ProviderError:
+        return None
+    hourly = data.get("hourly") or {}
+    rain = round(sum(x or 0 for x in hourly.get("precipitation") or []), 1)
+    chance = max([x or 0 for x in hourly.get("precipitation_probability") or []] or [0])
+    result = {"rainMm": rain, "chance": chance, "rainy": rain >= 0.5 or chance >= 70}
+    if len(_weather) > 2000:
+        _weather.clear()
+    _weather[key] = (time.time() + 1800, result)
+    return result
+
+
+# 2.17.0: offline timetables by region (Slovakia's regions, roughly; a stop near a border is in both).
+OFFLINE_REGIONS = {
+    "ba": ("Bratislavský kraj", (47.95, 16.83, 48.40, 17.40)),
+    "tt": ("Trnavský kraj", (47.75, 17.10, 48.80, 17.95)),
+    "tn": ("Trenčiansky kraj", (48.45, 17.55, 49.30, 18.75)),
+    "nr": ("Nitriansky kraj", (47.73, 17.75, 48.60, 18.95)),
+    "za": ("Žilinský kraj", (48.85, 18.25, 49.62, 19.95)),
+    "bb": ("Banskobystrický kraj", (47.95, 18.70, 49.00, 20.35)),
+    "po": ("Prešovský kraj", (48.75, 20.15, 49.62, 22.57)),
+    "ke": ("Košický kraj", (48.35, 20.10, 49.05, 22.25)),
+}
+OFFLINE_DAYS = 21
+_offline = {}
+
+
+def offline_region(t, rid):
+    """
+    A region's timetable for the apps to keep (next 21 days): its stations and every trip with two or more stops in it
+    (cut to those). Cached per timetable build; the version tells the apps when to download it again.
+    """
+    key = (rid, int(t.built))
+    if key not in _offline:
+        south, west, north, east = OFFLINE_REGIONS[rid][1]
+        inside = [s for s in range(len(t.names)) if t.lat[s] is not None and south <= t.lat[s] <= north and west <= t.lon[s] <= east]
+        index = {s: i for i, s in enumerate(inside)}
+        today = (datetime.now(timetable.ZONE).date() - t.first_day).days
+        trips = []
+        for trip in t.trips:
+            kept = [k for k, s in enumerate(trip[7]) if s in index]
+            if len(kept) < 2:
+                continue
+            runs = t.services.get(trip[6], ())
+            days = [d for d in range(OFFLINE_DAYS) if today + d in runs]
+            if days:
+                trips.append([trip[2], trip[3] or t.names[trip[7][-1]], trip[4], [index[trip[7][k]] for k in kept],
+                              [trip[9][k] for k in kept], days])
+        if len(_offline) > 20:
+            _offline.clear()
+        _offline[key] = {"region": rid, "version": int(t.built), "from": (datetime.now(timetable.ZONE).date()).isoformat(),
+                         "stations": [[t.station_ids[s], t.names[s], round(t.lat[s], 5), round(t.lon[s], 5)] for s in inside],
+                         "trips": trips}
+    return _offline[key]
+
+
+_rebuilding = threading.Lock()
+
+
+def rebuild_timetable():
+    """The timetable built again from the files already here (no download), in the background, one at a time: an
+    approved stop or connection takes effect in about half a minute."""
+    def run():
+        if not _rebuilding.acquire(blocking=False):
+            return
+        try:
+            timetable.load(GTFS_DIR, gtfs_feeds())
+        except Exception:  # noqa: BLE001 - the timetable in use stays
+            traceback.print_exc()
+        finally:
+            _rebuilding.release()
+    threading.Thread(target=run, daemon=True).start()
 
 
 def clean_lines(value):
@@ -339,6 +959,25 @@ OSRM_URL = ENV("HUB_OSRM_URL", "https://router.project-osrm.org")
 VALHALLA_URL = ENV("HUB_VALHALLA_URL", "https://valhalla1.openstreetmap.de")
 
 
+_drives = {}  # (from, to) -> (valid until, seconds)
+
+
+def drive_seconds(a, b):
+    """Seconds by car from a to b along the roads (OSRM), or None; the same pair is asked once in 10 min."""
+    hit = _drives.get((a, b))
+    if hit and hit[0] > time.time():
+        return hit[1]
+    try:
+        route = (http_json(f"{OSRM_URL}/route/v1/driving/{a[1]},{a[0]};{b[1]},{b[0]}?overview=false").get("routes") or [None])[0]
+    except ProviderError:
+        return None
+    seconds = round(route["duration"]) if route else None
+    if len(_drives) > 5000:
+        _drives.clear()
+    _drives[(a, b)] = (time.time() + 600, seconds)
+    return seconds
+
+
 def polyline6(text):
     """Valhalla's encoded shape: [[lat, lon]]."""
     out, index, lat, lon = [], 0, 0, 0
@@ -361,10 +1000,13 @@ def polyline6(text):
     return out
 
 
-def valhalla_route(a, b, curb=True):
-    """Like osrm_route, by bus. With `curb`, the bus leaves and arrives on the stop's side of the road."""
+def valhalla_route(a, b, curb=True, via=()):
+    """Like osrm_route, by bus. With `curb`, the bus leaves and arrives on the stop's side of the road; it passes `via`
+    (checkpoints set in the map editor) in order."""
     side = {"preferred_side": "same"} if curb else {}
-    body = {"locations": [{"lat": a[0], "lon": a[1], "type": "break", **side}, {"lat": b[0], "lon": b[1], "type": "break", **side}],
+    body = {"locations": [{"lat": a[0], "lon": a[1], "type": "break", **side},
+                          *({"lat": p[0], "lon": p[1], "type": "through"} for p in via),
+                          {"lat": b[0], "lon": b[1], "type": "break", **side}],
             "costing": "bus", "directions_type": "none"}
     trip = http_json(VALHALLA_URL.rstrip("/") + "/route", json.dumps(body).encode(), {"Content-Type": "application/json"}).get("trip") or {}
     legs = trip.get("legs") or []
@@ -373,25 +1015,29 @@ def valhalla_route(a, b, curb=True):
     return polyline6(legs[0]["shape"])[1:-1], float((legs[0].get("summary") or {}).get("length") or 0) * 1000
 
 
-def road(a, b, curb=True):
-    """The way by bus from Valhalla, else by car from OSRM: (points without the ends, metres) or None."""
+def road(a, b, curb=True, via=()):
+    """The way by bus from Valhalla, else by car from OSRM, through `via` in order: (points without the ends, metres)
+    or None."""
     if VALHALLA_URL != "off":
         try:
-            route = valhalla_route(a, b, curb)
+            route = valhalla_route(a, b, curb, via)
             if route:
                 return route
         except ProviderError:
             pass  # e.g. too busy: OSRM instead
-    return osrm_route(a, b, curb)
+    return osrm_route(a, b, curb, via)
 
 
-def osrm_route(a, b, curb=True):
+def osrm_route(a, b, curb=True, via=()):
     """
     The road from a to b ([lat, lon] each) from OSRM: (points without the ends, metres), or None. With `curb`, the bus
     leaves and arrives on the kerb side of the road (the stop's side), so on a dual carriageway it starts on the right one.
+    It passes `via` in order.
     """
-    url = f"{OSRM_URL}/route/v1/driving/{a[1]},{a[0]};{b[1]},{b[0]}?overview=full&geometries=geojson"
-    route = (http_json(url + ("&approaches=curb;curb" if curb else "")).get("routes") or [None])[0]
+    points = [a, *via, b]
+    url = f"{OSRM_URL}/route/v1/driving/{';'.join(f'{p[1]},{p[0]}' for p in points)}?overview=full&geometries=geojson"
+    sides = ";".join(["curb", *["unrestricted"] * len(via), "curb"])
+    route = (http_json(url + (f"&approaches={sides}" if curb else "")).get("routes") or [None])[0]
     if not route:
         return None
     coords = [[round(lat, 6), round(lon, 6)] for lon, lat in route["geometry"]["coordinates"]]
@@ -419,23 +1065,52 @@ def u_turns(points, window=20.0):
     return count
 
 
-def snap_segment(a, b, pause=1.0, other_ends=()):
+def snap_segment(a, b, pause=1.0, other_ends=(), via=()):
     """
-    The road between two stops (without its ends), or None. From the bus's own platform at a: leaving and arriving on
+    The road between two stops, from the bus's spot at a to the spot of b it goes to (both included), or None. From the bus's own platform at a: leaving and arriving on
     the kerb side, and the plain way. The kerb rule keeps a bus on its side of a dual carriageway, but where a stop's
     point is on the other side it loops round to reach it (line 1, Partizanska cesta in Banska Bystrica). Each turn back
     counts as 300 m; the kerb way wins a near tie. other_ends: b's other free spots; the one reached most directly wins
     (the trip then stops there: Timetable.traced_spot). `pause`: the routing servers ask for one request a second.
     """
-    tried = [(snap_one(a, end, pause), end) for end in [tuple(b), *map(tuple, other_ends)]]
+    tried = [(snap_one(a, end, pause, via), end) for end in [tuple(b), *map(tuple, other_ends)]]
     tried = [(way, end) for way, end in tried if way]
     if not tried:
         return None
-    return min(tried, key=lambda x: x[0][1] + 300 * u_turns([tuple(a), *x[0][0], x[1]]))[0][0]
+    way, end = min(tried, key=lambda x: x[0][1] + 300 * u_turns([tuple(a), *x[0][0], x[1]]))
+    # The trace starts and ends exactly at the spots it was made for: which of two close places a trip stops at is then
+    # known, not guessed from the road's last point (Okresny urad: 25 m apart, the road's end nearer the wrong one).
+    return [[a[0], a[1]], *way[0], [end[0], end[1]]]
 
 
-def snap_one(a, b, pause):
-    """The best way from a to b: (points, metres), or None (no way, or a way three times the distance)."""
+def through_checkpoints(a, b, via, pause):
+    """
+    The way through checkpoints set in the editor, stretch by stretch (stop to checkpoint, checkpoint to checkpoint, on
+    to the stop), so one turn the map data doesn't allow can't send the whole way round the block. A stretch the router
+    can only do the long way (more than twice the distance: line 5 north of the Nove Kaliste roundabout) is drawn
+    straight between the checkpoints: they say where the bus goes. (points without the ends, metres).
+    """
+    chain, points, total = [tuple(a), *via, tuple(b)], [], 0.0
+    for i, (p, q) in enumerate(zip(chain, chain[1:])):
+        straight = timetable.meters(p[0], p[1], q[0], q[1])
+        try:
+            leg = road(p, q, curb=False)
+        except ProviderError:
+            leg = None
+        if not leg or leg[1] > straight * 2 + 150:
+            leg = ([], straight)
+        if i:
+            points.append([p[0], p[1]])
+        points += leg[0]
+        total += leg[1]
+        time.sleep(pause)
+    return points, total
+
+
+def snap_one(a, b, pause, via=()):
+    """The best way from a to b (through `via`): (points, metres), or None (no way, or a way three times the distance)."""
+    if via:
+        return through_checkpoints(a, b, [tuple(p) for p in via], pause)
     kerb = road(a, b)
     time.sleep(pause)
     plain = road(a, b, curb=False)
@@ -448,7 +1123,8 @@ def snap_one(a, b, pause):
         return route[1] + 300 * u_turns([tuple(a), *route[0], tuple(b)])
     best = plain if cost(plain) < cost(kerb) * 0.9 - 50 else kerb
     # A way three times the distance (4.8 km for 0.9 km into Zvolen AS) is the router lost, not the bus: none.
-    if best[1] > timetable.meters(a[0], a[1], b[0], b[1]) * 3 + 1000:
+    chain = [tuple(a), *via, tuple(b)]
+    if best[1] > sum(timetable.meters(p[0], p[1], q[0], q[1]) for p, q in zip(chain, chain[1:])) * 3 + 1000:
         return None
     return best
 
@@ -558,6 +1234,8 @@ class RateLimiter:
 login_limiter = RateLimiter(10, 15 * 60)
 user_login_limiter = RateLimiter(20, 60 * 60)  # per username: many addresses guessing one account
 bug_limiter = RateLimiter(10, 60 * 60)
+submission_limiter = RateLimiter(20, 60 * 60)  # per IP: missing stops and connections sent from the apps
+eta_limiter = RateLimiter(30, 60 * 60)  # shared arrival links per IP an hour
 report_limiter = RateLimiter(1200, 60 * 60)  # per IP: phones on mobile data share addresses
 reporter_limiter = RateLimiter(300, 60 * 60)  # per rider: GPS every 15 s is 240 an hour
 timetable_limiter = RateLimiter(2000, 60 * 60)  # per IP: a planner search is a few requests
@@ -802,6 +1480,11 @@ TEMPLATES = {
     "user_ack": ("Report received (to reporter)", ["bug_id", "title", "description_html", "name", "platform", "app_version", "created"]),
     "user_reply": ("Admin reply (to reporter)", ["bug_id", "title", "name", "reply_html", "agent", "status_label"]),
     "user_status": ("Status changed (to reporter)", ["bug_id", "title", "name", "status_label", "created"]),
+    "user_fixed": ("Fixed in a released version (to reporter)", ["bug_id", "title", "name", "version", "created"]),
+    "user_ack.sk": ("Report received (to reporter, Slovak)", ["bug_id", "title", "description_html", "name", "platform", "app_version", "created"]),
+    "user_reply.sk": ("Admin reply (to reporter, Slovak)", ["bug_id", "title", "name", "reply_html", "agent", "status_label"]),
+    "user_status.sk": ("Status changed (to reporter, Slovak)", ["bug_id", "title", "name", "status_label", "created"]),
+    "user_fixed.sk": ("Fixed in a released version (to reporter, Slovak)", ["bug_id", "title", "name", "version", "created"]),
     "invite": ("Admin invitation", ["username", "invited_by", "invite_url", "expires_hours", "dashboard_url"]),
     "test": ("Test email", ["username", "smtp", "dashboard_url"]),
 }
@@ -943,13 +1626,54 @@ def bug_images(values):
     return images
 
 
+STATUS_SK = {"new": "nové", "triaged": "posúdené", "in_progress": "rieši sa", "awaiting_release": "opravené, čaká na aktualizáciu",
+             "resolved": "vyriešené", "closed": "uzavreté"}
+
+
+def bug_lang(bug):
+    """The reporter's language: "sk" or "en" (English only when the app or web said so, or the text clearly is)."""
+    return "en" if (bug["lang"] if "lang" in bug.keys() else "") == "en" else "sk"
+
+
+def user_template(name, bug):
+    """A reporter email in their language: user_ack.sk for Slovak reporters, user_ack for English ones."""
+    return f"{name}.sk" if bug_lang(bug) == "sk" else name
+
+
+def user_subject(kind, bug, **values):
+    code, sk = bug_code(bug["id"]), bug_lang(bug) == "sk"
+    return {
+        "ack": f"[{code}] " + ("Vaše hlásenie sme dostali" if sk else "We got your report"),
+        "reply": f"Re: [{code}] {bug['title']}",
+        "status": f"[{code}] " + (f"Stav: {STATUS_SK.get(bug['status'], bug['status'])}" if sk else f"Status: {bug['status'].replace('_', ' ')}"),
+        "fixed": f"[{code}] " + (f"Opravené vo verzii {values.get('version')}" if sk else f"Fixed in version {values.get('version')}"),
+    }[kind]
+
+
+def guess_lang(data, logs, text):
+    """The app or web says its language; older versions only in the logs header ("language en"); else the text tells."""
+    said = str(data.get("language") or "").lower()[:2]
+    if said in ("sk", "en"):
+        return said
+    m = re.search(r"\blanguage (sk|en)\b", logs[:2000])
+    if m:
+        return m.group(1)
+    if re.search(r"[áäčďéíĺľňóôŕšťúýž]", text.lower()):
+        return "sk"
+    words = set(re.findall(r"[a-z']+", text.lower()))
+    english = {"the", "is", "are", "isn't", "it's", "there's", "and", "when", "with", "this", "that", "in", "of", "both",
+               "same", "doesn't", "don't", "not", "app", "bus", "time", "notification", "from", "there", "it", "it's", "but"}
+    return "en" if len(words & english) >= 2 else "sk"  # Slovak typed without diacritics has none of these
+
+
 def bug_values(bug, **extra):
     values = dict(bug)
+    sk = bug_lang(bug) == "sk"
     values.update(
         bug_id=bug_code(bug["id"]),
-        name=bug["name"] or "there",
+        name=bug["name"] or ("" if sk else "there"),
         created=time.strftime("%d.%m.%Y %H:%M", time.localtime(bug["created_at"])),
-        status_label=bug["status"].replace("_", " "),
+        status_label=STATUS_SK.get(bug["status"], bug["status"]) if sk else bug["status"].replace("_", " "),
         dashboard_url=f"{PUBLIC_URL}/dashboard#bug/{bug['id']}",
         logs_lines=len(bug["logs"].splitlines()),
         description_html=paragraphs(bug["description"]),
@@ -962,9 +1686,10 @@ def sample_values(name, user):
     """Realistic values for template previews and the test email."""
     bug = {"id": 42, "title": "QR code doesn't refresh after the phone wakes up", "description": "Every morning the code stays old until I reopen the app.\n\nPixel 8, Android 16.",
            "name": "Jana", "email": "jana@example.com", "status": "in_progress", "category": "ticket", "platform": "android",
-           "app_version": "2.1.0", "device": "Google Pixel 8, Android 16", "logs": "a\nb\nc", "created_at": now()}
+           "app_version": "2.1.0", "device": "Google Pixel 8, Android 16", "logs": "a\nb\nc", "created_at": now(),
+           "lang": "sk" if name.endswith(".sk") else "en"}
     values = bug_values(bug, reply_html=paragraphs("Thanks, Jana. A fix is in version 2.1.1.\n\nDoes it also happen on Wi-Fi?"),
-                        agent=user["username"])
+                        agent=user["username"], version="2.1.1")
     values.update(username="newadmin" if name == "invite" else user["username"], invited_by=user["username"],
                   invite_url=PUBLIC_URL + "/invite?token=example", expires_hours=INVITE_HOURS, smtp=smtp_label())
     return values
@@ -1120,11 +1845,11 @@ def day_type(day):
     return "saturday" if weekday == 5 else "sunday" if weekday == 6 else "workday"
 
 
-def trip_history(conn, trip_key):
-    """How late this trip usually is: its last runs on the same kind of day, today's run left out."""
+def history_runs(conn, trip_key):
+    """This trip's delay on each of its last runs on the same kind of day, {date: seconds}, today's left out."""
     run = trip_run(trip_key)
     if not run:
-        return None
+        return {}
     trip, day = run
     kind = day_type(day)
     parts = trip_key.split("|")
@@ -1138,16 +1863,42 @@ def trip_history(conn, trip_key):
         other = trip_run(key)
         if other and other[0] == trip and other[1] != day and day_type(other[1]) == kind:
             runs.setdefault(other[1], []).append((delay_s, report_kind in EXACT_KINDS))
-    # A run's delay: from the exact moments it left or passed stops when a phone recorded any.
-    recent = [statistics.median([d for d, exact in r if exact] or [d for d, _ in r])
-              for _, r in sorted(runs.items(), reverse=True)[:HISTORY_RUNS]]
-    if len(recent) < HISTORY_MIN_RUNS:
+    return {d: statistics.median([x for x, exact in r if exact] or [x for x, _ in r])
+            for d, r in sorted(runs.items(), reverse=True)[:HISTORY_RUNS]}
+
+
+def transfer_odds(conn, arriving_key, leaving_key, slack_s):
+    """
+    2.17.0: how often a change worked on earlier days: the first bus's delay against the next one's (its usual delay
+    when it has no report that day) and the time between them. {"worked", "runs"}, or None with too few runs.
+    """
+    arriving = history_runs(conn, arriving_key)
+    if len(arriving) < HISTORY_MIN_RUNS:
         return None
+    leaving = history_runs(conn, leaving_key)
+    usual = statistics.median(leaving.values()) if leaving else 0
+    return {"worked": sum(a - leaving.get(d, usual) <= slack_s for d, a in arriving.items()), "runs": len(arriving)}
+
+
+def crowd_now(conn, trip_key):
+    """How full the bus is from riders on it: the newest report in the last 20 min, {"level": 1-3, "minutesAgo"}."""
+    row = conn.execute("""SELECT level, created_at FROM crowd_reports WHERE trip_key=? AND created_at>=?
+                          AND reporter NOT IN (SELECT reporter FROM blocked_reporters) ORDER BY created_at DESC LIMIT 1""",
+                       (trip_key, now() - 20 * 60)).fetchone()
+    return {"level": row["level"], "minutesAgo": (now() - row["created_at"]) // 60} if row else None
+
+
+def trip_history(conn, trip_key):
+    """How late this trip usually is: its last runs on the same kind of day, today's run left out."""
+    runs = history_runs(conn, trip_key)
+    if len(runs) < HISTORY_MIN_RUNS:
+        return None
+    recent = list(runs.values())
     return {
         "delaySeconds": int(statistics.median(recent)),
         "runs": len(recent),
         "lateRuns": sum(d >= HISTORY_LATE_S for d in recent),
-        "dayType": kind,
+        "dayType": day_type(trip_run(trip_key)[1]),
     }
 
 
@@ -1313,6 +2064,28 @@ def walk_leg(a, b, at_ms, arriving):
             "to": {k: b[k] for k in ("id", "name", "lat", "lon") if k in b}, "departure": start, "arrival": start + ms}
 
 
+def add_transfer_odds(t, journeys):
+    """2.17.0: each change gets how often it worked on earlier days ("transfer": {"worked", "runs"}), when known."""
+    def key(leg):
+        try:
+            feed, rest = leg["tripId"].split(":", 1)
+            tid, day = rest.rsplit(":", 1)
+            index = t.trip_index[(feed, tid)]
+            keys = t.community_keys(index, datetime.strptime(day, "%Y%m%d").date())
+            return keys[-1]  # the sadzv key when it's a city bus (riders report under it), else the timetable one
+        except (KeyError, ValueError, AttributeError):
+            return None
+    with db() as conn:
+        for journey in journeys:
+            legs = [leg for leg in journey["legs"] if leg.get("type") == "trip" and leg.get("tripId")]
+            for a, b in zip(legs, legs[1:]):
+                ka, kb = key(a), key(b)
+                if ka and kb:
+                    odds = transfer_odds(conn, ka, kb, (b["departure"] - a["arrival"]) // 1000)
+                    if odds:
+                        b["transfer"] = odds
+
+
 # "Arrive by": how far before the wanted arrival connections are searched.
 ARRIVE_WINDOW_S = 4 * 3600
 
@@ -1354,6 +2127,34 @@ def timetable_query(route, query):
         return 200, {"departures": t.departures(stations, when_param(query.get("time")), limit(30, 200), exclude,
                                                 ending=query.get("ending") in ("1", "true")),
                      "stops": [t.station_json(s) for s in stations]}
+    if route == "weather":
+        try:
+            lat, lon = float(query.get("lat")), float(query.get("lon"))
+        except (TypeError, ValueError):
+            return 400, {"error": "lat and lon are required"}
+        if not (47 < lat < 51 and 16 < lon < 23.5):
+            return 400, {"error": "That place is outside Slovakia"}
+        result = weather_at(lat, lon)
+        return (200, result) if result else (502, {"error": "No weather right now"})
+    if route == "offline":
+        return 200, {"version": int(t.built), "regions": [{"id": k, "name": v[0], "bbox": v[1]} for k, v in OFFLINE_REGIONS.items()]}
+    if route == "offline/region":
+        rid = query.get("id")
+        if rid not in OFFLINE_REGIONS:
+            return 404, {"error": "No such region"}
+        return 200, offline_region(t, rid)
+    if route == "drive":
+        # EM-0072: the drive from about where the rider is to their stop, along the roads at their speeds (OSRM's car
+        # profile: town streets, 90 km/h roads, 130 km/h motorways). The apps send their position rounded to ~100 m.
+        try:
+            a = tuple(round(float(x), 3) for x in (query.get("from") or "").split(",")[:2])
+            b = tuple(round(float(x), 4) for x in (query.get("to") or "").split(",")[:2])
+        except ValueError:
+            a = b = ()
+        if len(a) != 2 or len(b) != 2 or not all(47 < p[0] < 51 and 16 < p[1] < 23.5 for p in (a, b)):
+            return 400, {"error": "from and to: lat,lon in Slovakia"}
+        seconds = drive_seconds(a, b)
+        return (200, {"seconds": seconds}) if seconds is not None else (502, {"error": "No route by car"})
     if route == "path":
         # EM-0064: the roads between a trip's stops for the apps' maps, as drawn or snapped in the dashboard. Stops come
         # as positions (a live S.A.D. bus doesn't know the timetable's stations): of the stations near each, a pair with
@@ -1404,7 +2205,9 @@ def timetable_query(route, query):
             journeys = merge_live(journeys, live)
         if arrive_by is not None:
             journeys = [j for j in journeys if j["arrival"] <= arrive_by * 1000][-count:]
-        return 200, {"from": t.station_json(origin), "to": t.station_json(target), "connections": journeys[:count]}
+        journeys = journeys[:count]
+        add_transfer_odds(t, journeys)
+        return 200, {"from": t.station_json(origin), "to": t.station_json(target), "connections": journeys}
     return 404, {"error": "Not found"}
 
 
@@ -1429,6 +2232,10 @@ class Handler(BaseHTTPRequestHandler):
         return direct
 
     def send(self, status, body=b"", content_type="application/json", headers=None):
+        self._status = status
+        hook = self.__dict__.pop("_before_send", None)
+        if hook and status < 400:
+            hook()
         if isinstance(body, (dict, list)):
             body = json.dumps(body).encode()
         elif isinstance(body, str):
@@ -1469,8 +2276,11 @@ class Handler(BaseHTTPRequestHandler):
         return self._raw
 
     def json_body(self, limit=1_000_000):
+        if hasattr(self, "_json"):
+            return self._json
         raw = self.read_body(limit)
         data = json.loads(raw or b"{}")
+        self._json = data
         if not isinstance(data, dict):
             raise ValueError("Expected a JSON object")
         return data
@@ -1521,6 +2331,26 @@ class Handler(BaseHTTPRequestHandler):
         self.dispatch("POST")
 
     def dispatch(self, method):
+        started = time.monotonic()
+        try:
+            self.route(method)
+        finally:
+            stream = "Upgrade" in self.headers or "text/event-stream" in (self.headers.get("Accept") or "")
+            # Only answered routes: unknown ones (401/404) would let anyone grow the table.
+            if not stream and (self._status < 400 or self._status >= 500):
+                ms = (time.monotonic() - started) * 1000
+                t = timings.setdefault(route_group(urllib.parse.urlsplit(self.path).path), [0, 0.0, 0.0])
+                t[0] += 1
+                t[1] += ms
+                t[2] = max(t[2], ms)
+                version = (self.headers.get("X-App-Version") or "")[:40]
+                if version and (version in app_versions or len(app_versions) < 50):
+                    app_versions[version] = app_versions.get(version, 0) + 1
+
+    def route(self, method):
+        self.__dict__.pop("_json", None)  # one connection serves many requests: never another request's body
+        self.__dict__.pop("_before_send", None)
+        self._status = 500
         url = urllib.parse.urlsplit(self.path)
         path, query = url.path, dict(urllib.parse.parse_qsl(url.query))
         # Read the whole body up front, even when a handler ignores it: on a keep-alive
@@ -1534,12 +2364,35 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/v1/"):
                 return self.public_api(method, path[len("/api/v1/"):], query)
             if path.startswith("/admin/api/"):
-                return self.admin_api(method, path[len("/admin/api/"):], query)
+                route_ = path[len("/admin/api/"):]
+                who = self.current_user()
+                if method == "POST" and who:
+                    targets = []
+                    if route_.startswith("map/"):
+                        try:
+                            targets = history_targets(route_[4:], self.json_body())
+                        except ValueError:
+                            targets = []
+                    before = [(target, map_row(*target)) for target in targets]
+
+                    def record():
+                        # Before the answer goes out, so the next request (the dashboard redrawing) already sees it.
+                        audit(who["username"], route_)
+                        for target, old in before:
+                            new = map_row(*target)
+                            if new != old:
+                                with db() as conn:
+                                    conn.execute("""INSERT INTO map_history(created_at, username, action, tbl, key_col, key, before, after)
+                                                    VALUES (?,?,?,?,?,?,?,?)""", (now(), who["username"], route_[4:], *target,
+                                                                                 json.dumps(old) if old else None, json.dumps(new) if new else None))
+                    self._before_send = record
+                return self.admin_api(method, route_, query)
             return self.pages(method, path, query)
         except (ValueError, json.JSONDecodeError) as error:
             self.error(400, str(error), cors=path.startswith("/api/"))
         except Exception:  # noqa: BLE001 - keep serving; log the trace
             traceback.print_exc()
+            note_error(f"{method} {path}")
             self.error(500, "Server error", cors=path.startswith("/api/"))
 
     # ---- pages & auth
@@ -1548,6 +2401,8 @@ class Handler(BaseHTTPRequestHandler):
         page = site_route(path)
         if method == "GET" and page:
             return self.send(200, render_site(*page), "text/html")
+        if method == "GET" and path.startswith("/eta/"):
+            return self.send(200, eta_page(etas.get(path[len("/eta/"):])), "text/html")
         if method == "GET" and path == "/f":
             # A followed bus shared from the app: the web version opens it (the app's link stays the same if it moves).
             trip = query.get("t", "")
@@ -1564,7 +2419,9 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/dashboard":
             if not self.current_user():
                 return self.redirect("/login")
-            return self.send(200, (HERE / "static" / "dashboard.html").read_bytes(), "text/html", {"Content-Security-Policy": CSP_DASHBOARD})
+            # Never from the browser's cache: a new version's buttons show on the next load.
+            return self.send(200, (HERE / "static" / "dashboard.html").read_bytes(), "text/html",
+                             {"Content-Security-Policy": CSP_DASHBOARD, "Cache-Control": "no-store"})
         if method == "GET" and path == "/brand.css":
             return self.static("brand.css", "text/css")
         if method == "GET" and path == "/favicon.svg":
@@ -1751,8 +2608,28 @@ class Handler(BaseHTTPRequestHandler):
             if not key:
                 return self.error(400, "trip is required", cors=True)
             with db() as conn:
-                return self.send(200, {"trip": key, "delay": trip_delay(conn, key), "history": trip_history(conn, key)},
-                                 headers=self.cors())
+                return self.send(200, {"trip": key, "delay": trip_delay(conn, key), "history": trip_history(conn, key),
+                                       "crowd": crowd_now(conn, key)}, headers=self.cors())
+        if method == "POST" and route == "community/crowd":
+            # 2.17.0: how full the bus is, from a rider on it (the apps ask only once it has left their stop).
+            data = self.json_body(limit=2_000)
+            reporter, key = clean(data.get("reporter"), 64), clean(data.get("tripKey"), 300)
+            level = data.get("level")
+            if not reporter or not key or level not in (1, 2, 3):
+                return self.error(400, "tripKey, reporter and level 1-3 are required", cors=True)
+            if not (report_limiter.allow(self.client_ip()) and reporter_limiter.allow(reporter)):
+                return self.error(429, "Too many reports", cors=True)
+            with db() as conn:
+                conn.execute("INSERT INTO crowd_reports(created_at, trip_key, level, reporter) VALUES (?,?,?,?)",
+                             (now(), key, level, reporter))
+                return self.send(201, {"crowd": crowd_now(conn, key)}, headers=self.cors())
+        if method == "GET" and route == "notices":
+            with db() as conn:
+                return self.send(200, {"notices": active_notices(conn)}, headers=self.cors())
+        if method == "POST" and route == "submissions":
+            return self.submit_submission()
+        if route.startswith("eta"):
+            return self.eta_api(method, route, query)
         self.error(404, "Not found", cors=True)
 
     def share_socket(self, query):
@@ -1902,10 +2779,10 @@ class Handler(BaseHTTPRequestHandler):
         with db() as conn:
             cur = conn.execute(
                 """INSERT INTO bugs(created_at, updated_at, status, category, title, description, name, email,
-                   platform, app_version, device, logs, consent_at, kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   platform, app_version, device, logs, consent_at, kind, lang) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (t, t, "new", category, title, description, one_line(data.get("name"), 120), email,
                  one_line(data.get("platform"), 20), one_line(data.get("appVersion"), 40), one_line(data.get("device"), 200),
-                 logs, t, kind),
+                 logs, t, kind, guess_lang(data, logs, title + " " + description)),
             )
             bug = conn.execute("SELECT * FROM bugs WHERE id=?", (cur.lastrowid,)).fetchone()
             for mime, blob in images:
@@ -1922,10 +2799,90 @@ class Handler(BaseHTTPRequestHandler):
         what = "New suggestion" if kind == "feature" else "New bug"
         queue_mail(admin_to, f"[{code}] {what}: {title}", render_template("admin_new_bug", bug_values(bug)))
         if email:
-            queue_mail(email, f"[{code}] We got your report", render_template("user_ack", bug_values(bug)),
+            queue_mail(email, user_subject("ack", bug), render_template(user_template("user_ack", bug), bug_values(bug)),
                        reply_to=setting("mail_reply_to"))
         publish("bugs")
         self.send(201, {"id": bug["id"], "code": code}, headers=self.cors())
+
+    def submit_submission(self):
+        """
+        2.17.0: a stop, a connection or a problem a rider says the timetable lacks. Kept for an admin, who approves it
+        before it changes anything. A stop: name, lat, lon. A trip: line, weekdays (0 = Monday), stops [[station id,
+        "HH:MM"], ...]. A problem: station id and text.
+        """
+        if not submission_limiter.allow(self.client_ip()):
+            return self.error(429, "Too many submissions, try again later", cors=True)
+        data = self.json_body(limit=20_000)
+        kind, name = data.get("kind"), clean(data.get("name"), 80)
+        if kind not in ("stop", "trip", "problem") or not name:
+            return self.error(400, "kind (stop, trip or problem) and name are required", cors=True)
+        t = timetable.current
+        try:
+            if kind == "stop":
+                lat, lon = float(data["lat"]), float(data["lon"])
+                if not (47 < lat < 51 and 16 < lon < 23.5):
+                    raise ValueError("That place is outside Slovakia")
+                body = {"name": one_line(data.get("stopName"), 80), "lat": round(lat, 6), "lon": round(lon, 6)}
+                if not body["name"]:
+                    raise ValueError("The stop needs a name")
+            elif kind == "trip":
+                stops = []
+                for sid, hhmm in data.get("stops") or []:
+                    h, m = (int(x) for x in str(hhmm).split(":"))
+                    if t is None or str(sid) not in t.by_id or not (0 <= h < 30 and 0 <= m < 60):
+                        raise ValueError("Each stop needs a known stop and a time HH:MM")
+                    stops.append([str(sid), h * 3600 + m * 60])
+                if len(stops) < 2 or len(stops) > 80 or any(b[1] < a[1] for a, b in zip(stops, stops[1:])):
+                    raise ValueError("At least two stops, in order of time")
+                weekdays = sorted({int(d) for d in data.get("weekdays") or [] if 0 <= int(d) <= 6})
+                line = one_line(data.get("line"), 12)
+                if not weekdays or not line:
+                    raise ValueError("The line and at least one day are required")
+                body = {"line": line, "weekdays": weekdays, "stops": stops, "headsign": one_line(data.get("headsign"), 80),
+                        "operator": one_line(data.get("operator"), 80)}
+            else:
+                text = clean(data.get("text"), 2000)
+                if not text:
+                    raise ValueError("Say what the problem is")
+                body = {"station": clean(data.get("station"), 200), "text": text}
+        except (KeyError, TypeError, ValueError) as error:
+            return self.error(400, str(error) if isinstance(error, ValueError) and str(error)[:1].isupper() else "Check the details", cors=True)
+        with db() as conn:
+            sid = conn.execute("INSERT INTO submissions(created_at, kind, name, email, data) VALUES (?,?,?,?,?)",
+                               (now(), kind, name, clean(data.get("email"), 120), json.dumps(body))).lastrowid
+        publish("submissions")
+        return self.send(201, {"id": sid}, headers=self.cors())
+
+    def eta_api(self, method, route, query):
+        """
+        2.17.0: a live arrival time anyone can open in a browser (no app): POST eta {label, stop} -> {id, token, url};
+        POST eta/<id> {token, arrivalMs, delaySeconds, line} keeps it current; DELETE-like POST eta/<id>/end.
+        """
+        parts = route.split("/")
+        if method == "POST" and route == "eta":
+            data = self.json_body(limit=2_000)
+            if not eta_limiter.allow(self.client_ip()):
+                return self.error(429, "Too many shared arrivals", cors=True)
+            item = etas.create(one_line(data.get("label"), 60), one_line(data.get("stop"), 80))
+            if item is None:
+                return self.error(503, "Sharing is busy, try again later", cors=True)
+            return self.send(201, {"id": item["id"], "token": item["token"], "url": PUBLIC_URL.rstrip("/") + "/eta/" + item["id"]},
+                             headers=self.cors())
+        if method == "POST" and len(parts) in (2, 3):
+            data = self.json_body(limit=2_000)
+            item = etas.owned(parts[1], data.get("token"))
+            if not item:
+                return self.error(404, "No such arrival", cors=True)
+            if len(parts) == 3 and parts[2] == "end":
+                etas.end(item["id"])
+            else:
+                try:
+                    item.update(arrivalMs=int(data.get("arrivalMs") or 0), delaySeconds=int(data.get("delaySeconds") or 0),
+                                line=one_line(data.get("line"), 12), updated=now())
+                except (TypeError, ValueError):
+                    return self.error(400, "arrivalMs and delaySeconds are numbers", cors=True)
+            return self.send(200, {"ok": True}, headers=self.cors())
+        return self.error(404, "Not found", cors=True)
 
     def submit_report(self):
         data = self.json_body(limit=10_000)
@@ -2016,11 +2973,205 @@ class Handler(BaseHTTPRequestHandler):
             timetable.log(f"{user['username']} changed the feed list: {', '.join(names)}")
             timetable.request_update()
             return self.send(200, {"ok": True})
+        if method == "GET" and route == "feeds/health":
+            # Each feed's trips per day (last 30 days) and the last builds' changes.
+            with db() as conn:
+                days = [r["day"] for r in conn.execute("SELECT DISTINCT day FROM feed_history ORDER BY day DESC LIMIT 30")][::-1]
+                rows = conn.execute("SELECT * FROM feed_history WHERE day>=? ORDER BY feed, day", (days[0] if days else "",)).fetchall()
+                feeds = {}
+                for r in rows:
+                    feeds.setdefault(r["feed"], {})[r["day"]] = {"trips": r["trips"], "alerted": r["alerted"], "result": r["result"]}
+                builds = [{"built": r["built"], "changes": json.loads(r["changes"] or "{}")}
+                          for r in conn.execute("SELECT built, changes FROM build_snapshots ORDER BY built DESC LIMIT 10")]
+            return self.send(200, {"days": days, "feeds": feeds, "builds": builds})
         if method == "GET" and route.startswith("timetable/"):
             status, body = timetable_query(route[len("timetable/"):], query)
             return self.send(status, body)
         if route.startswith("map/"):
             return self.map_api(user, method, route[len("map/"):], query)
+        if method == "GET" and route == "lines":
+            # Lines added here, with their stops by name; and every operator in the timetable, to pick from.
+            t = timetable.current
+            with db() as conn:
+                rows = [dict(r, data=json.loads(r["data"])) for r in conn.execute("SELECT * FROM admin_lines ORDER BY id DESC")]
+            for r in rows:
+                r["data"]["stopNames"] = [t.names[t.by_id[s]] if t and s in t.by_id else s for s, _ in r["data"]["stops"]]
+            operators = sorted({trip[4] for trip in t.trips if trip[4]}) if t else []
+            return self.send(200, {"lines": rows, "operators": operators})
+        if method == "POST" and re.fullmatch(r"lines(/\d+)?(/delete)?", route):
+            parts = route.split("/")
+            line_id = int(parts[1]) if len(parts) > 1 else None
+            with db() as conn:
+                if line_id is not None and not conn.execute("SELECT 1 FROM admin_lines WHERE id=?", (line_id,)).fetchone():
+                    return self.error(404, "No such line")
+                if route.endswith("/delete"):
+                    conn.execute("DELETE FROM admin_lines WHERE id=?", (line_id,))
+                else:
+                    try:
+                        body = json.dumps(clean_admin_line(self.json_body(limit=200_000), timetable.current))
+                    except ValueError as error:
+                        return self.error(400, str(error))
+                    if line_id is None:
+                        line_id = conn.execute("INSERT INTO admin_lines(created_at, updated_at, updated_by, data) VALUES (?,?,?,?)",
+                                               (now(), now(), user["username"], body)).lastrowid
+                    else:
+                        conn.execute("UPDATE admin_lines SET data=?, updated_at=?, updated_by=? WHERE id=?",
+                                     (body, now(), user["username"], line_id))
+            load_map_edits()
+            rebuild_timetable()  # in the planner, boards and offline packs in about half a minute
+            return self.send(200, {"ok": True, "id": line_id})
+        if method == "POST" and route == "stops/new":
+            # A stop the timetable lacks, placed on the map by an admin (kept like an approved rider's stop).
+            data = self.json_body()
+            try:
+                lat, lon = float(data["lat"]), float(data["lon"])
+            except (KeyError, TypeError, ValueError):
+                return self.error(400, "lat and lon are required")
+            stop_name = one_line(data.get("name"), 80)
+            if not stop_name or not (47 < lat < 51 and 16 < lon < 23.5):
+                return self.error(400, "A name and a place in Slovakia are required")
+            with db() as conn:
+                sid = conn.execute("""INSERT INTO submissions(created_at, kind, name, data, status, reviewed_by, reviewed_at)
+                                      VALUES (?,?,?,?,?,?,?)""", (now(), "stop", user["username"],
+                                   json.dumps({"name": stop_name, "lat": round(lat, 6), "lon": round(lon, 6)}), "approved",
+                                   user["username"], now())).lastrowid
+            load_map_edits()
+            rebuild_timetable()
+            return self.send(200, {"ok": True, "id": f"submitted-{sid}"})
+        if method == "GET" and route == "notices":
+            with db() as conn:
+                return self.send(200, {"notices": [dict(r) for r in conn.execute("SELECT * FROM notices ORDER BY id DESC LIMIT 200")], "now": now()})
+        if method == "POST" and re.fullmatch(r"notices(/\d+)?(/delete)?", route):
+            parts = route.split("/")
+            nid = int(parts[1]) if len(parts) > 1 else None
+            with db() as conn:
+                if nid is not None and not conn.execute("SELECT 1 FROM notices WHERE id=?", (nid,)).fetchone():
+                    return self.error(404, "No such notice")
+                if route.endswith("/delete"):
+                    conn.execute("DELETE FROM notices WHERE id=?", (nid,))
+                else:
+                    n = clean_notice(self.json_body(limit=20_000))
+                    cols = list(n)
+                    if nid is None:
+                        nid = conn.execute(f"INSERT INTO notices(created_at, updated_at, updated_by, {','.join(cols)}) VALUES (?,?,?,{','.join('?' * len(cols))})",
+                                           [now(), now(), user["username"], *n.values()]).lastrowid
+                    else:
+                        conn.execute(f"UPDATE notices SET updated_at=?, updated_by=?, {', '.join(c + '=?' for c in cols)} WHERE id=?",
+                                     [now(), user["username"], *n.values(), nid])
+            return self.send(200, {"ok": True, "id": nid})
+        if method == "GET" and route == "community/stats":
+            days = min(max(int(query.get("days") or 30), 1), 365) if str(query.get("days") or "30").isdigit() else 30
+            with db() as conn:
+                return self.send(200, rider_stats(conn, days))
+        if method == "GET" and route == "replies":
+            with db() as conn:
+                return self.send(200, {"replies": [dict(x) for x in conn.execute("SELECT * FROM saved_replies ORDER BY title")]})
+        if method == "POST" and re.fullmatch(r"replies(/\d+)?(/delete)?", route):
+            parts = route.split("/")
+            rid = int(parts[1]) if len(parts) > 1 else None
+            with db() as conn:
+                if rid is not None and not conn.execute("SELECT 1 FROM saved_replies WHERE id=?", (rid,)).fetchone():
+                    return self.error(404, "No such reply")
+                if route.endswith("/delete"):
+                    conn.execute("DELETE FROM saved_replies WHERE id=?", (rid,))
+                    return self.send(200, {"ok": True})
+                data = self.json_body(limit=40_000)
+                title, body_sk, body_en = one_line(data.get("title"), 80), clean(data.get("bodySk"), 10_000), clean(data.get("bodyEn"), 10_000)
+                if not title or not (body_sk or body_en):
+                    return self.error(400, "A reply needs a title and a text in Slovak or English")
+                if rid is None:
+                    rid = conn.execute("INSERT INTO saved_replies(title, body_sk, body_en, updated_at, updated_by) VALUES (?,?,?,?,?)",
+                                       (title, body_sk, body_en, now(), user["username"])).lastrowid
+                else:
+                    conn.execute("UPDATE saved_replies SET title=?, body_sk=?, body_en=?, updated_at=?, updated_by=? WHERE id=?",
+                                 (title, body_sk, body_en, now(), user["username"], rid))
+                return self.send(200, {"ok": True, "id": rid})
+        if method == "GET" and route == "releases":
+            # Versions with fixes marked for them, and the ones already released.
+            with db() as conn:
+                counts = {r["fixed_in"]: dict(r) for r in conn.execute(
+                    """SELECT fixed_in, COUNT(*) n, SUM(email<>'') with_email FROM bugs WHERE fixed_in<>'' GROUP BY fixed_in""")}
+                released = {r["version"]: dict(r) for r in conn.execute("SELECT * FROM releases")}
+                versions = sorted(set(counts) | set(released), key=lambda v: [int(x) for x in v.split(".")], reverse=True)
+                return self.send(200, {"releases": [dict(version=v, fixes=counts.get(v, {}).get("n", 0),
+                                                         withEmail=counts.get(v, {}).get("with_email", 0) or 0,
+                                                         **{k: released.get(v, {}).get(k) for k in ("released_at", "notified", "notes_en", "notes_sk")})
+                                                    for v in versions]})
+        m = re.fullmatch(r"releases/(\d+(?:\.\d+){1,3})(/draft|/notes|/release)?", route)
+        if m:
+            version, what = m.group(1), m.group(2) or ""
+            with db() as conn:
+                if method == "GET" and what == "/draft":
+                    return self.send(200, release_draft(conn, version))
+                if method == "POST" and what == "/notes":
+                    data = self.json_body(limit=20_000)
+                    conn.execute("""INSERT INTO releases(version, notes_en, notes_sk, updated_by) VALUES (?,?,?,?)
+                                    ON CONFLICT(version) DO UPDATE SET notes_en=excluded.notes_en, notes_sk=excluded.notes_sk,
+                                    updated_by=excluded.updated_by""",
+                                 (version, clean(data.get("en"), 4000), clean(data.get("sk"), 4000), user["username"]))
+                    return self.send(200, {"ok": True})
+                if method == "POST" and what == "/release":
+                    # Released: every reporter of a fix in it (who left an email) hears so, once, in their language.
+                    row = conn.execute("SELECT notified FROM releases WHERE version=?", (version,)).fetchone()
+                    if row and row["notified"]:
+                        return self.error(409, f"{version} was already announced to its reporters")
+                    conn.execute("""INSERT INTO releases(version, released_at, updated_by) VALUES (?,?,?)
+                                    ON CONFLICT(version) DO UPDATE SET released_at=excluded.released_at, updated_by=excluded.updated_by""",
+                                 (version, now(), user["username"]))
+                    sent = 0
+                    for bug in conn.execute("SELECT * FROM bugs WHERE fixed_in=?", (version,)).fetchall():
+                        if bug["status"] not in ("resolved", "closed"):
+                            conn.execute("UPDATE bugs SET status='resolved', updated_at=? WHERE id=?", (now(), bug["id"]))
+                        if not bug["email"]:
+                            continue
+                        cur = conn.execute("INSERT INTO bug_messages(bug_id, created_at, kind, author, body, mail_status) VALUES (?,?,?,?,?,?)",
+                                           (bug["id"], now(), "system", user["username"], f"Released in {version}: reporter told", "queued"))
+                        queue_mail(bug["email"], user_subject("fixed", bug, version=version),
+                                   render_template(user_template("user_fixed", bug), bug_values(bug, version=version)),
+                                   cur.lastrowid, setting("mail_reply_to"))
+                        sent += 1
+                    conn.execute("UPDATE releases SET notified=1 WHERE version=?", (version,))
+                    publish("bugs")
+                    return self.send(200, {"ok": True, "emailed": sent})
+            return self.error(404, "Not found")
+        if method == "GET" and route == "labels":
+            with db() as conn:
+                found = {}
+                for r in conn.execute("SELECT labels FROM bugs WHERE labels<>''"):
+                    for x in r["labels"].split(","):
+                        found[x] = found.get(x, 0) + 1
+                return self.send(200, {"labels": sorted(found.items(), key=lambda kv: -kv[1])})
+        if method == "GET" and route == "server":
+            return self.send(200, server_health())
+        if method == "POST" and route == "server/backup":
+            return self.send(200, {"ok": True, "name": backup_db().name, "backups": list_backups()})
+        if method == "GET" and route == "audit":
+            with db() as conn:
+                return self.send(200, {"entries": [dict(r) for r in conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 300")]})
+        if method == "GET" and route == "submissions":
+            with db() as conn:
+                rows = [dict(r, data=json.loads(r["data"])) for r in conn.execute(
+                    "SELECT * FROM submissions ORDER BY status='new' DESC, id DESC LIMIT 300")]
+            t = timetable.current
+            for r in rows:  # the stops of a trip by name, for reading it
+                if r["kind"] == "trip" and t is not None:
+                    r["data"]["stopNames"] = [t.names[t.by_id[s]] if s in t.by_id else s for s, _ in r["data"]["stops"]]
+            return self.send(200, {"submissions": rows})
+        if method == "POST" and re.fullmatch(r"submissions/\d+/(approve|reject|done)", route):
+            sid, action = int(route.split("/")[1]), route.split("/")[2]
+            note = clean(self.json_body().get("note"), 500)
+            status = {"approve": "approved", "reject": "rejected", "done": "done"}[action]
+            with db() as conn:
+                row = conn.execute("SELECT kind FROM submissions WHERE id=?", (sid,)).fetchone()
+                if not row:
+                    return self.error(404, "No such submission")
+                conn.execute("UPDATE submissions SET status=?, note=?, reviewed_by=?, reviewed_at=? WHERE id=?",
+                             (status, note, user["username"], now(), sid))
+            if row["kind"] in ("stop", "trip") and status in ("approved", "rejected"):
+                load_map_edits()
+                rebuild_timetable()  # the stop or connection in (or out of) the timetable in about half a minute
+            publish("submissions")
+            return self.send(200, {"ok": True, "status": status})
         parts = route.strip("/").split("/")
         with db() as conn:
             if method == "GET" and route == "me":
@@ -2040,9 +3191,11 @@ class Handler(BaseHTTPRequestHandler):
                 reports_today = conn.execute(
                     "SELECT COUNT(*) FROM community_reports WHERE created_at>=?", (now() - 86400,)
                 ).fetchone()[0]
-                return self.send(200, {"bugs": counts, "ideas": ideas, "activeTrips": active, "reportsToday": reports_today})
+                waiting = conn.execute("SELECT COUNT(*) FROM submissions WHERE status='new'").fetchone()[0]
+                return self.send(200, {"bugs": counts, "ideas": ideas, "activeTrips": active, "reportsToday": reports_today,
+                                       "submissions": waiting})
             if method == "GET" and route == "bugs":
-                sql, args = "SELECT id, created_at, updated_at, status, category, title, name, email, platform, kind FROM bugs", []
+                sql, args = "SELECT id, created_at, updated_at, status, category, title, name, email, platform, kind, lang, labels, fixed_in, app_version FROM bugs", []
                 where = ["kind=?"]
                 args.append(query.get("kind") if query.get("kind") in BUG_KINDS else "bug")
                 if query.get("status") in BUG_STATUSES:
@@ -2050,6 +3203,9 @@ class Handler(BaseHTTPRequestHandler):
                     args.append(query["status"])
                 elif query.get("status") == "open":
                     where.append("status NOT IN ('resolved','closed')")
+                if query.get("label"):
+                    where.append("(','||labels||',') LIKE ?")
+                    args.append("%," + clean(query["label"], 30).lower() + ",%")
                 if query.get("q"):
                     where.append("(title LIKE ? OR description LIKE ? OR email LIKE ? OR name LIKE ?)")
                     args += ["%" + query["q"] + "%"] * 4
@@ -2280,7 +3436,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not bug:
                     return self.error(404, "No such bug")
                 values = bug_values(bug, reply_html=paragraphs(data.get("body", "")), agent=user["username"])
-                return self.send(200, {"html": render_template("user_reply", values)})
+                return self.send(200, {"html": render_template(user_template("user_reply", values), values)})
         self.error(404, "Not found")
 
     def map_api(self, user, method, route, query):
@@ -2307,6 +3463,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, {"stations": t.stations_in(*box())})
         if method == "GET" and route == "lines":
             return self.send(200, {"routes": t.line_routes(query.get("q") or "")})
+        if method == "GET" and route == "todo":
+            return self.send(200, map_todo(t))
+        if method == "GET" and route == "history":
+            with db() as conn:
+                rows = [dict(r) for r in conn.execute("SELECT id, created_at, username, action, tbl, key, undone_at FROM map_history ORDER BY id DESC LIMIT 200")]
+            for row in rows:  # stop ids and parts by name, for reading
+                ids = row["key"].split(">") if ">" in row["key"] else [row["key"]]
+                row["what"] = " → ".join(t.names[t.by_id[x]] if x in t.by_id else x for x in ids)
+            return self.send(200, {"history": rows})
+        if method == "GET" and route == "bulk":
+            ops = sorted({trip[4] for trip in t.trips if trip[4]})
+            return self.send(200, {"status": dict(bulk), "operators": ops})
         if method == "GET" and route == "vehicles":
             with db() as conn:
                 reported = {r[0] for r in conn.execute("SELECT DISTINCT trip_key FROM community_reports WHERE created_at>=?",
@@ -2358,6 +3526,36 @@ class Handler(BaseHTTPRequestHandler):
             load_map_edits()
             changed(station=sid)
             return self.send(200, t.station_json(s))
+        m_undo = re.fullmatch(r"history/(\d+)/undo", route)
+        if m_undo:
+            with db() as conn:
+                entry = conn.execute("SELECT * FROM map_history WHERE id=?", (int(m_undo.group(1)),)).fetchone()
+            if not entry:
+                return self.error(404, "No such change")
+            if entry["undone_at"]:
+                return self.error(409, "Already undone")
+            newer = map_row(entry["tbl"], entry["key_col"], entry["key"])
+            if (json.dumps(newer) if newer else None) != entry["after"]:
+                return self.error(409, "Changed again since: undo the newer change first")
+            undo_map_change(dict(entry))
+            load_map_edits()
+            t.apply_station_edits()
+            t.apply_routes()
+            if entry["tbl"] == "map_stops":
+                rebuild_timetable()  # a stop's place is used across the timetable
+            changed(segment=entry["key"] if ">" in entry["key"] else None, station=None if ">" in entry["key"] else entry["key"])
+            return self.send(200, {"ok": True})
+        if route == "bulk":
+            if bulk.get("running"):
+                return self.error(409, f"Already snapping {bulk.get('operator')}")
+            operator = one_line(data.get("operator"), 120)
+            if operator == "stop":
+                bulk["running"] = False
+                return self.send(200, {"ok": True})
+            if not any(trip[4] == operator for trip in t.trips):
+                return self.error(400, "No such operator in the timetable")
+            bulk_snap(operator, user["username"])
+            return self.send(202, {"ok": True, "total": bulk.get("total", 0)})
         if route == "station":
             # A station's extra places, zone and central flag; fields left out stay as they are.
             s = t.by_id.get(str(data.get("id")))
@@ -2429,6 +3627,44 @@ class Handler(BaseHTTPRequestHandler):
             load_map_edits()
             changed(segment=key)
             return self.send(200, {"ok": True})
+        if route == "via":
+            # Checkpoints for one stop-to-stop part: snapping goes through them in order ([] removes them).
+            key = f"{data.get('from')}>{data.get('to')}"
+            if data.get("from") not in t.by_id or data.get("to") not in t.by_id:
+                return self.error(404, "No such stop")
+            try:
+                points = [[round(float(p[0]), 6), round(float(p[1]), 6)] for p in data.get("points") or []][:25]
+            except (TypeError, ValueError, IndexError):
+                return self.error(400, "Checkpoints are [lat, lon] pairs")
+            if any(not (47 < p[0] < 51 and 16 < p[1] < 23.5) for p in points):
+                return self.error(400, "A checkpoint is outside Slovakia")
+            with db() as conn:
+                if points:
+                    conn.execute("""INSERT INTO map_vias(segment, points, updated_by, updated_at) VALUES (?,?,?,?)
+                                    ON CONFLICT(segment) DO UPDATE SET points=excluded.points, updated_by=excluded.updated_by,
+                                    updated_at=excluded.updated_at""", (key, json.dumps(points), user["username"], now()))
+                else:
+                    conn.execute("DELETE FROM map_vias WHERE segment=?", (key,))
+            load_map_edits()
+            changed(segment=key)
+            return self.send(200, {"ok": True})
+        if route == "route":
+            # A way's stops set by hand (S.A.D. leaves some out, a regional feed may too); [] goes back to the timetable's.
+            key = t.route_key(str(data.get("trip") or ""))
+            if not key:
+                return self.error(400, "A rider's submitted connection is changed in Submissions, not here")
+            stations = [str(x) for x in data.get("stations") or [] if str(x) in t.by_id][:120]
+            with db() as conn:
+                if len(stations) < 2:
+                    conn.execute("DELETE FROM map_routes WHERE route_key=?", (key,))
+                else:
+                    conn.execute("""INSERT INTO map_routes(route_key, stations, updated_by, updated_at) VALUES (?,?,?,?)
+                                    ON CONFLICT(route_key) DO UPDATE SET stations=excluded.stations, updated_by=excluded.updated_by,
+                                    updated_at=excluded.updated_at""", (key, json.dumps(stations), user["username"], now()))
+            load_map_edits()
+            t.apply_routes()
+            changed(trip=str(data.get("trip")), route=key)
+            return self.send(200, {"ok": True})
         if route == "snap":
             # Every stop-to-stop part of the trip along the roads (OSRM), except parts drawn by hand.
             shape = t.trip_shape(str(data.get("id") or ""))
@@ -2442,11 +3678,12 @@ class Handler(BaseHTTPRequestHandler):
                     # One part only (the dashboard goes part by part, to show its progress).
                     if data.get("from") and (seg["from"], seg["to"]) != (data.get("from"), data.get("to")):
                         continue
-                    if key in manual or len(seg["points"]) < 2 or (data.get("keep") and seg["traced"]):
+                    if (key in manual and not data.get("force")) or len(seg["points"]) < 2 or (data.get("keep") and seg["traced"]):
                         continue
                     try:
                         points = snap_segment(seg["points"][0], seg["points"][-1],
-                                              other_ends=[p[:2] for p in t.free_spots(t.by_id[seg["to"]])])
+                                              other_ends=[p[:2] for p in t.free_spots(t.by_id[seg["to"]])],
+                                              via=timetable.edits.get("vias", {}).get(key, ()))
                     except ProviderError:
                         points = False  # the router not answering: what was there stays
                     if not points:
@@ -2475,7 +3712,7 @@ class Handler(BaseHTTPRequestHandler):
             messages = conn.execute("SELECT * FROM bug_messages WHERE bug_id=? ORDER BY id", (bug_id,)).fetchall()
             images = conn.execute("SELECT id, mime, length(data) size FROM bug_images WHERE bug_id=? ORDER BY id", (bug_id,)).fetchall()
             return self.send(200, dict(bug, code=bug_code(bug_id), messages=[dict(m) for m in messages],
-                                       images=[dict(i) for i in images]))
+                                       images=[dict(i) for i in images], lang=bug_lang(bug), similar=similar_bugs(conn, bug)))
         if method == "GET" and action.startswith("images/") and action[7:].isdigit():
             image = conn.execute("SELECT mime, data FROM bug_images WHERE id=? AND bug_id=?", (int(action[7:]), bug_id)).fetchone()
             if not image:
@@ -2502,8 +3739,28 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("UPDATE bugs SET status=?, updated_at=? WHERE id=?", (status, t, bug_id))
             bug = conn.execute("SELECT * FROM bugs WHERE id=?", (bug_id,)).fetchone()
             values = bug_values(bug, reply_html=paragraphs(body), agent=user["username"])
-            queue_mail(bug["email"], f"Re: [{bug_code(bug_id)}] {bug['title']}", render_template("user_reply", values),
+            queue_mail(bug["email"], user_subject("reply", bug), render_template(user_template("user_reply", bug), values),
                        cur.lastrowid, setting("mail_reply_to") or user["email"])
+            return self.send(200, {"ok": True})
+        if action == "meta":
+            # The reporter's language (which emails they get), labels, and the version the fix ships in.
+            lang = data.get("lang") if data.get("lang") in ("sk", "en") else bug["lang"]
+            labels = ",".join(dict.fromkeys(x for x in (one_line(v, 30).lower() for v in str(data.get("labels", bug["labels"])).split(",")) if x))[:300]
+            fixed_in = one_line(data.get("fixedIn", bug["fixed_in"]), 20)
+            if fixed_in and not re.fullmatch(r"\d+(\.\d+){1,3}", fixed_in):
+                return self.error(400, "A version looks like 2.17.1")
+            # A version set: it waits for that release; taken off again: back to being worked on.
+            if fixed_in and bug["status"] not in ("resolved", "closed"):
+                status = "awaiting_release"
+            elif not fixed_in and bug["status"] == "awaiting_release":
+                status = "in_progress"
+            else:
+                status = bug["status"]
+            conn.execute("UPDATE bugs SET lang=?, labels=?, fixed_in=?, status=?, updated_at=? WHERE id=?",
+                         (lang, labels, fixed_in, status, t, bug_id))
+            if status != bug["status"]:
+                conn.execute("INSERT INTO bug_messages(bug_id, created_at, kind, author, body) VALUES (?,?,?,?,?)",
+                             (bug_id, t, "status", user["username"], f"{bug['status']} -> {status}"))
             return self.send(200, {"ok": True})
         if action == "note":
             body = clean(data.get("body"), 20_000)
@@ -2524,10 +3781,130 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("UPDATE bugs SET status=?, updated_at=? WHERE id=?", (status, t, bug_id))
             if notify:
                 bug = conn.execute("SELECT * FROM bugs WHERE id=?", (bug_id,)).fetchone()
-                queue_mail(bug["email"], f"[{bug_code(bug_id)}] Status: {status.replace('_', ' ')}",
-                           render_template("user_status", bug_values(bug)), cur.lastrowid, setting("mail_reply_to"))
+                queue_mail(bug["email"], user_subject("status", bug),
+                           render_template(user_template("user_status", bug), bug_values(bug)), cur.lastrowid, setting("mail_reply_to"))
             return self.send(200, {"ok": True})
         self.error(404, "Not found")
+
+
+def crash_signature(logs):
+    """The exception of a crash in the logs ("java.lang.IllegalStateException: ..."), without numbers, or ''."""
+    m = re.search(r"FATAL EXCEPTION[\s\S]{0,400}?\n.*?((?:[\w$]+\.)+[\w$]*(?:Exception|Error)\b[^\n]*)", logs or "")
+    return re.sub(r"\d+", "#", m.group(1).strip())[:200] if m else ""
+
+
+def similar_bugs(conn, bug, limit=5):
+    """Other reports that may be the same problem: the same crash, or mostly the same words in the title."""
+    words = lambda text: {w for w in re.findall(r"\w{3,}", text.lower())}  # noqa: E731
+    mine, crash = words(bug["title"]), crash_signature(bug["logs"])
+    found = []
+    for o in conn.execute("SELECT id, title, status, logs FROM bugs WHERE id<>? AND kind=? ORDER BY id DESC LIMIT 400",
+                          (bug["id"], bug["kind"])):
+        theirs = words(o["title"])
+        overlap = len(mine & theirs) / max(1, len(mine | theirs))
+        same_crash = bool(crash) and crash == crash_signature(o["logs"])
+        if same_crash or overlap >= 0.5:
+            found.append((same_crash, overlap, {"id": o["id"], "code": bug_code(o["id"]), "title": o["title"],
+                                                 "status": o["status"], "why": "same crash" if same_crash else "similar title"}))
+    found.sort(key=lambda x: (not x[0], -x[1]))
+    return [f[2] for f in found[:limit]]
+
+
+def release_draft(conn, version):
+    """Play notes from the bugs and suggestions fixed in [version]: bullet lists in English and Slovak, to edit."""
+    rows = conn.execute("SELECT id, kind, title, lang FROM bugs WHERE fixed_in=? ORDER BY kind DESC, id", (version,)).fetchall()
+    items = [dict(r, code=bug_code(r["id"])) for r in rows]
+    fixes = [r for r in items if r["kind"] == "bug"]
+    ideas = [r for r in items if r["kind"] == "feature"]
+
+    def notes(new, fixed):
+        lines = [f"• {x['title']}" for x in ideas] + [f"• {fixed}: {x['title']}" for x in fixes]
+        return "\n".join(lines) if lines else ""
+    return {"version": version, "items": items, "en": notes("New", "Fixed"), "sk": notes("Nové", "Opravené")}
+
+
+# ------------------------------------------------------------------ server health and database backups
+
+STARTED = time.time()
+BACKUP_DIR = Path(ENV("HUB_BACKUP_DIR", str(Path(DB_PATH).parent / "backups")))
+BACKUP_KEEP = 14
+timings = {}  # "app: timetable" -> [requests, total ms, slowest ms], since the server started
+recent_errors = deque(maxlen=30)
+app_versions = {}  # X-App-Version -> requests since the server started
+
+
+def route_group(path):
+    parts = path.strip("/").split("/")
+    if parts[:2] == ["api", "v1"]:
+        return "app: " + "/".join(parts[2:3])
+    if parts[:2] == ["admin", "api"]:
+        return "admin: " + "/".join(parts[2:3])
+    return "pages"
+
+
+def note_error(where):
+    recent_errors.appendleft({"at": now(), "where": where, "error": traceback.format_exc()[-2000:]})
+
+
+def backup_db():
+    """A consistent copy of the database (sqlite's online backup) in BACKUP_DIR; keeps the newest BACKUP_KEEP."""
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    target = BACKUP_DIR / f"hub-{datetime.now(LOCAL_ZONE):%Y-%m-%d-%H%M%S}.db"
+    src, dst = db(), sqlite3.connect(target)
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+    for old in sorted(BACKUP_DIR.glob("hub-*.db"))[:-BACKUP_KEEP]:
+        old.unlink()
+    return target
+
+
+def list_backups():
+    return [{"name": p.name, "size": p.stat().st_size, "at": int(p.stat().st_mtime)} for p in sorted(BACKUP_DIR.glob("hub-*.db"), reverse=True)]
+
+
+def backup_worker():
+    """A backup once a day. ponytail: hourly check of the newest backup's age, so the hour drifts with restarts."""
+    time.sleep(60)
+    while True:
+        try:
+            newest = max((p.stat().st_mtime for p in BACKUP_DIR.glob("hub-*.db")), default=0)
+            if time.time() - newest > 23.5 * 3600:
+                print(f"[emhub] database backup {backup_db().name}", flush=True)
+        except Exception:  # noqa: BLE001 - try again in an hour; shown on the Server page
+            traceback.print_exc()
+            note_error("daily backup")
+        time.sleep(3600)
+
+
+def server_health():
+    """What the Server page shows: this process, the machine, the database, request times, recent errors."""
+    out = {"version": VERSION, "started": int(STARTED), "now": now(), "threads": threading.active_count(), "mailQueue": mail_queue.qsize()}
+    try:  # Linux only
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                out["rss"] = int(line.split()[1]) * 1024
+        mem = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines() if ":" in line)
+        out["memTotal"], out["memAvailable"] = (int(mem[k].split()[0]) * 1024 for k in ("MemTotal", "MemAvailable"))
+        out["load"] = [round(x, 2) for x in os.getloadavg()]
+        out["cpus"] = os.cpu_count()
+    except (OSError, KeyError, AttributeError):
+        pass
+    disk = shutil.disk_usage(Path(DB_PATH).parent)
+    out["disk"] = {"total": disk.total, "free": disk.free}
+    out["dbSize"] = sum(p.stat().st_size for p in Path(DB_PATH).parent.glob(Path(DB_PATH).name + "*"))
+    out["routes"] = sorted(({"route": k, "count": c, "avgMs": round(t / c), "maxMs": round(m)} for k, (c, t, m) in list(timings.items())),
+                           key=lambda x: -x["count"])
+    out["errors"] = list(recent_errors)
+    out["appVersions"] = sorted(({"version": k, "requests": v} for k, v in list(app_versions.items())), key=lambda x: -x["requests"])
+    with db() as conn:
+        out["reportedVersions"] = [dict(r) for r in conn.execute(
+            """SELECT platform, app_version AS version, COUNT(*) AS reports, MAX(created_at) AS last FROM bugs
+               WHERE created_at>=? AND app_version<>'' GROUP BY platform, app_version ORDER BY last DESC LIMIT 20""", (now() - 90 * 86400,))]
+    out["backups"] = list_backups()
+    return out
 
 
 class Server(ThreadingHTTPServer):
@@ -2548,6 +3925,7 @@ def main():
         print(f"password sign-in {'allowed again' if changed else 'unchanged: no such user'} for {sys.argv[2]}")
         return
     threading.Thread(target=mail_worker, daemon=True).start()
+    threading.Thread(target=backup_worker, daemon=True).start()
     if ENV("HUB_TIMETABLE", "on") != "off":
         load_map_edits()  # moved stops and road traces, kept through every timetable rebuild
         timetable.start(GTFS_DIR, gtfs_feeds, collect=sadzv.collect)

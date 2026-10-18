@@ -4,6 +4,7 @@ import { $, esc, apiJson, store, plate, toast, clock } from './core.js';
 import { readableStop, lineNumber, nextRideDeparture, localToEpoch, WORKDAYS, EVERY_DAY, plannerLeg } from './logic.js';
 import { openScheduledTrip, startJourney } from './live.js';
 import { rides, saveRides, rideDayText } from './rides.js';
+import { openSubmit } from './submit.js';
 
 // One timetable for every region; the city is kept only because saved routes carry it.
 const ALL = 'vlakbusmhd';
@@ -38,11 +39,14 @@ export function renderPlanner(el, { openStop } = {}) {
         <ul class="suggest" id="pl-suggest" role="listbox" hidden></ul>
       </div>
       <button type="button" class="chip" data-near>${t('nearest_stop')}</button>
+      <div class="places">${['home', 'work'].map((k) => { const pl = store.get('place_' + k, null); return `<button type="button" class="place ${pl ? 'set' : ''}" data-place="${k}">
+        <b>${t('place_' + k)}</b><span>${esc(pl ? readableStop(pl.text) : t('place_not_set'))}</span></button>`; }).join('')}</div>
       <div class="planner-opts">
         <div class="segmented small"><button type="button" aria-pressed="${!p.time && !p.date}" data-now>${t('leave_now')}</button>
           <label class="time-pick ${p.time ? 'on' : ''}">${t(p.time && p.arrive ? 'arrive_at_time' : 'at_time')} <input type="time" id="pl-time" value="${esc(p.time)}"></label>
           <label class="time-pick ${p.date ? 'on' : ''}"><input type="date" id="pl-date" value="${esc(p.date)}" min="${todayIso()}" aria-label="${esc(t('date'))}"></label></div>
         ${p.time ? `<label class="mini-switch"><input type="checkbox" id="pl-arrive" ${p.arrive ? 'checked' : ''}> ${t('arrive_by')}</label>` : ''}
+        <label class="mini-switch"><input type="checkbox" id="pl-car" ${store.get('catchCar', false) ? 'checked' : ''}> ${t('to_stop_by_car')}</label>
         <label class="mini-switch"><input type="checkbox" id="pl-direct" ${p.direct ? 'checked' : ''}> ${t('direct_only')}</label>
       </div>
       <div class="planner-actions">
@@ -59,12 +63,13 @@ function renderBody() {
   const box = $('#pl-body', root);
   if (!box) return;
   if (p.error) { box.innerHTML = `<div class="notice error">${esc(p.error)}</div>`; return; }
+  const missing = `<button class="btn outline wide" data-missing>${t('submit_missing_connection')}</button>`;
   if (p.results.length) {
-    box.innerHTML = `<ul class="connections">${p.results.map(connectionHtml).join('')}</ul>
-      ${p.cursor ? `<button class="btn outline wide" data-more ${p.loadingMore ? 'disabled' : ''}>${p.loadingMore ? '<span class="spinner"></span>' : t('load_more')}</button>` : ''}`;
+    box.innerHTML = `${p.rainy ? `<div class="notice">${t('planner_rain')}</div>` : ''}<ul class="connections">${p.results.map(connectionHtml).join('')}</ul>
+      ${p.cursor ? `<button class="btn outline wide" data-more ${p.loadingMore ? 'disabled' : ''}>${p.loadingMore ? '<span class="spinner"></span>' : t('load_more')}</button>` : ''}${missing}`;
     return;
   }
-  if (p.searched && !p.loading) { box.innerHTML = `<div class="empty"><p>${t('no_connections')}</p></div>`; return; }
+  if (p.searched && !p.loading) { box.innerHTML = `<div class="empty"><p>${t('no_connections')}</p>${missing}</div>`; return; }
   const chips = (list, key) => list.map((r, i) => `<button class="chip route" data-route="${key}:${i}">${esc(readableStop(r.from))} – ${esc(readableStop(r.to))}</button>`).join('');
   const saved = routes('savedRoutes'), recent = routes('recentRoutes');
   box.innerHTML = (saved.length ? `<h2 class="section-label">${t('saved_routes')}</h2><div class="chips">${chips(saved, 'savedRoutes')}</div>` : '') +
@@ -72,8 +77,10 @@ function renderBody() {
 }
 
 function connectionHtml(c, ci) {
+  // 2.17.0: how often the change onto this bus worked on earlier days (late when under 80 %).
+  const odds = (s) => (s.transfer?.runs ? `<p class="small transfer-odds ${s.transfer.worked * 5 >= s.transfer.runs * 4 ? '' : 'late'}">${esc(t('transfer_odds', s.transfer.worked, s.transfer.runs))}</p>` : '');
   const segs = c.segments.map((s, si) => `
-    <li class="seg">
+    <li class="seg">${si ? odds(s) : ''}
       <div class="seg-line">${plate(lineNumber(s.line) || '·')}<span class="hint small">${esc(s.operatorName)}</span></div>
       <div class="seg-stops">
         <button class="seg-stop" data-stop="${ci}:${si}:dep"><b>${esc(s.departureTime)}</b> ${esc(readableStop(s.departureStop))}${s.departurePlatform ? ` <span class="pf">${esc(t('platform', s.departurePlatform))}</span>` : ''}</button>
@@ -125,18 +132,34 @@ function bind(el) {
     (active.which === 'from' ? to : null)?.focus();
   };
   [from, to].forEach((i) => (i.onblur = () => setTimeout(() => (sug.hidden = true), 150)));
-  $('#pl-time', el).onchange = (e) => { p.time = e.target.value; renderPlanner(root); };
-  $('#pl-date', el).onchange = (e) => { p.date = e.target.value === todayIso() ? '' : e.target.value; renderPlanner(root); };
+  // EM-0070: iOS reports every turn of the time and date wheels as a change while the picker is open; redrawing the form
+  // then closed it mid-scroll. A change only keeps the value; the form is redrawn once the time picker is closed, and only
+  // when "arrive by" has to appear or go.
+  const hadTime = !!p.time;
+  const pick = (input, value) => {
+    input.closest('.time-pick').classList.toggle('on', !!value);
+    $('[data-now]', el).setAttribute('aria-pressed', String(!p.time && !p.date));
+  };
+  $('#pl-time', el).onchange = (e) => { p.time = e.target.value; pick(e.target, p.time); };
+  $('#pl-time', el).onblur = () => { if (!!p.time !== hadTime) renderPlanner(root); };
+  $('#pl-date', el).onchange = (e) => { p.date = e.target.value === todayIso() ? '' : e.target.value; pick(e.target, p.date); };
   $('#pl-direct', el).onchange = (e) => (p.direct = e.target.checked);
+  // EM-0074: on foot or by car to the stop (catch estimates), right in the planner too.
+  $('#pl-car', el).onchange = (e) => store.set('catchCar', e.target.checked);
   const arrive = $('#pl-arrive', el);
   if (arrive) arrive.onchange = (e) => { p.arrive = e.target.checked; renderPlanner(root); };
   $('form', el).onsubmit = (e) => { e.preventDefault(); search(); };
+  // Hold (a long press is a context menu on phones) or right-click a place: set it from To.
+  el.querySelectorAll('[data-place]').forEach((b) => (b.oncontextmenu = (e) => { e.preventDefault(); setPlace(b.dataset.place); }));
   el.onclick = (e) => {
     if (e.target.closest('[data-swap]')) {
       [p.from, p.to, p.fromSug, p.toSug] = [p.to, p.from, p.toSug, p.fromSug];
       return renderPlanner(root);
     }
     if (e.target.closest('[data-now]')) { p.time = ''; p.date = ''; return renderPlanner(root); }
+    if (e.target.closest('[data-missing]')) return openSubmit('trip', { from: p.fromSug, to: p.toSug });
+    const place = e.target.closest('[data-place]');
+    if (place) return goPlace(place.dataset.place);
     if (e.target.closest('[data-near]')) {
       if (!navigator.geolocation) return toast(t('no_stop_near'));
       return navigator.geolocation.getCurrentPosition(async (pos) => {
@@ -191,6 +214,30 @@ function bind(el) {
   };
 }
 
+/**
+ * 2.17.0 "Take me home": Home or Work from the stop nearest you, now. Not set yet: the stop picked in To becomes it
+ * (hold the button, or right-click, to set it again from To; with To empty it's forgotten).
+ */
+function goPlace(kind) {
+  const pl = store.get('place_' + kind, null);
+  if (!pl) return setPlace(kind);
+  Object.assign(p, { to: pl.text, toSug: pl, time: '', date: '', arrive: false });
+  if (!navigator.geolocation) return renderPlanner(root);
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const s = await apiJson(`/api/cp/nearest?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`).catch(() => null);
+    if (!s) { toast(t('place_no_location')); return renderPlanner(root); }
+    Object.assign(p, { from: s.text, fromSug: s });
+    search();
+  }, () => { toast(t('place_no_location')); renderPlanner(root); }, { maximumAge: 60000, timeout: 15000 });
+}
+function setPlace(kind) {
+  const to = p.toSug && p.toSug.text === p.to.trim() ? p.toSug : null;
+  if (!to && !store.get('place_' + kind, null)) return toast(t('place_set_hint', t('place_' + kind)));
+  store.set('place_' + kind, to);
+  toast(to ? t('place_saved', t('place_' + kind), readableStop(to.text)) : t('place_cleared', t('place_' + kind)));
+  renderPlanner(root);
+}
+
 function toggleSaved() {
   const r = { city: p.city, from: p.from.trim(), to: p.to.trim(), fromSug: p.fromSug, toSug: p.toSug };
   const saved = routes('savedRoutes');
@@ -206,7 +253,7 @@ async function search() {
     const r = await apiJson('/api/cp/search', {
       city: p.city, from: p.from.trim(), to: p.to.trim(), fromSug: p.fromSug, toSug: p.toSug, time: p.time, date: cpDate(p.date), directOnly: p.direct, arriveBy: p.arrive && !!p.time,
     });
-    Object.assign(p, { results: r.connections, cursor: r.cursor, fromSug: r.from, toSug: r.to });
+    Object.assign(p, { results: r.connections, cursor: r.cursor, fromSug: r.from, toSug: r.to, rainy: !!r.rainy });
     p.searchedRoute = { city: p.city, from: r.from.text, to: r.to.text, fromSug: r.from, toSug: r.to };
     const recent = { city: p.city, from: r.from.text, to: r.to.text, fromSug: r.from, toSug: r.to };
     store.set('recentRoutes', [recent, ...routes('recentRoutes').filter((x) => !sameRoute(x, recent))].slice(0, 8));
@@ -322,6 +369,7 @@ function editRide(ride, isNew) {
       ${r.lines.length ? `<p class="small">${esc(t('rides_lines', r.lines.join(' → ')))}</p>` : ''}
       <label class="field">${t('rides_departs')}<input type="time" name="time" value="${esc(r.time)}" required></label>
       <fieldset class="chips"><legend class="section-label">${t('rides_days')}</legend>
+        ${r.days.length || r.dates.length ? '' : `<p class="hint small">${t('rides_pick_days')}</p>`}
         ${EVERY_DAY.map((n) => `<label class="chip"><input type="checkbox" name="day" value="${n}" ${r.days.includes(n) ? 'checked' : ''}>${esc(dayName(n))}</label>`).join('')}</fieldset>
       <div class="chips"><button type="button" class="chip" data-days="1,2,3,4,5">${t('rides_workdays')}</button><button type="button" class="chip" data-days="6,7">${t('rides_weekends')}</button><button type="button" class="chip" data-days="1,2,3,4,5,6,7">${t('rides_every_day')}</button></div>
       <div class="two"><label class="field">${t('rides_from')}<input type="date" name="startDate" value="${esc(r.startDate || '')}"></label>
@@ -343,7 +391,11 @@ function editRide(ride, isNew) {
       startDate: f.startDate.value || null, endDate: f.endDate.value || null, leadMinutes: Number(f.lead.value), enabled: f.enabled.checked };
   };
   draw();
-  d.onchange = (e) => { read(); if (e.target.name === 'addDate' && e.target.value && !r.dates.includes(e.target.value)) { r.dates.push(e.target.value); draw(); } };
+  d.onchange = (e) => {
+    read();
+    if (e.target.name === 'addDate' && e.target.value && !r.dates.includes(e.target.value)) { r.dates.push(e.target.value); draw(); }
+    if (e.target.name === 'day') draw(); // the "no day: just today" hint comes and goes with the last day
+  };
   d.onclick = async (e) => {
     if (e.target === d || e.target.closest('[data-cancel]')) return d.remove();
     const days = e.target.closest('[data-days]');
@@ -356,7 +408,14 @@ function editRide(ride, isNew) {
     e.preventDefault();
     read();
     const err = $('#ride-error', d);
-    if (!r.days.length && !r.dates.length) { err.textContent = t('rides_pick_days'); err.hidden = false; return; }
+    // EM-0076: no day picked: just today, or tomorrow when its time (minus the lead) has already gone.
+    if (!r.days.length && !r.dates.length) {
+      const now = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bratislava', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+      const [h, m] = r.time.split(':').map(Number), [nh, nm] = now.split(':').map(Number);
+      const today = todayIso();
+      const tomorrow = new Date(Date.UTC(...today.split('-').map((x, i) => Number(x) - (i === 1 ? 1 : 0))) + 86400000).toISOString().slice(0, 10);
+      r.dates = [h * 60 + m - r.leadMinutes > nh * 60 + nm ? today : tomorrow];
+    }
     const ok = await saveRides([...rides().filter((x) => x.id !== r.id), r]);
     if (!ok) { err.textContent = t('rides_push_needed'); err.hidden = false; return; }
     d.remove();

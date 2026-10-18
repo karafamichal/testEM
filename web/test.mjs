@@ -26,6 +26,10 @@ assert.equal(tripProgress(detail, { boardingPlatformIds: [1], alightOrder: 2 }, 
 assert.deepEqual(catchEstimate(600, 900), { walkSeconds: 600, marginSeconds: 300, verdict: 'leaveSoon' });
 assert.equal(catchEstimate(600, 400).verdict, 'miss');
 assert.equal(catchEstimate(30, 10).verdict, 'atStop');
+// EM-0072: by car the router's drive time counts (no parking); without it about 50 km/h; a close stop is still a walk.
+assert.equal(catchEstimate(4000, 1800, true, 330).walkSeconds, 330);
+assert.equal(catchEstimate(4000, 1800, true).walkSeconds, 402);
+assert.equal(catchEstimate(200, 600, true).walkSeconds, catchEstimate(200, 600).walkSeconds);
 // location checks before the stop: 3/4 of the walk, every 1 to 3 min
 assert.equal(nextCheckMs(120), 90000);
 assert.equal(nextCheckMs(10), 60000);

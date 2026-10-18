@@ -232,6 +232,12 @@ private fun LiveCard(context: Context, view: FollowView?, now: Long, colors: Car
             view.catchLine?.let {
                 Text(it, maxLines = 1, style = TextStyle(color = on, fontSize = 12.sp), modifier = GlanceModifier.padding(top = 2.dp))
             }
+            // 2.17.0: how full it is, from riders on it.
+            view.detail.crowd?.let { c ->
+                val level = context.getString(listOf(R.string.crowd_1, R.string.crowd_2, R.string.crowd_3)[(c.level - 1).coerceIn(0, 2)])
+                Text(context.getString(R.string.crowd_now, level, c.minutesAgo), maxLines = 1,
+                    style = TextStyle(color = on, fontSize = 12.sp, fontWeight = FontWeight.Medium), modifier = GlanceModifier.padding(top = 2.dp))
+            }
         }
     }
 }

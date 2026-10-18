@@ -255,9 +255,9 @@ class LiveRepository(context: Context) {
         }
         val key = detail.communityKey
         if (key == null || !prefs.getCommunityEnabled() || !com.ksjd.testem.hub.HubClient.isConfigured) return detail
-        val (community, history) = runCatching { com.ksjd.testem.hub.HubClient.communityDelay(key) }.getOrNull()
+        val (community, history, crowd) = runCatching { com.ksjd.testem.hub.HubClient.communityDelay(key) }.getOrNull()
             ?: return detail
-        detail = detail.copy(history = history)
+        detail = detail.copy(history = history, crowd = crowd)
         if (community == null) {
             val shift = history != null && prefs.getPredictShift() && detail.positionSource == PositionSource.Timetable
             return if (shift) detail.copy(delaySeconds = history!!.delaySeconds, positionSource = PositionSource.History) else detail

@@ -13,6 +13,7 @@ which keeps daylight-saving days right.
 import bisect
 import collections
 import csv
+import hashlib
 import io
 import json
 import math
@@ -151,6 +152,9 @@ class Timetable:
         self.city_platforms = {} # sadzv platform id (str) -> [name, lat, lon, number, stop id]
         self._days = {}
         self._lock = threading.Lock()
+        self._building = threading.Lock()
+        self.city_rows, self.platforms_of = {}, {}
+        self.base_trips = {}     # trip index -> the timetable's own trip, for regional buses whose stops were set by hand
         stops = {}               # (feed, stop_id) -> (name, lat, lon, platform)
         raw_trips = []
         for feed, path in feeds.items():
@@ -174,14 +178,56 @@ class Timetable:
             for s in ids:
                 if s is not None:
                     self.weight[s] += 1
+        # Stops moved by hand first: city buses join our stops where they really are (Part.cesta and Part.cesta ČS PL
+        # were swapped, so lines 7 and 8 went by the petrol station), then again for the stops the city buses add.
+        self.apply_stop_edits()
         try:
             self._add_city(city)
         except Exception:  # noqa: BLE001 - the regional timetable still works without city buses
             traceback.print_exc()
             log("city buses: could not add them")
+        try:
+            self._add_extra()
+        except Exception:  # noqa: BLE001 - a bad approved submission must not stop the timetable
+            traceback.print_exc()
+            log("riders' submissions: could not add them")
+        self.apply_routes()  # regional ways too (city ones were done in _add_city), also with no city buses read
         self.apply_stop_edits()
         self.apply_station_edits()
         self._footpaths()
+
+    def _add_extra(self):
+        """
+        Stops and connections riders sent in and an admin approved (2.17.0: the timetable lacked them, e.g. a bus only
+        cp.sk knew). A trip runs on its weekdays, between the stations named, at the times given.
+        """
+        for st in edits.get("extra_stations", []):
+            if st["id"] in self.by_id:
+                continue
+            self.station_ids.append(st["id"])
+            self.names.append(st["name"])
+            self.lat.append(st["lat"])
+            self.lon.append(st["lon"])
+            self.words.append(fold(st["name"]))
+            self.weight.append(0)
+            self.by_id[st["id"]] = len(self.names) - 1
+        for x in edits.get("extra_trips", []):
+            stops = [(self.by_id.get(sid), secs) for sid, secs in x["stops"]]
+            if len(stops) < 2 or any(s is None for s, _ in stops):
+                log(f"submission {x['id']}: a stop of it is no longer in the timetable, left out")
+                continue
+            service = ("extra", str(x["id"]))
+            start, end = x.get("validFrom") or "0000-00-00", x.get("validTo") or "9999-99-99"
+            self.services[service] = {n for n in range(DAYS_BACK + DAYS_AHEAD + 1)
+                                      if (self.first_day + timedelta(days=n)).weekday() in x["weekdays"]
+                                      and start <= (self.first_day + timedelta(days=n)).isoformat() <= end}
+            trip_id = x.get("tripId") or f"submission-{x['id']}"
+            self.trip_index[("extra", trip_id)] = len(self.trips)
+            times = tuple(secs for _, secs in stops)
+            self.trips.append(("extra", trip_id, x["line"], x.get("headsign") or self.names[stops[-1][0]], x.get("operator") or "",
+                               "bus", service, tuple(s for s, _ in stops), times, times, tuple("" for _ in stops)))
+            for s, _ in stops:
+                self.weight[s] += 1
 
     def _add_city(self, collections):
         """
@@ -206,7 +252,7 @@ class Timetable:
         stops = {}
         for pid, (name, lat, lon, _, stop_id) in self.city_platforms.items():
             stops.setdefault(stop_id, []).append((pid, name, lat, lon))
-        station_of = {}
+        station_of, platforms_of = {}, {}
         for members in stops.values():
             name = max({m[1] for m in members}, key=lambda n: sum(m[1] == n for m in members))
             lat = sum(m[2] for m in members) / len(members)
@@ -214,6 +260,7 @@ class Timetable:
             s = self._city_station(name, lat, lon)
             for m in members:
                 station_of[m[0]] = s
+                platforms_of.setdefault(s, []).append(m[0])
         count = 0
         for c, day in zip(collections, read):
             service = ("sadzv", c["date"])
@@ -224,6 +271,7 @@ class Timetable:
                 rows = [(station_of[str(pid)], secs, str(pid)) for pid, secs in t["stops"] if str(pid) in station_of]
                 if len(rows) < 2:
                     continue
+                self.city_rows[len(self.trips)] = rows  # S.A.D.'s own, for the editor's stop lists (apply_routes)
                 trip_id = f'{c["date"].replace("-", "")}-{t["lineId"]}-{t["route"]}-{t["trip"]}'
                 self.trip_index[(CITY_FEED, trip_id)] = len(self.trips)
                 self.city[len(self.trips)] = (t["lineId"], t["route"], t["trip"], t["line"], tuple(r[2] for r in rows))
@@ -234,6 +282,101 @@ class Timetable:
                     self.weight[r[0]] += 1
                 count += 1
         self.feeds[CITY_FEED] = count
+        self.platforms_of = platforms_of
+        self.apply_routes()
+
+    def apply_routes(self):
+        """
+        The ways' stops set in the map editor, on the city trips in use: right after a save, no rebuild (that took
+        half a minute or more). Each trip starts again from S.A.D.'s own stops, so a stop taken off the list goes too.
+        """
+        routes = edits.get("routes", {})
+        for index, rows in self.city_rows.items():
+            city, trip = self.city[index], self.trips[index]
+            own = routes.get(f"{city[0]}-{city[1]}")
+            new = self._own_stops(rows, own, self.platforms_of) if own else rows
+            self.trips[index] = trip[:7] + (tuple(r[0] for r in new), tuple(r[1] for r in new), tuple(r[1] for r in new),
+                                           tuple(str(self.city_platforms[r[2]][3]) for r in new))
+            self.city[index] = city[:4] + (tuple(r[2] for r in new),)
+        # Regional and intercity buses (GTFS): each way is a line's list of stops; its trips start again from their own.
+        for index, base in self.base_trips.items():
+            self.trips[index] = base
+        self.base_trips = {}
+        ways = {k for k in routes if k.startswith("g:")}
+        if ways:
+            if len(getattr(self, "_way_keys", ())) != len(self.trips):
+                self._way_keys = [None if trip[0] in (CITY_FEED, "extra") else self.way_key(trip) for trip in self.trips]
+            for index, key in enumerate(self._way_keys):
+                if key not in ways:
+                    continue
+                trip = self.trips[index]
+                rows = list(zip(trip[7], trip[9], trip[10], trip[8]))  # (station, departure, platform, arrival)
+                new = self._own_stops(rows, routes[key], None)
+                if new is rows:
+                    continue
+                self.base_trips[index] = trip
+                self.trips[index] = trip[:7] + (tuple(r[0] for r in new), tuple(r[3] if len(r) > 3 else r[1] for r in new),
+                                               tuple(r[1] for r in new), tuple(r[2] for r in new))
+        with self._lock:
+            self._days.clear()  # each day's connections are built from the trips: again on next use
+
+    def _own_stops(self, rows, own, platforms_of):
+        """
+        A city way's stops as set in the map editor (S.A.D. leaves some out and nothing tells which): the trip keeps
+        its own stops' times, the ones added between them are timed by distance, ones before or after them by the bus's
+        speed. Stops of the trip left out of the list go. Unchanged when the list has fewer than two of the trip's stops, or has them in another order.
+        rows: [(station, seconds, sadzv platform id)]; platforms_of None (a regional bus): added stops get no platform.
+        """
+        def platform(s, near):
+            return "" if platforms_of is None else (platforms_of.get(s) or [near])[0]
+        want = [self.by_id[x] for x in own if x in self.by_id]
+        known = {r[0]: r for r in rows}
+        kept = [s for s in want if s in known]
+        if len(kept) < 2 or kept != [r[0] for r in rows if r[0] in set(kept)]:
+            return rows
+        out, i, last = [], want.index(kept[0]), want.index(kept[-1])
+        while i <= last:
+            if want[i] in known:
+                out.append(known[want[i]])
+                i += 1
+                continue
+            j = next(j for j in range(i, last + 1) if want[j] in known)
+            a, b = out[-1], known[want[j]]
+            chain = [a[0], *want[i:j], b[0]]
+            legs = [meters(self.lat[x], self.lon[x], self.lat[y], self.lon[y]) if None not in (self.lat[x], self.lat[y]) else 1.0
+                    for x, y in zip(chain, chain[1:])]
+            total, run = sum(legs) or 1.0, 0.0
+            for s, leg in zip(want[i:j], legs):
+                run += leg
+                # ponytail: the stop's first sadzv platform, not necessarily this way's side
+                out.append((s, a[1] + round((b[1] - a[1]) * run / total), platform(s, a[2])))
+            i = j
+        # Stops added after the bus's last stop or before its first (S.A.D. ends line 7 at Moskovska razc., the rest of
+        # the way set in the editor): timed at the bus's own average speed there, else about 20 km/h.
+        def dist(x, y):
+            return meters(self.lat[x], self.lon[x], self.lat[y], self.lon[y]) if None not in (self.lat[x], self.lat[y]) else 400.0
+        span = sum(dist(x[0], y[0]) for x, y in zip(out, out[1:]))
+        speed = span / (out[-1][1] - out[0][1]) if out[-1][1] > out[0][1] and span else 5.5
+        for s in want[last + 1:]:
+            out.append((s, out[-1][1] + round(dist(out[-1][0], s) / speed), platform(s, out[-1][2])))
+        for s in reversed(want[:want.index(kept[0])]):
+            out.insert(0, (s, out[0][1] - round(dist(s, out[0][0]) / speed), platform(s, out[0][2])))
+        return out
+
+    def route_key(self, trip_id):
+        """
+        The way a trip belongs to, whose stops the editor can set: a city one "<line id>-<route>", a regional or
+        intercity one "g:<hash>" of its feed, line and own stops. None for riders' submitted trips.
+        """
+        feed, rest = trip_id.split(":", 1)
+        index = self.trip_index.get((feed, rest.rsplit(":", 1)[0]))
+        if index is None or feed == "extra":
+            return None
+        city = self.city.get(index)
+        return f"{city[0]}-{city[1]}" if city else self.way_key(self.base_trips.get(index, self.trips[index]))
+
+    def way_key(self, trip):
+        return "g:" + hashlib.sha1("|".join([trip[0], trip[2], *(self.station_ids[s] for s in trip[7])]).encode()).hexdigest()[:16]
 
     def _city_station(self, name, lat, lon):
         """Our station for a sadzv stop ("Námestie SNP" is "Zvolen, Nám.SNP"), or a new one."""
@@ -255,10 +398,12 @@ class Timetable:
                 return s
         town = next((self.names[s].split(",")[0].strip() for d, s in near if "," in self.names[s] and d < 5000), None)
         if town:
-            for s in range(len(self.names)):
-                if self.lat[s] is None and self.names[s].startswith(town + ",") and named(s):
-                    self.lat[s], self.lon[s] = lat, lon
-                    return s
+            # The closest name, not the first that fits: "Partizánska cesta" is "Part.cesta", not "Part.cesta ČS PL".
+            fits = [s for s in range(len(self.names)) if self.lat[s] is None and self.names[s].startswith(town + ",") and named(s)]
+            if fits:
+                s = min(fits, key=lambda s: (abs(len(fold(self.names[s].split(",", 1)[1])) - len(words)), len(self.names[s])))
+                self.lat[s], self.lon[s] = lat, lon
+                return s
         display = clean_name(name if not town or fold(name)[:len(fold(town))] == fold(town) else f"{town}, {name}")
         sid, n = " ".join(fold(display)), 1
         while sid in self.by_id:
@@ -430,6 +575,10 @@ class Timetable:
         own = line_key(line)
         heading = ends = None
         if trip is not None and k is not None:
+            pinned = self.pinned_spot(s, trip, k)
+            if pinned:
+                return pinned
+        if trip is not None and k is not None:
             end = trip[3] or self.names[trip[7][-1]]
             ends = name_keys(end) | name_keys(self.names[trip[7][-1]])
             heading = ends | {key for x in trip[7][k + 1:] for key in name_keys(self.names[x])}
@@ -452,6 +601,25 @@ class Timetable:
         if best is None and trip is not None and k is not None:
             best = self.traced_spot(s, trip, k) or self.kerb_side(s, trip, k)
         return best
+
+    def pinned_spot(self, s, trip, k):
+        """
+        The spot of station s that the road trace into it (or, at the first stop, out of it) ends on exactly: picked in
+        the map editor ("Line ends at"), or by snapping. It decides where the trip stops, before any direction or rule.
+        (lat, lon, platform) or None.
+        """
+        stops, ids = trip[7], self.station_ids
+        if k > 0:
+            end = edits["segments"].get(f"{ids[stops[k - 1]]}>{ids[s]}", [])[-1:]
+        else:
+            end = edits["segments"].get(f"{ids[s]}>{ids[stops[k + 1]]}", [])[:1] if k + 1 < len(stops) else []
+        if not end:
+            return None
+        spots = [(p["lat"], p["lon"], p.get("platform") or p.get("label") or "") for p in getattr(self, "places", {}).get(s, ())]
+        spots += [(self.lat[c], self.lon[c], info.get("platform") or "") for c, info in getattr(self, "children", {}).get(s, ())]
+        spots.append((self.lat[s], self.lon[s], ""))
+        e = end[0]
+        return next((p for p in spots if p[0] is not None and meters(p[0], p[1], e[0], e[1]) <= 2), None)
 
     def free_spots(self, s):
         """
@@ -614,7 +782,15 @@ class Timetable:
         traced = edits["segments"].get(f"{self.station_ids[a]}>{self.station_ids[b]}")
         ends = ([self.position_for(a, line, trip, k), self.position_for(b, line, trip, None if k is None else k + 1)] if line
                 else [(self.lat[a], self.lon[a]), (self.lat[b], self.lon[b])])
-        return [ends[0], *[tuple(p) for p in traced], ends[1]] if traced else ends
+        if not traced:
+            return ends
+        inner = [tuple(p) for p in traced]
+        # A trace that starts or ends exactly at this trip's spot (snapped since 1.27.1): not twice.
+        if meters(*ends[0], *inner[0]) < 1:
+            inner = inner[1:]
+        if inner and meters(*ends[1], *inner[-1]) < 1:
+            inner = inner[:-1]
+        return [ends[0], *inner, ends[1]]
 
     def community_keys(self, index, service_day):
         """The keys riders' reports for this trip go under (as the apps make them, LiveRepository.communityKey)."""
@@ -679,12 +855,15 @@ class Timetable:
         trip = self.trip(trip_id)
         if not trip:
             return None
+        trip["routeKey"] = self.route_key(trip_id)
+        trip["ownStops"] = trip["routeKey"] in edits.get("routes", {})
         index = self.trip_index[(trip_id.split(":", 1)[0], trip_id.split(":", 1)[1].rsplit(":", 1)[0])]
         st = self.trips[index][7]
         trip["segments"] = [{"from": self.station_ids[a], "to": self.station_ids[b],
                              "points": (self.segment_points(a, b, trip["line"], self.trips[index], k)
                                         if self.lat[a] is not None and self.lat[b] is not None else []),
-                             "traced": self.fits_trace(a, b, trip["line"], self.trips[index], k)}
+                             "traced": self.fits_trace(a, b, trip["line"], self.trips[index], k),
+                             "via": edits.get("vias", {}).get(f"{self.station_ids[a]}>{self.station_ids[b]}", [])}
                             for k, (a, b) in enumerate(zip(st, st[1:]))]
         return trip
 
@@ -696,6 +875,15 @@ class Timetable:
             cached = self._days.get(d)
             if cached:
                 return cached
+        # One build at a time: every map tab asks for the buses now at once after a restart, and each building its own
+        # copy of the day (a few hundred MB, seconds each) ran the hub out of memory (9 GB, 2026-10-12). The rest wait
+        # and take it from the cache.
+        with self._building:
+            with self._lock:
+                cached = self._days.get(d)
+            return cached or self._build_day(d)
+
+    def _build_day(self, d):
         n = (d - self.first_day).days
         base = base_epoch(d)
         conns = []
@@ -841,7 +1029,8 @@ class Timetable:
     def line_routes(self, line, limit=60):
         """
         Every way line `line` goes ("34", "60101"): one trip for each list of stops, dated the next day it runs, the
-        most frequent first. For drawing the roads of buses that aren't on the road right now.
+        most frequent first. For drawing the roads of buses that aren't on the road right now. Not a line: the ways
+        through a stop ("zvolen as"), or from one stop to another ("bb as > zvolen as", also with → or " - ").
         """
         want = line_key(line)
         if not want:
@@ -851,6 +1040,16 @@ class Timetable:
         for i, trip in enumerate(self.trips):
             if line_key(trip[2]) == want:
                 groups.setdefault((trip[0], tuple(trip[7])), []).append(i)
+        if not groups:
+            parts = [p for p in re.split(r"\s*(?:→|->|>|\s-\s)\s*", str(line)) if p.strip()][:2]
+            ends = [{self.by_id[x["id"]] for x in self.search(p, 6)} for p in parts]
+            if not parts or not all(ends):
+                return []
+            for i, trip in enumerate(self.trips):
+                st = trip[7]
+                first = next((k for k, s in enumerate(st) if s in ends[0]), None)
+                if first is not None and (len(ends) == 1 or any(s in ends[1] for s in st[first + 1:])):
+                    groups.setdefault((trip[0], tuple(st)), []).append(i)
         out = []
         for (_, stops), indexes in groups.items():
             trip = self.trips[indexes[0]]
@@ -1169,7 +1368,7 @@ def inside_polygon(lat, lon, points):
 # stations' extra places, zones and the central flag {"name", "places": [{"label", "platform", "lat", "lon", "lines", "directions"}],
 # "zone", "central"}; and sub-stations of central stations {"name", "parent", "label", "platform", "lines", "directions"} by the
 # sub-station's id. A direction is {"name", "lines", "towards"}; "lines" of a place is all its directions' lines together.
-edits = {"stops": {}, "segments": {}, "stations": {}, "children": {}}
+edits = {"stops": {}, "segments": {}, "stations": {}, "children": {}, "routes": {}, "vias": {}, "extra_stations": [], "extra_trips": []}
 
 
 # ------------------------------------------------------------------ downloads, the daily refresh, the log
@@ -1253,15 +1452,21 @@ def load(folder, feeds):
     paths = {f: folder / f"{f}.zip" for f in feeds if (folder / f"{f}.zip").exists()}
     built = Timetable(paths, city=city_days(folder))
     today = datetime.now(ZONE).date()
-    for d in (today, today + timedelta(days=1)):  # the first search of the day mustn't wait for this
+    for d in (today - timedelta(days=1), today, today + timedelta(days=1)):  # the map's buses now and the first search mustn't wait
         built.day(d)
     current = built
+    for step in on_loaded:
+        try:
+            step(built)
+        except Exception:  # noqa: BLE001 - a report about the build never stops the build
+            traceback.print_exc()
     failed = [f for f, n in built.feeds.items() if n == "failed"]
     log(f"loaded {len(built.trips)} trips, {len(built.names)} stations from {len(paths)} feeds "
         f"in {time.time() - started:.0f} s" + (f"; failed: {', '.join(failed)}" if failed else ""))
 
 
 _collect = None  # sadzv.collect, set by start(): today's city buses
+on_loaded = []  # emHUB's own steps after each build (feed health, what changed), each given the new timetable
 
 
 def update(folder, feeds, fetch=True):

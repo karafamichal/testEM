@@ -321,8 +321,10 @@ export function pickRideConnection(connections, ride, departureMs) {
     || best(connections.filter((c) => gap(c) <= 10));
 }
 
-export function catchEstimate(distance, secondsToBoarding) {
-  const walkSeconds = Math.trunc((distance * DETOUR_FACTOR) / WALK_METERS_PER_SECOND);
+export function catchEstimate(distance, secondsToBoarding, byCar = false, driveSeconds = null) {
+  // EM-0072: driven to the stop: the router's time along the roads, else roads 40 % longer at 50 km/h; close by, a walk.
+  const walkSeconds = byCar && distance > 300 ? (driveSeconds ?? Math.trunc((distance * 1.4) / 13.9))
+    : Math.trunc((distance * DETOUR_FACTOR) / WALK_METERS_PER_SECOND);
   const marginSeconds = secondsToBoarding - walkSeconds;
   let verdict;
   if (walkSeconds <= 45) verdict = 'atStop';

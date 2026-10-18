@@ -1,6 +1,6 @@
 // Service worker: caches the app shell so the PWA launches offline, and shows
 // "follow this bus" push alerts. API requests (/api/*) are always network.
-const CACHE = 'testem-shell-v37-2.16.0';
+const CACHE = 'testem-shell-v49-2.17.0';
 const SHELL = [
   '/',
   '/index.html',
@@ -12,6 +12,7 @@ const SHELL = [
   '/js/live.js',
   '/js/planner.js',
   '/js/rides.js',
+  '/js/submit.js',
   '/qrcode.min.js',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
@@ -20,7 +21,8 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload': past the browser's HTTP cache, or a new version could store the old files (EM-0076's fix didn't show).
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
@@ -45,7 +47,7 @@ self.addEventListener('fetch', (event) => {
   }
   // Static assets: network first so updates land, cache as the offline fallback.
   event.respondWith(
-    fetch(request)
+    fetch(request, { cache: 'no-cache' }) // revalidated (a 304 when unchanged), never an hour-old copy
       .then((resp) => {
         if (resp.ok) {
           const copy = resp.clone();

@@ -1,6 +1,7 @@
 // Departures, stop boards, trip sheet and "follow this bus" for the web client.
 import { t, lang } from './i18n.js';
 import { $, $$, esc, api, apiJson, store, config, clock, countdown, delayChip, delayInfo, plate, toast, openSheet, openPage, closeOverlay, log } from './core.js';
+import { openSubmit } from './submit.js';
 import { tripProgress, catchEstimate, communityKey, distanceMeters, readableStop, lineNumber, snapToRoute, referenceAt, delayAt, nextCheckMs, stopPassDetector, earliestBoardingMs, LIVE_GPS_BEFORE_MS, RIDER_GPS_MAX_M, plannerLeg } from './logic.js';
 
 /** Helping with bus positions: 'off' | 'buttons' | 'auto' (earlier versions had an on/off switch). */
@@ -8,6 +9,9 @@ export const communityMode = () => store.get('communityMode', store.get('communi
 
 const BOARD_REFRESH_MS = 15000;
 const FOLLOW_REFRESH_MS = 15000;
+// Material "directions walk" and "directions car" (outlined), for the on foot / by car toggle.
+const WALK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18"><path fill="currentColor" d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9 7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1L6 8.3V13h2V9.6l1.8-.7"/></svg>';
+const CAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18"><path fill="currentColor" d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.04 3H5.81l1.04-3zM19 17H5v-5h14v5zM7.5 13a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>';
 const BUS_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 16c0 .88.39 1.67 1 2.22V20a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4S4 2.5 4 6v10Zm3.5 1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3ZM18 11H6V6h12v5Z"/></svg>';
 const STAR = (on) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="${on ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></svg>`;
 
@@ -177,12 +181,14 @@ function renderBoard() {
     ${b.loading ? `<p class="hint"><span class="spinner"></span></p>` : b.error && !b.departures.length
       ? `<div class="notice error">${t('board_failed')} <button class="text-btn" data-refresh>${t('retry')}</button></div>`
       : b.departures.length ? `<ul class="board">${rows}</ul>` : `<div class="empty"><p>${t('board_empty')}</p></div>`}
-    ${b.updatedAt ? `<p class="hint small">${t('updated', clock(b.updatedAt))}</p>` : ''}`;
+    ${b.updatedAt ? `<p class="hint small">${t('updated', clock(b.updatedAt))}</p>` : ''}
+    ${config.hub ? `<button class="btn outline wide" data-report-stop>${t('submit_report_stop')}</button>` : ''}`;
   renderFollowSlot($('#follow-slot-board', root));
   root.onclick = (e) => {
     if (e.target.closest('[data-back]')) return closeBoard();
     if (e.target.closest('[data-fav]')) { toggleFavourite(b.stop.id); live.onChange(); return renderBoard(); }
     if (e.target.closest('[data-refresh]')) return refreshBoard();
+    if (e.target.closest('[data-report-stop]')) return openSubmit('problem', { stopName: b.stop.name });
     const dep = e.target.closest('[data-dep]');
     if (dep) {
       const d = b.departures[Number(dep.dataset.dep)];
@@ -276,6 +282,7 @@ async function loadTrip(ref, { withCoordinates = false } = {}) {
   const res = await apiJson('/api/hub/delay?trip=' + encodeURIComponent(detail.communityKey)).catch(() => null);
   const pooled = res?.delay;
   detail.history = res?.history || null;
+  detail.crowd = res?.crowd || null;
   if (!pooled) {
     // No one reported today: optionally shift the timetable by how late this trip usually is.
     if (detail.history && detail.positionSource === 'timetable' && store.get('predictShift', false)) {
@@ -591,6 +598,17 @@ function saveFollow() {
 
 // ---- journeys: several buses followed one after another (planner connections or built by hand)
 
+// EM-0072: the drive to the stop from the router (position rounded to ~100 m), asked again after 300 m or 3 min.
+const drive = { seconds: null, at: 0, from: null };
+function askDrive(fix) {
+  const moved = !drive.from || distanceMeters(fix.latitude, fix.longitude, drive.from.latitude, drive.from.longitude) > 300;
+  if (!moved && Date.now() - drive.at < 180000) return;
+  drive.from = fix;
+  drive.at = Date.now();
+  apiJson(`/api/live/drive?from=${fix.latitude.toFixed(3)},${fix.longitude.toFixed(3)}&to=${stopCoords.lat.toFixed(4)},${stopCoords.lon.toFixed(4)}`)
+    .then((r) => { drive.seconds = r.seconds; }).catch(() => {});
+}
+
 let draft = store.get('journeyDraft', []); // [{ ref, boardingPlatformIds, alightOrder }]
 function setDraft(list) { draft = list; store.set('journeyDraft', list); renderJourneyBars(); }
 function addToDraft(leg) { setDraft([...draft.filter((x) => !sameRef(x.ref, leg.ref)), leg]); }
@@ -661,6 +679,7 @@ export const followedLine = () => follow?.ref?.line || '';
 
 export function stopFollow() {
   if (follow?.pushId) api('/api/unfollow', { id: follow.pushId });
+  if (follow?.eta) api(`/api/hub/eta/${follow.eta.id}/end`, { token: follow.eta.token }); // "Arrived" for whoever has the link
   // Sharing by a code ends with following.
   for (const sh of store.get('sharesOut', [])) { outSockets[sh.id]?.close(); delete outSockets[sh.id]; api(`/api/hub/shares/${sh.id}/cancel`, { token: sh.token }); }
   store.set('sharesOut', []);
@@ -725,6 +744,7 @@ async function followTick() {
       return stopFollow();
     }
     updateLocation(p);
+    sendEta();
   }
   renderAllFollowSlots();
   if (sheetTrip && sameRef(sheetTrip.ref, follow.ref)) renderTripSheet();
@@ -881,10 +901,16 @@ function catchLine(d, p) {
   const known = knownPosition(d);
   if (!known && !store.get('catchTimetable', false)) return '';
   const seconds = Math.trunc((earliestBoarding(p) - Date.now()) / 1000);
-  const e = catchEstimate(distanceMeters(fix.latitude, fix.longitude, stopCoords.lat, stopCoords.lon), seconds);
+  const meters = distanceMeters(fix.latitude, fix.longitude, stopCoords.lat, stopCoords.lon);
+  const car = store.get('catchCar', false) && meters > 300;
+  if (car) askDrive(fix);
+  const e = catchEstimate(meters, seconds, car, car ? drive.seconds : null);
   const walk = Math.max(1, Math.round(e.walkSeconds / 60));
-  const text = { atStop: t('catch_at_stop'), relaxed: t('catch_leave_in', walk, Math.round(e.marginSeconds / 60)), leaveSoon: t('catch_leave_in', walk, Math.round(e.marginSeconds / 60)), leaveNow: t('catch_leave_now', walk), miss: t('catch_miss', walk) }[e.verdict];
-  return `<p class="catch ${e.verdict}">${esc(known ? text : t('catch_by_timetable', text))}</p>`;
+  const k = (key) => (car ? key.replace('catch_', 'catch_car_') : key);
+  const text = { atStop: t('catch_at_stop'), relaxed: t(k('catch_leave_in'), walk, Math.round(e.marginSeconds / 60)), leaveSoon: t(k('catch_leave_in'), walk, Math.round(e.marginSeconds / 60)), leaveNow: t(k('catch_leave_now'), walk), miss: t(k('catch_miss'), walk) }[e.verdict];
+  const byCar = store.get('catchCar', false);
+  return `<p class="catch ${e.verdict}">${esc(known ? text : t('catch_by_timetable', text))}
+    <button type="button" class="chip mode-toggle" data-car aria-label="${esc(t(byCar ? 'catch_mode_car' : 'catch_mode_walk'))}">${byCar ? CAR_SVG : WALK_SVG}</button></p>`;
 }
 
 // ---- community reports
@@ -953,6 +979,60 @@ function progressTrack(d, p) {
     <span class="track-bus" style="left:${pct(p.position)}">${BUS_SVG}</span></div>`;
 }
 
+const CROWD = ['crowd_1', 'crowd_2', 'crowd_3'];
+/**
+ * 2.17.0: how full the bus is, from riders on it; said in one tap once the bus has left your stop with you on it (again
+ * whenever it changes). Not before: a bus coming or standing at the stop doesn't count.
+ */
+function crowdHtml(d, p) {
+  const c = d.crowd;
+  const canReport = config.hub && d.communityKey && p.onBoard && !p.finished;
+  if (!c && !canReport) return '';
+  return `<div class="crowd">${c ? `<p><b>${esc(t('crowd_now', t(CROWD[Math.min(Math.max(c.level, 1), 3) - 1]), c.minutesAgo))}</b></p>` : ''}
+    ${canReport ? `<p class="hint small">${t(Date.now() - (follow.crowdAt || 0) < 300000 ? 'crowd_thanks' : 'crowd_title')}</p>
+      <div class="follow-actions">${CROWD.map((k, i) => `<button class="chip ${c?.level === i + 1 ? 'on' : ''}" data-crowd="${i + 1}">${t(k)}</button>`).join('')}</div>` : ''}</div>`;
+}
+
+async function reportCrowd(level) {
+  const d = follow?.detail;
+  if (!d?.communityKey || Date.now() - (follow.crowdAt || 0) < 20000) return; // a double tap is one report
+  follow.crowdAt = Date.now();
+  const r = await apiJson('/api/hub/crowd', { tripKey: d.communityKey, reporter: follow.reporter, level }).catch(() => null);
+  if (follow?.detail) follow.detail.crowd = r?.crowd || { level, minutesAgo: 0 };
+  saveFollow();
+  renderAllFollowSlots();
+}
+
+/** 2.17.0: a link with your arrival, live, for anyone (no app needed); kept current while following, ended on arrival. */
+async function shareEta() {
+  if (!follow) return;
+  if (!follow.eta) {
+    const d = follow.detail;
+    const stop = follow.nextLegs?.at(-1)?.toStop || follow.toStop || (d && tripProgress(d, follow).alightStopName) || d?.destination || '';
+    follow.eta = await apiJson('/api/hub/eta', { stop }).catch(() => null);
+    if (!follow.eta) return toast(t('eta_failed'));
+    follow.etaSent = '';
+    saveFollow();
+    sendEta();
+  }
+  const text = t('eta_share_text', follow.eta.url);
+  if (navigator.share) navigator.share({ text }).catch(() => {});
+  else navigator.clipboard?.writeText(text).then(() => toast(t('copied')));
+  renderAllFollowSlots();
+}
+function sendEta() {
+  const f = follow, d = f && effectiveDetail(f);
+  if (!f?.eta || !d?.stops?.length) return;
+  const p = tripProgress(d, f);
+  const s = d.stops[p.alightIndex ?? d.stops.length - 1];
+  // ponytail: a journey's later buses have only a clock time here; the link follows the bus ridden now
+  const arrivalMs = s.actualMs || s.scheduledMs + (d.delaySeconds || 0) * 1000;
+  const key = `${arrivalMs}|${d.delaySeconds || 0}`;
+  if (key === f.etaSent && Date.now() - (f.etaAt || 0) < 120000) return;
+  Object.assign(f, { etaSent: key, etaAt: Date.now() });
+  api(`/api/hub/eta/${f.eta.id}`, { token: f.eta.token, arrivalMs, delaySeconds: d.delaySeconds || 0, line: f.ref.line });
+}
+
 function followCardHtml() {
   const d = follow && effectiveDetail(follow);
   if (!d?.stops?.length) return follow ? `<section class="follow"><p class="hint"><span class="spinner"></span> ${plate(follow.ref.line)} ${esc(follow.ref.destination)}</p></section>` : '';
@@ -1008,9 +1088,10 @@ function followCardHtml() {
     ${progressTrack(d, p)}
     ${f.note ? `<p class="hint small">${esc(f.note)}</p>` : ''}
     ${actions ? `<div class="follow-actions">${actions}</div>` : ''}
+    ${crowdHtml(d, p)}
     <div class="follow-foot">
       <label class="mini-switch"><input type="checkbox" data-push ${f.pushId ? 'checked' : ''}> ${t('follow_push')}</label>
-      <span><button class="text-btn" data-open-trip>${t('show_stops')}</button><button class="text-btn danger" data-stop>${t('unfollow')}</button></span>
+      <span>${config.hub ? `<button class="text-btn" data-eta>${t(f.eta ? 'eta_sharing' : 'eta_share')}</button>` : ''}<button class="text-btn" data-open-trip>${t('show_stops')}</button><button class="text-btn danger" data-stop>${t('unfollow')}</button></span>
     </div></section>`;
 }
 
@@ -1022,7 +1103,12 @@ export function renderFollowSlot(el) {
   el.onclick = (e) => {
     const r = e.target.closest('[data-report]');
     if (r) return report(Number(r.dataset.report), !!r.dataset.leaving);
+    const crowd = e.target.closest('[data-crowd]');
+    if (crowd) return reportCrowd(Number(crowd.dataset.crowd));
+    if (e.target.closest('[data-eta]')) return shareEta();
     if (e.target.closest('[data-stop]')) return stopFollow();
+    // EM-0072: on foot or by car today, one tap.
+    if (e.target.closest('[data-car]')) { store.set('catchCar', !store.get('catchCar', false)); drive.at = 0; return renderAllFollowSlots(); }
     if (e.target.closest('[data-open-trip]') && follow) return openTrip(follow.ref, { boardingPlatformIds: follow.boardingPlatformIds, alightOrder: follow.alightOrder });
   };
   el.onchange = (e) => {

@@ -110,7 +110,12 @@ object LeaveBy {
             val here = Locations.current(context, maxAgeMs = 5 * 60_000L) ?: return@runCatching null
             val byName = trip.ref.isScheduleOnly || detail.fromTimetable
             val stop = repo.stopLocation(if (byName) emptyList() else trip.boardingPlatformIds, p.boardingStopName) ?: return@runCatching null
-            CatchEstimate.from(LiveRepository.distanceMeters(here.latitude, here.longitude, stop.first, stop.second), 0).walkSeconds
+            val meters = LiveRepository.distanceMeters(here.latitude, here.longitude, stop.first, stop.second)
+            val byCar = com.ksjd.testem.CredentialsManager(context).getCatchByCar()
+            val drive = if (byCar && meters > CatchEstimate.CAR_FROM_M) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                CatchEstimate.driveSeconds(here.latitude, here.longitude, stop.first, stop.second)
+            } else null
+            CatchEstimate.from(meters, 0, byCar, drive).walkSeconds
         }.getOrNull()
         val leaveAt = departs - ((walk ?: DEFAULT_WALK_S) + SPARE_S) * 1000L
         val delayMin = ((detail.delaySeconds ?: 0) / 60.0).roundToInt()
@@ -144,15 +149,14 @@ object LeaveBy {
     ) {
         if (!Reminders.canNotify(context)) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            if (quiet) NotificationChannel(CHANNEL_NOTE, context.getString(R.string.leave_by_channel), NotificationManager.IMPORTANCE_LOW)
-            else NotificationChannel(CHANNEL_NOW, context.getString(R.string.leave_now_channel), NotificationManager.IMPORTANCE_HIGH)
-        )
+        val channelId = if (quiet) channel.also {
+            manager.createNotificationChannel(NotificationChannel(CHANNEL_NOTE, context.getString(R.string.leave_by_channel), NotificationManager.IMPORTANCE_LOW))
+        } else AlertSound.channel(context, CHANNEL_NOW, context.getString(R.string.leave_now_channel))
         val open = PendingIntent.getActivity(
             context, 4502, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val builder = NotificationCompat.Builder(context, channel)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_stat_bus)
             .setContentTitle(title)
             .setContentText(body)

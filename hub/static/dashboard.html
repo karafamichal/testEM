@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>emHUB</title>
 <link rel="icon" href="/favicon.svg?v=1.18">
-<link rel="stylesheet" href="/brand.css">
+<link rel="stylesheet" href="/brand.css?v=1.31">
 <style>
   body { display: grid; grid-template-columns: 220px 1fr; min-height: 100dvh; }
 
@@ -47,6 +47,7 @@
   .status.new::before { background: var(--amber); }
   .status.triaged::before { background: var(--sign); }
   .status.in_progress::before { background: var(--late); }
+  .status.awaiting_release::before { background: var(--amber); border-radius: 50%; }
   .status.resolved::before { background: var(--ok); }
 
   .detail { padding: 22px 28px 40px; min-width: 0; }
@@ -127,7 +128,8 @@
 
   @media (max-width: 900px) {
     /* Phones: one column that never gets wider than the screen (EM: the rail made pages 564 px wide). */
-    body { grid-template-columns: minmax(0, 1fr); }
+    /* The header row keeps its own height; short pages (Submissions, Lines) used to stretch it to fill the screen. */
+    body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
     .rail { position: sticky; top: 0; z-index: 5; height: auto; display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 10px 14px 0; }
     .rail-brand { padding: 0; }
     .rail-brand strong { font-size: 22px; }
@@ -191,14 +193,117 @@
   .map-wrap { display: grid; grid-template-columns: 1fr 390px; height: calc(100dvh - 76px); border-top: 1px solid var(--line); }
   #map { height: 100%; }
   .busy-note { background: #5a3a00; color: #ffd28a; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+  .own-stops li { display: flex; gap: 6px; align-items: center; }
+  .sub { max-width: 760px; padding: 16px 0 18px; border-bottom: 1px solid var(--line); }
+  .map-tools { gap: 6px; }
+  .notice-card.warning { border-left: 4px solid var(--late); }
+  .error-log { border-top: 1px solid var(--line); padding: 8px 0; }
+  .error-log summary { cursor: pointer; }
+  .error-log pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 8px 0 0; }
+  .warn-text { color: var(--late); }
+  .notice-card .line-card-head { flex-wrap: wrap; }
+  .spark { display: inline-flex; align-items: flex-end; gap: 2px; height: 24px; }
+  .spark i { width: 6px; background: var(--sign); border-radius: 1px; display: block; }
+  .spark i.none { background: var(--line); }
+  .spark i.bad { background: var(--bad); }
+  .spark i.warn { background: var(--late); }
+  .build { border-bottom: 1px solid var(--line); padding: 8px 0; max-width: 900px; }
+  .build summary { cursor: pointer; }
+  .build p { margin: 6px 0 0 16px; }
+  .todo-list, .hist-list { margin: 8px 0; padding-left: 20px; display: grid; gap: 8px; }
+  .todo-list li button.link { text-align: left; color: var(--ink); padding: 0; font-weight: 600; }
+  .hist-list { list-style: none; padding: 0; }
+  .hist-list li { border-bottom: 1px solid var(--line); padding: 6px 0 8px; display: grid; gap: 4px; }
+  .hist-list li button { justify-self: start; }
+  .hist-list li.undone { opacity: .55; }
+  .tag { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+  button.tag { cursor: pointer; font: inherit; font-size: 12px; }
+  button.tag[aria-pressed="true"] { background: var(--amber); color: #0B3D1C; border-color: var(--amber); }
+  .label-filter { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
+  .bug-row .tags { gap: 4px; flex-wrap: wrap; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; background: transparent; color: var(--ink); padding: 3px 10px; cursor: pointer; font: inherit; font-size: 13px; }
+  .seg button[aria-pressed="true"] { background: var(--sign); color: var(--sign-ink); font-weight: 600; }
+  .fix-row { align-items: flex-end; gap: 12px; margin: 0 0 16px; max-width: 75ch; }
+  .similar { border-left: 3px solid var(--amber); padding: 6px 12px; margin: 0 0 16px; max-width: 75ch; }
+  .similar h3 { font-size: 15px; margin: 0 0 4px; }
+  .similar ul { margin: 0; padding-left: 18px; }
+  .rel-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+  .rel { display: flex; flex-direction: column; padding: 8px 14px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); text-decoration: none; background: var(--surface); }
+  .rel.on { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+  .rel b { font-family: var(--display); font-size: 18px; }
+  .rel-items { max-width: 75ch; padding-left: 18px; }
+  .notes-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; max-width: 900px; }
+  .notes-grid textarea { width: 100%; font: 14px/1.5 var(--body); }
+  .count-chars { float: right; font-size: 12px; color: var(--muted); }
+  .count-chars.over { color: var(--bad); font-weight: 600; }
+  .release-box { margin-top: 22px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); max-width: 900px; }
+  .release-box p { margin: 0 0 10px; }
+  .reply-form { max-width: 900px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin: 0 0 24px; display: grid; gap: 12px; }
+  .reply-form h2 { margin: 0; }
+  /* Phones: forms never wider than the screen (grid items would grow to their text boxes' own width). */
+  .reply-form, .line-form { grid-template-columns: minmax(0, 1fr); }
+  .notes-grid { grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
+  .reply-form .input, .line-form .input { min-width: 0; max-width: 100%; box-sizing: border-box; }
+  .line-form { max-width: 860px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin: 0 0 28px; display: grid; gap: 12px; }
+  .line-form h2 { margin: 0; } .line-form h3 { margin: 6px 0 0; font-size: 16px; }
+  .line-grid { display: grid; grid-template-columns: 140px 1fr 1fr; gap: 12px; }
+  .line-days { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+  .line-days legend { font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+  .line-days .day { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+  .day-presets { display: inline-flex; gap: 10px; margin-left: 8px; }
+  .line-stops { margin: 0; padding-left: 26px; display: grid; gap: 6px; }
+  .line-stops li { display: flex; gap: 8px; align-items: center; }
+  .line-stops .stop-name { flex: 1; min-width: 0; }
+  .line-stops .mins { width: 84px; padding: 5px 8px; }
+  .stop-hits { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; }
+  .gen { gap: 8px; } .gen .input { width: auto; padding: 6px 8px; } #gen-every { width: 76px; }
+  .line-list { display: grid; gap: 12px; max-width: 860px; }
+  .line-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .line-card-head { display: flex; gap: 10px; align-items: center; }
+  .line-card p { margin: 6px 0 10px; }
+  button.link { background: none; border: 0; color: var(--sign); cursor: pointer; padding: 2px 4px; font: inherit; }
+  button.link:disabled { opacity: .35; cursor: default; }
+  @media (max-width: 700px) { .line-grid { grid-template-columns: 1fr; } }
+  .sub header { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 6px; }
+  .sub h3 { font-size: 18px; margin: 0; }
+  .sub-stops { margin: 6px 0 10px; padding-left: 22px; columns: 2 260px; }
+  .sub-stops b { font-variant-numeric: tabular-nums; margin-right: 6px; }
+  .sub-actions { gap: 8px; flex-wrap: wrap; }
+  .sub-actions .input { flex: 1 1 220px; }
+  .op-filter { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin: 0 0 8px; padding: 0 28px; }
+  @media (max-width: 900px) { .op-filter { padding: 0 16px; } }
+  .op-filter label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+  button { transition: transform .06s, filter .12s; }
+  button:hover:not(:disabled) { filter: brightness(1.12); }
+  button:active:not(:disabled) { transform: scale(.96); filter: brightness(1.25); }
+  button.working { opacity: .6; cursor: progress; pointer-events: none; }
+  button.working::after { content: " …"; }
+  .via-pin { background: #F59E0B; color: #111; font-weight: 700; font-size: 11px; border: 2px solid #fff; border-radius: 50%;
+    width: 20px; height: 20px; display: grid; place-items: center; transform: translate(-10px, -10px); }
+  .own-stops li span { flex: 1; }
   .map-side { border-left: 1px solid var(--line); overflow-y: auto; padding: 14px 16px; background: var(--surface); font-size: 14px; }
   .line-routes { list-style: none; padding: 0; margin: 8px 0; }
   .line-routes button { width: 100%; text-align: left; margin: 0 0 6px; white-space: normal; }
   #line-find input { flex: 1; min-width: 0; }
   .map-side h2 { font-size: 20px; margin: 0 0 6px; }
   .map-side .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
-  .map-side button { border: 1px solid var(--line); background: var(--surface); border-radius: 3px; padding: 5px 10px; cursor: pointer; }
+  .map-side button { border: 1px solid var(--line); background: var(--paper); color: var(--ink); border-radius: 8px; padding: 7px 12px;
+    min-height: 34px; font: 600 13.5px/1.25 var(--body, inherit); cursor: pointer; }
   .map-side button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  /* A row of buttons only: an even grid (2, 3, or 2 per line with an odd last one across), never 3 and then 1 on its own. */
+  .map-side .row:not(:has(> :not(button))) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .map-side .row:not(:has(> :not(button))):has(> button:nth-child(3):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .map-side .row:not(:has(> :not(button))) > button:nth-child(odd):last-child:not(:nth-child(3)) { grid-column: 1 / -1; }
+  .map-side .row:has(> button:only-child) { display: flex; }
+  /* Small icon actions in lists (remove, add after): no box until hovered. */
+  .map-side button.link { border: 0; background: none; min-height: 0; padding: 3px 8px; border-radius: 6px; color: var(--muted); font-weight: 600; }
+  .map-side button.link:hover { background: color-mix(in srgb, var(--ink) 9%, transparent); color: var(--ink); }
+  .map-side .pnum-badge { border: 0; padding: 0 6px; min-height: 26px; border-radius: 13px; background: #7C3AED; color: #fff; }
+  .map-side .child-row .pnum-badge { background: #0F766E; }
+  .line-routes button { font-weight: 400; }
+  .own-stops { padding-left: 22px; }
+  .own-stops li.adding { box-shadow: inset 3px 0 0 var(--amber); }
   .legend span { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
   .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
   .bus-icon { background: #5f6b7a; color: #fff; font: 700 11px/20px var(--display, sans-serif); border-radius: 10px; text-align: center; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); white-space: nowrap; padding: 0 5px; }
@@ -269,10 +374,15 @@
   <nav>
     <a href="#bugs" data-nav="bugs">Bugs <span class="count" id="count-new" hidden></span></a>
     <a href="#ideas" data-nav="ideas">Suggestions <span class="count" id="count-ideas" hidden></span></a>
+    <a href="#submissions" data-nav="submissions">Submissions <span class="count" id="count-subs" hidden></span></a>
+    <a href="#lines" data-nav="lines">Lines</a>
+    <a href="#releases" data-nav="releases">Releases</a>
+    <a href="#notices" data-nav="notices">Notices</a>
     <a href="#community" data-nav="community">Community</a>
     <a href="#timetable" data-nav="timetable">Timetable</a>
     <a href="#map" data-nav="map">Map</a>
     <a href="#site" data-nav="site">Website</a>
+    <a href="#server" data-nav="server">Server</a>
     <a href="#settings" data-nav="settings">Settings</a>
   </nav>
   <div class="rail-foot">
@@ -295,17 +405,20 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const view = $("#view");
-const STATUSES = ["new", "triaged", "in_progress", "resolved", "closed"];
-const label = (s) => s.replace("_", " ").replace(/^./, (c) => c.toUpperCase());
+const STATUSES = ["new", "triaged", "in_progress", "awaiting_release", "resolved", "closed"];
+const label = (s) => s === "awaiting_release" ? "Waiting for update" : s.replace("_", " ").replace(/^./, (c) => c.toUpperCase());
 let me = null;
 let bugFilter = { status: "open", q: "" };
 
 const MAP_TAB = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 async function api(path, body) {
+  // A button that sends something shows it's working until the answer is back (so a click is seen, and not repeated).
+  const pressed = body !== undefined && document.activeElement?.tagName === "BUTTON" ? document.activeElement : null;
+  pressed?.classList.add("working");
   const res = await fetch("/admin/api/" + path, body === undefined ? { headers: { "X-Map-Tab": MAP_TAB } } : {
     method: "POST", headers: { "Content-Type": "application/json", "X-Map-Tab": MAP_TAB }, body: JSON.stringify(body),
-  });
+  }).finally(() => pressed?.classList.remove("working"));
   if (res.status === 401) { location.href = "/login"; throw new Error("signed out"); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Request failed (" + res.status + ")");
@@ -340,9 +453,16 @@ function delayText(sec) {
 async function route() {
   const [page, arg] = location.hash.slice(1).split("/");
   document.querySelectorAll("[data-nav]").forEach((a) =>
-    a.setAttribute("aria-current", (a.dataset.nav === ({ bug: "bugs", idea: "ideas", templates: "settings" }[page] || page || "bugs")) ? "page" : "false"));
+    a.setAttribute("aria-current", (a.dataset.nav === ({ bug: "bugs", idea: "ideas", templates: "settings", replies: "settings", activity: "settings" }[page] || page || "bugs")) ? "page" : "false"));
   try {
     if (page === "community") return await renderCommunity(arg);
+    if (page === "submissions") return await renderSubmissions();
+    if (page === "lines") return await renderLines();
+    if (page === "releases") return await renderReleases(arg);
+    if (page === "notices") return await renderNotices(arg);
+    if (page === "replies") return await renderReplies(arg);
+    if (page === "activity") return await renderActivity();
+    if (page === "server") return await renderServer();
     if (page === "timetable") return await renderTimetable();
     if (page === "map") return renderMap(arg ? decodeURIComponent(arg) : null);
     if (page === "settings") return await renderSettings(arg);
@@ -363,7 +483,510 @@ async function refreshCounts() {
   el.textContent = n; el.hidden = !n;
   const ideas = $("#count-ideas"), i = (s.ideas || {}).new || 0;
   ideas.textContent = i; ideas.hidden = !i;
+  const subs = $("#count-subs");
+  subs.textContent = s.submissions || 0; subs.hidden = !s.submissions;
   return s;
+}
+
+// ------------------------------------------------------------------ lines added here (city and intercity)
+
+/** "6:05" from seconds of the day; and the other way, null when it isn't a time. */
+const hhmm = (secs) => `${Math.floor(secs / 3600)}:${String(Math.floor(secs % 3600 / 60)).padStart(2, "0")}`;
+const secsOf = (text) => { const m = /^(\d{1,2}):(\d{2})$/.exec(text.trim()); return m && +m[2] < 60 ? +m[1] * 3600 + +m[2] * 60 : null; };
+const WORKDAYS = [0, 1, 2, 3, 4], WEEKEND = [5, 6], EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
+const daysText = (days) => days.length === 7 ? "every day" : days.join() === WORKDAYS.join() ? "workdays" : days.join() === WEEKEND.join() ? "weekends"
+  : days.map((x) => DAY_NAMES[x]).join(", ");
+
+/**
+ * Lines added in the dashboard: a number, the days, the stops with the minutes after the first one, and the departures
+ * from the first stop. Each departure is a trip of the timetable (planner, stop boards, following, offline packs).
+ */
+async function renderLines() {
+  const { lines, operators } = await api("lines");
+  view.innerHTML = `
+    <div class="page-head"><h1>Lines</h1><button class="btn" id="line-new" type="button">Add a line</button></div>
+    <div class="section">
+      <p class="muted" style="max-width:72ch;margin:0 0 16px">City (MHD) and intercity lines the timetable doesn't have. Each departure becomes a bus
+        in the apps' planner and stop boards, can be followed, and goes into the offline timetables, about half a minute after saving.
+        A stop the timetable lacks: open the Map and use <em>New stop here</em> first.</p>
+      <div id="line-editor"></div>
+      <h2>${lines.length ? "Lines added here" : "No lines added yet"}</h2>
+      <div class="line-list">${lines.map((x) => `<article class="line-card" data-id="${x.id}">
+        <div class="line-card-head"><span class="plate line">${esc(x.data.line)}</span>
+          <b>${esc(x.data.stopNames[0])} → ${esc(x.data.stopNames.at(-1))}</b></div>
+        <p class="muted small">${esc(x.data.operator || "No operator")} · ${esc(daysText(x.data.weekdays))} · ${x.data.departures.length} departure${x.data.departures.length === 1 ? "" : "s"}
+          (${x.data.departures.slice(0, 6).map(hhmm).join(", ")}${x.data.departures.length > 6 ? ", …" : ""}) · ${x.data.stops.length} stops · changed by ${esc(x.updated_by)} ${ago(x.updated_at)}</p>
+        ${x.data.validFrom || x.data.validTo ? `<p class="small">Runs ${x.data.validFrom ? "from " + esc(x.data.validFrom) : ""}${x.data.validTo ? " until " + esc(x.data.validTo) : ""}</p>` : ""}
+        <div class="row"><button class="btn quiet" data-act="edit" type="button">Edit</button><button class="btn quiet" data-act="copy" type="button">Copy</button><button class="btn quiet" data-act="back" type="button">Add the way back</button>
+          <button class="btn danger" data-act="delete" type="button">Delete</button></div></article>`).join("")}</div>
+    </div>`;
+  $("#line-new").onclick = () => lineEditor(null, null, operators);
+  view.querySelector(".line-list").onclick = async (e) => {
+    const b = e.target.closest("[data-act]");
+    if (!b) return;
+    const x = lines.find((l) => l.id === Number(b.closest("[data-id]").dataset.id));
+    if (b.dataset.act === "edit") return lineEditor(x.id, x.data, operators);
+    if (b.dataset.act === "copy") return lineEditor(null, x.data, operators); // a similar line: change what differs
+    if (b.dataset.act === "back") {
+      // The same stops the other way, each the same minutes from the end; departures are for you to fill in.
+      const total = x.data.stops.at(-1)[1];
+      const stops = [...x.data.stops].reverse().map(([id, m], i) => [id, total - m, [...x.data.stopNames].reverse()[i]]);
+      return lineEditor(null, { ...x.data, headsign: "", stops, stopNames: stops.map((s) => s[2]), departures: [] }, operators);
+    }
+    if (!confirm(`Delete line ${x.data.line} (${x.data.departures.length} departures)? Its buses leave the timetable.`)) return;
+    await api(`lines/${x.id}/delete`, {});
+    toast("Deleted: gone from the timetable in about half a minute");
+    renderLines();
+  };
+}
+
+function lineEditor(id, d, operators) {
+  const box = $("#line-editor");
+  const data = d || { line: "", headsign: "", operator: "", weekdays: WORKDAYS, stops: [], stopNames: [], departures: [] };
+  let stops = data.stops.map(([sid, minutes], i) => ({ id: sid, name: data.stopNames?.[i] || sid, minutes }));
+  box.innerHTML = `<form class="line-form" autocomplete="off">
+    <h2>${id ? `Edit line ${esc(data.line)}` : "New line"}</h2>
+    <div class="line-grid">
+      <label class="field">Line<input class="input" name="line" maxlength="12" required value="${esc(data.line)}" placeholder="12 or 60150"></label>
+      <label class="field">Operator<input class="input" name="operator" maxlength="80" list="line-ops" value="${esc(data.operator)}" placeholder="MHD Banská Bystrica"></label>
+      <label class="field">Destination shown<input class="input" name="headsign" maxlength="80" value="${esc(data.headsign)}" placeholder="The last stop"></label>
+    </div>
+    <datalist id="line-ops">${operators.map((o) => `<option value="${esc(o)}">`).join("")}</datalist>
+    <div class="row" style="gap:12px">
+      <label class="field">Valid from (optional)<input class="input" type="date" name="validFrom" value="${esc(data.validFrom || "")}"></label>
+      <label class="field">Valid until (optional)<input class="input" type="date" name="validTo" value="${esc(data.validTo || "")}"></label>
+    </div>
+    <fieldset class="line-days"><legend>Runs on</legend>
+      ${DAY_NAMES.map((n, i) => `<label class="day"><input type="checkbox" name="day" value="${i}" ${data.weekdays.includes(i) ? "checked" : ""}> ${n}</label>`).join("")}
+      <span class="day-presets"><button type="button" class="link" data-days="w">Workdays</button><button type="button" class="link" data-days="e">Weekends</button>
+        <button type="button" class="link" data-days="a">Every day</button></span></fieldset>
+    <h3>Stops</h3>
+    <p class="muted small">In order, each with the minutes after the first stop (the first is 0).</p>
+    <ol class="line-stops" id="line-stops"></ol>
+    <div class="stop-find"><input class="input" id="line-stop-q" placeholder="Add a stop: type its name" aria-label="Add a stop"><div id="line-stop-hits" class="stop-hits"></div></div>
+    <h3>Departures from the first stop</h3>
+    <textarea class="input" name="departures" rows="3" placeholder="6:05 6:35 7:05 14:40">${esc(data.departures.map(hhmm).join(" "))}</textarea>
+    <div class="row gen"><span class="muted small">Or every</span><input class="input" type="number" min="1" max="240" id="gen-every" value="30" aria-label="Every how many minutes">
+      <span class="muted small">min from</span><input class="input" type="time" id="gen-from" value="05:00" aria-label="From"><span class="muted small">to</span>
+      <input class="input" type="time" id="gen-to" value="22:00" aria-label="To"><button type="button" class="btn quiet" id="gen-add">Add these times</button></div>
+    <p class="error-text" id="line-error" hidden></p>
+    <div class="row"><button class="btn" type="submit">${id ? "Save the line" : "Add the line"}</button><button class="btn quiet" type="button" id="line-cancel">Cancel</button></div>
+  </form>`;
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
+  const form = box.querySelector("form");
+  const drawStops = () => {
+    $("#line-stops").innerHTML = stops.map((x, i) => `<li data-i="${i}"><span class="stop-name">${esc(x.name)}</span>
+      <input class="input mins" type="number" min="0" max="1440" value="${x.minutes}" ${i === 0 ? "disabled" : ""} aria-label="Minutes after the first stop"><span class="muted small">min</span>
+      <button type="button" class="link" data-move="-1" ${i === 0 ? "disabled" : ""} title="Move up" aria-label="Move up">↑</button>
+      <button type="button" class="link" data-move="1" ${i === stops.length - 1 ? "disabled" : ""} title="Move down" aria-label="Move down">↓</button>
+      <button type="button" class="link" data-del title="Remove" aria-label="Remove">✕</button></li>`).join("")
+      || `<li class="muted small">No stops yet: add the first one below.</li>`;
+  };
+  drawStops();
+  $("#line-stops").oninput = (e) => {
+    const li = e.target.closest("[data-i]");
+    if (li && e.target.matches(".mins")) stops[Number(li.dataset.i)].minutes = Number(e.target.value);
+  };
+  $("#line-stops").onclick = (e) => {
+    const li = e.target.closest("[data-i]");
+    if (!li) return;
+    const i = Number(li.dataset.i);
+    if (e.target.closest("[data-del]")) stops.splice(i, 1);
+    const mv = e.target.closest("[data-move]");
+    if (mv) { const j = i + Number(mv.dataset.move); [stops[i], stops[j]] = [stops[j], stops[i]]; }
+    if (stops[0]) stops[0].minutes = 0;
+    drawStops();
+  };
+  let timer = null;
+  $("#line-stop-q").oninput = (e) => {
+    clearTimeout(timer);
+    const q = e.target.value.trim();
+    timer = setTimeout(async () => {
+      if (q.length < 2) return ($("#line-stop-hits").innerHTML = "");
+      const r = await api("timetable/stops?q=" + encodeURIComponent(q) + "&n=8");
+      $("#line-stop-hits").innerHTML = r.stops.map((x, i) => `<button type="button" class="link" data-hit="${i}">${esc(x.name)}</button>`).join("")
+        || `<span class="muted small">No such stop. Place it on the Map with <em>New stop here</em>.</span>`;
+      $("#line-stop-hits").onclick = (ev) => {
+        const b = ev.target.closest("[data-hit]");
+        if (!b) return;
+        const x = r.stops[Number(b.dataset.hit)];
+        stops.push({ id: x.id, name: x.name, minutes: stops.length ? stops.at(-1).minutes + 2 : 0 });
+        $("#line-stop-q").value = ""; $("#line-stop-hits").innerHTML = "";
+        drawStops();
+        $("#line-stop-q").focus();
+      };
+    }, 250);
+  };
+  form.querySelectorAll("[data-days]").forEach((b) => (b.onclick = () => {
+    const want = { w: WORKDAYS, e: WEEKEND, a: EVERY_DAY }[b.dataset.days];
+    form.querySelectorAll("[name=day]").forEach((c) => (c.checked = want.includes(Number(c.value))));
+  }));
+  $("#gen-add").onclick = () => {
+    const every = Number($("#gen-every").value), from = secsOf($("#gen-from").value), to = secsOf($("#gen-to").value);
+    if (!every || from == null || to == null || to < from) return toast("Set every how many minutes, and from and to");
+    const times = [];
+    for (let t = from; t <= to && times.length < 300; t += every * 60) times.push(hhmm(t));
+    form.departures.value = (form.departures.value.trim() + " " + times.join(" ")).trim();
+  };
+  $("#line-cancel").onclick = () => (box.innerHTML = "");
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const words = form.departures.value.split(/[\s,;]+/).filter(Boolean);
+    const wrong = words.filter((w) => secsOf(w) == null);
+    const error = $("#line-error");
+    if (wrong.length) { error.textContent = `Not a time: ${wrong.slice(0, 3).join(", ")}. Write times like 6:05.`; error.hidden = false; return; }
+    const body = {
+      line: form.line.value, operator: form.operator.value, headsign: form.headsign.value,
+      weekdays: [...form.querySelectorAll("[name=day]:checked")].map((c) => Number(c.value)),
+      stops: stops.map((x) => [x.id, x.minutes]), departures: words, validFrom: form.validFrom.value, validTo: form.validTo.value,
+    };
+    try {
+      await api(id ? `lines/${id}` : "lines", body);
+    } catch (err) { error.textContent = err.message; error.hidden = false; return; }
+    toast(id ? "Saved: in the timetable in about half a minute" : "Added: in the timetable in about half a minute");
+    renderLines();
+  };
+}
+
+// ------------------------------------------------------------------ riders' statistics (community page)
+
+async function renderRiderStats(days = 30) {
+  const box = $("#c-stats");
+  if (!box) return;
+  const st = await api(`community/stats?days=${days}`);
+  const mins = (s) => (s >= 0 ? "+" : "") + Math.round(s / 60) + " min";
+  const hours = (h) => `<span class="spark" title="Usual delay by hour of departure">${h.map((v, i) => `<i class="${v == null ? "none" : v >= 300 ? "bad" : v >= 120 ? "warn" : ""}"
+    style="height:${v == null ? 2 : Math.max(3, Math.min(22, Math.round(v / 60) * 2 + 3))}px" title="${i}:00 ${v == null ? "no reports" : mins(v)}"></i>`).join("")}</span>`;
+  box.innerHTML = `
+    <div class="row" style="justify-content:space-between;align-items:baseline"><h2>Delays and crowding by line</h2>
+      <label class="small">Last <select class="input" id="stats-days">${[7, 30, 90, 365].map((d) => `<option value="${d}" ${d === st.days ? "selected" : ""}>${d} days</option>`).join("")}</select></label></div>
+    <p class="muted" style="max-width:72ch;margin:0 0 12px">From riders' reports: each reported trip counts once, with its last delay. Late means 3 minutes or more.
+      The bars are the usual delay by hour of the day the bus leaves.</p>
+    ${st.delays.length ? `<div class="table-wrap"><table class="grid"><thead><tr><th>Line</th><th>Trips reported</th><th>Usual delay</th><th>Late</th><th>By hour (0 to 23)</th></tr></thead>
+      <tbody>${st.delays.map((x) => `<tr><td data-label="Line"><span class="plate line">${esc(x.line)}</span></td><td data-label="Trips reported">${x.trips}</td>
+        <td data-label="Usual delay"><span class="delay ${x.avgDelay >= 600 ? "very" : x.avgDelay >= 180 ? "late" : "on"}">${mins(x.avgDelay)}</span></td>
+        <td data-label="Late">${Math.round(x.lateShare * 100)} %</td><td data-label="By hour">${hours(x.byHour)}</td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted">No reports in this time.</p>`}
+    <h3 style="margin-top:20px">How full riders said the buses were</h3>
+    ${st.crowd.length ? `<div class="table-wrap"><table class="grid"><thead><tr><th>Line</th><th>Seats free</th><th>Standing</th><th>Full</th></tr></thead>
+      <tbody>${st.crowd.map((c) => `<tr><td data-label="Line"><span class="plate line">${esc(c.line)}</span></td><td data-label="Seats free">${c.seats}</td>
+        <td data-label="Standing">${c.standing}</td><td data-label="Full">${c.full}</td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted">No crowding reports in this time.</p>`}`;
+  $("#stats-days").onchange = (e) => renderRiderStats(Number(e.target.value));
+}
+
+// ------------------------------------------------------------------ service notices: on the apps' home screen
+
+/** epoch seconds <-> the value of an <input type="datetime-local"> (local time). */
+const toLocalInput = (sec) => { if (!sec) return ""; const d = new Date(sec * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+const fromLocalInput = (v) => (v ? Math.round(new Date(v).getTime() / 1000) : null);
+
+async function renderNotices(openId) {
+  const { notices, now: nowS } = await api("notices");
+  const editing = openId === "new" ? { id: null, level: "info", title_sk: "", title_en: "", body_sk: "", body_en: "", lines: "", stops: "", starts_at: null, ends_at: null }
+    : notices.find((x) => String(x.id) === openId);
+  const state = (n) => n.ends_at && n.ends_at <= nowS ? ["Ended", "closed"] : n.starts_at && n.starts_at > nowS ? ["Scheduled", "triaged"] : ["Showing now", "resolved"];
+  view.innerHTML = `
+    <div class="page-head"><h1>Notices</h1><a class="btn" href="#notices/new">Write a notice</a></div>
+    <div class="section">
+      <p class="muted" style="max-width:72ch;margin:0 0 16px">Shown on the Home screen of the app and the web version, in the rider's language, from its start until
+        its end: detours, strikes, a stop closed. Riders can hide one they've read.</p>
+      ${editing ? `<form class="reply-form" id="notice-form">
+        <h2>${editing.id ? "Edit notice" : "New notice"}</h2>
+        <div class="seg" role="group" aria-label="Kind">${[["info", "Information"], ["warning", "Warning"]].map(([v, l]) =>
+          `<button type="button" data-level="${v}" aria-pressed="${editing.level === v}">${l}</button>`).join("")}</div>
+        <div class="notes-grid">
+          <label class="field">Title in Slovak<input class="input" name="title_sk" maxlength="120" value="${esc(editing.title_sk)}" placeholder="Linka 7 ide obchádzkou"></label>
+          <label class="field">Title in English<input class="input" name="title_en" maxlength="120" value="${esc(editing.title_en)}" placeholder="Line 7 detour"></label>
+          <label class="field">Text in Slovak<textarea class="input" name="body_sk" rows="4">${esc(editing.body_sk)}</textarea></label>
+          <label class="field">Text in English<textarea class="input" name="body_en" rows="4">${esc(editing.body_en)}</textarea></label>
+        </div>
+        <div class="notes-grid">
+          <label class="field">Lines (optional)<input class="input" name="lines" value="${esc(editing.lines)}" placeholder="7, 8, 60101"></label>
+          <label class="field">Stops (optional, separated by ;)<input class="input" name="stops" value="${esc(editing.stops)}" placeholder="Zvolen, AS; Zvolen, Námestie SNP"></label>
+          <label class="field">Shows from (empty: now)<input class="input" type="datetime-local" name="starts_at" value="${toLocalInput(editing.starts_at)}"></label>
+          <label class="field">Until (empty: until you delete it)<input class="input" type="datetime-local" name="ends_at" value="${toLocalInput(editing.ends_at)}"></label>
+        </div>
+        <p class="muted small">A notice in one language only is shown in that language to everyone.</p>
+        <p class="error-text" id="notice-error" hidden></p>
+        <div class="row" style="gap:8px"><button class="btn" type="submit">${editing.id ? "Save" : "Publish"}</button><a class="btn quiet" href="#notices">Cancel</a>
+          ${editing.id ? `<button class="btn danger" type="button" id="notice-delete">Delete</button>` : ""}</div>
+      </form>` : ""}
+      <div class="line-list">${notices.map((n) => { const [label_, cls] = state(n); return `<article class="line-card notice-card ${n.level}">
+        <div class="line-card-head"><span class="status ${cls}">${label_}</span><b>${esc(n.title_sk || n.title_en)}</b></div>
+        ${n.title_sk && n.title_en ? `<p class="muted small">${esc(n.title_en)}</p>` : ""}
+        <p class="small">${[n.lines && `Lines ${esc(n.lines.replaceAll(",", ", "))}`, n.stops && `Stops ${esc(n.stops)}`,
+          n.starts_at && `from ${when(n.starts_at)}`, n.ends_at && `until ${when(n.ends_at)}`].filter(Boolean).join(", ") || "Everyone, until deleted"}</p>
+        <a class="btn quiet" href="#notices/${n.id}">Edit</a></article>`; }).join("") || `<p class="muted">No notices yet.</p>`}</div>
+    </div>`;
+  const form = $("#notice-form");
+  if (!form) return;
+  let level = editing.level;
+  form.querySelectorAll("[data-level]").forEach((b) => b.onclick = () => {
+    level = b.dataset.level; form.querySelectorAll("[data-level]").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { level, lines: form.lines.value, stops: form.stops.value, starts_at: fromLocalInput(form.starts_at.value), ends_at: fromLocalInput(form.ends_at.value) };
+    for (const k of ["title_sk", "title_en", "body_sk", "body_en"]) body[k] = form[k].value;
+    try { await api(editing.id ? `notices/${editing.id}` : "notices", body); toast(editing.id ? "Saved" : "Published"); location.hash = "#notices"; }
+    catch (err) { const el = $("#notice-error"); el.textContent = err.message; el.hidden = false; }
+  };
+  const del = $("#notice-delete");
+  if (del) del.onclick = async () => { if (!confirm("Delete this notice? The apps stop showing it.")) return; await api(`notices/${editing.id}/delete`, {}); toast("Deleted"); location.hash = "#notices"; };
+}
+
+// ------------------------------------------------------------------ timetable: feed health, what changed
+
+/** Each feed's trips over the last days as small bars (red: couldn't be read, amber: a sharp drop), and the last builds' changes. */
+async function renderFeedHealth() {
+  const box = $("#tt-health");
+  if (!box) return;
+  const { days, feeds, builds } = await api("feeds/health");
+  const names = Object.keys(feeds).sort();
+  const bars = (feed) => {
+    const vals = days.map((d) => feeds[feed][d]);
+    const max = Math.max(1, ...vals.map((v) => v?.trips || 0));
+    return `<span class="spark" aria-hidden="true">${vals.map((v, i) => `<i class="${!v ? "none" : v.trips == null ? "bad" : v.alerted ? "warn" : ""}"
+      style="height:${!v ? 2 : v.trips == null ? 22 : Math.max(2, Math.round((v.trips / max) * 22))}px" title="${esc(days[i])}: ${v ? (v.trips ?? "could not be read") : "no build"}"></i>`).join("")}</span>`;
+  };
+  const latest = (feed) => feeds[feed][days[days.length - 1]];
+  const summary = (c) => [c.newLines?.length && `${c.newLines.length} new line(s)`, c.goneLines?.length && `${c.goneLines.length} line(s) gone`,
+    c.changedLines?.length && `${c.changedLines.length} line(s) with far fewer or more trips`, c.newStops?.length && `${c.newStops.length} new stop(s)`,
+    c.goneStops?.length && `${c.goneStops.length} stop(s) gone`].filter(Boolean).join(", ") || "no changes worth noting";
+  const list = (title, items) => items?.length ? `<p class="small"><b>${title}:</b> ${items.slice(0, 40).map(esc).join(", ")}${items.length > 40 ? `, and ${items.length - 40} more` : ""}</p>` : "";
+  box.innerHTML = `
+    <h2>Feed health</h2>
+    <p class="muted" style="max-width:72ch;margin:0 0 12px">Trips each feed brought ${days.length > 1 ? `on each of the last ${days.length} days` : "today (each day is kept from now on)"}. Red: the feed couldn't be read.
+      Amber: far fewer trips than before (admins got an email).</p>
+    ${names.length ? `<div class="table-wrap"><table class="grid"><thead><tr><th>Feed</th><th>Last days</th><th>Trips now</th></tr></thead>
+      <tbody>${names.map((f) => `<tr><td data-label="Feed"><code>${esc(f)}</code></td><td data-label="Last days">${bars(f)}</td>
+        <td data-label="Trips now">${latest(f) ? (latest(f).trips ?? '<span class="error-text">could not be read</span>') : '<span class="muted">not today</span>'}</td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted">Recorded from the next timetable update on.</p>`}
+    <h2 style="margin-top:24px">What changed</h2>
+    ${builds.length ? builds.map((b) => `<details class="build"><summary><b>${when(b.built)}</b> <span class="muted">${esc(summary(b.changes))}</span></summary>
+      ${list("New lines", b.changes.newLines)}${list("Lines gone", b.changes.goneLines)}
+      ${list("Far fewer or more trips", (b.changes.changedLines || []).map((x) => `${x.line} ${x.before} → ${x.after}`))}
+      ${list("New stops", b.changes.newStops)}${list("Stops gone", b.changes.goneStops)}</details>`).join("")
+      : `<p class="muted">Compared from the next timetable update on.</p>`}`;
+}
+
+// ------------------------------------------------------------------ releases: fixes wait for a version, then everyone hears
+
+async function renderReleases(open) {
+  const { releases } = await api("releases");
+  const chosen = open ? decodeURIComponent(open) : (releases.find((x) => !x.notified) || releases[0] || {}).version;
+  const draft = chosen ? await api(`releases/${encodeURIComponent(chosen)}/draft`) : null;
+  const rel = releases.find((x) => x.version === chosen) || {};
+  const count = (text) => `<span class="count-chars ${text.length > 500 ? "over" : ""}">${text.length} / 500</span>`;
+  view.innerHTML = `
+    <div class="page-head"><h1>Releases</h1></div>
+    <div class="section release-page">
+      <p class="muted" style="max-width:72ch;margin:0 0 16px">Set "Fixed in version" on a bug or suggestion: it waits for that update. When the
+        version is out, mark it released here. Every report fixed in it is resolved and its reporter gets an email in their language.</p>
+      <form class="row" id="rel-new" style="gap:8px;margin-bottom:18px"><input class="input" name="v" placeholder="Version, e.g. 2.17.1" style="width:180px">
+        <button class="btn quiet" type="submit">Open</button></form>
+      <div class="rel-list">${releases.map((x) => `<a class="rel ${x.version === chosen ? "on" : ""}" href="#releases/${encodeURIComponent(x.version)}">
+        <b>${esc(x.version)}</b><span class="muted small">${x.notified ? "released " + ago(x.released_at) : `${x.fixes} waiting`}</span></a>`).join("") || `<p class="muted">No versions yet. Set "Fixed in version" on a report first.</p>`}</div>
+      ${draft ? `<h2>${esc(chosen)}</h2>
+        <h3>In this version</h3>
+        ${draft.items.length ? `<ul class="rel-items">${draft.items.map((x) => `<li><a href="#${x.kind === "feature" ? "idea" : "bug"}/${x.id}">${x.code}</a> ${esc(x.title)}
+          <span class="muted small">${x.kind === "feature" ? "suggestion" : "bug"}, ${x.lang === "en" ? "English" : "Slovak"}</span></li>`).join("")}</ul>`
+          : `<p class="muted">Nothing is marked as fixed in ${esc(chosen)} yet.</p>`}
+        <h3>Release notes for Google Play</h3>
+        <div class="notes-grid">
+          <label class="field">English ${count(rel.notes_en || draft.en)}<textarea class="input" id="notes-en" rows="8">${esc(rel.notes_en || draft.en)}</textarea></label>
+          <label class="field">Slovak ${count(rel.notes_sk || draft.sk)}<textarea class="input" id="notes-sk" rows="8">${esc(rel.notes_sk || draft.sk)}</textarea></label>
+        </div>
+        <div class="row" style="gap:8px;margin-top:10px">
+          <button class="btn quiet" id="notes-save" type="button">Save notes</button>
+          <button class="btn quiet" id="notes-copy" type="button">Copy for Play Console</button>
+        </div>
+        <div class="release-box">
+          ${rel.notified ? `<p><b>Released ${when(rel.released_at)}.</b> Its reporters were told.</p>`
+            : `<p>When ${esc(chosen)} is out in Google Play: ${draft.items.length} report(s) become resolved,
+               ${rel.withEmail || 0} reporter(s) with an email get "Fixed in ${esc(chosen)}" in their language.</p>
+               <button class="btn" id="release" type="button" ${draft.items.length ? "" : "disabled"}>Mark ${esc(chosen)} as released</button>`}
+        </div>` : ""}
+    </div>`;
+  $("#rel-new").onsubmit = (e) => { e.preventDefault(); const v = e.target.v.value.trim(); if (/^\d+(\.\d+){1,3}$/.test(v)) location.hash = "#releases/" + v; else toast("A version looks like 2.17.1"); };
+  if (!draft) return;
+  view.querySelectorAll("#notes-en, #notes-sk").forEach((t) => t.oninput = () => { t.previousElementSibling.outerHTML = count(t.value); });
+  $("#notes-save").onclick = async () => { await api(`releases/${encodeURIComponent(chosen)}/notes`, { en: $("#notes-en").value, sk: $("#notes-sk").value }); toast("Notes saved"); };
+  $("#notes-copy").onclick = async () => {
+    const text = `<en-US>\n${$("#notes-en").value.trim()}\n</en-US>\n<sk>\n${$("#notes-sk").value.trim()}\n</sk>`;
+    try { await navigator.clipboard.writeText(text); toast("Copied: paste it into Play Console"); } catch { toast("Couldn't copy; select the text instead"); }
+  };
+  const btn = $("#release");
+  if (btn) btn.onclick = async () => {
+    if (!confirm(`Mark ${chosen} as released? ${draft.items.length} report(s) become resolved and their reporters get an email.`)) return;
+    const r = await api(`releases/${encodeURIComponent(chosen)}/release`, {});
+    toast(`Released: ${r.emailed} reporter(s) emailed`); renderReleases(chosen);
+  };
+}
+
+// ------------------------------------------------------------------ saved replies (Slovak and English)
+
+async function renderReplies(openId) {
+  const { replies } = await api("replies");
+  const editing = openId === "new" ? { id: null, title: "", body_sk: "", body_en: "" } : replies.find((x) => String(x.id) === openId);
+  view.innerHTML = `
+    <div class="page-head"><h1>Saved replies</h1><a class="btn" href="#replies/new">Add a reply</a></div>
+    <div class="section">
+      <p class="muted" style="max-width:72ch;margin:0 0 16px">Texts you send often. On a bug or suggestion, picking one puts it in the reply in the
+        reporter's language (Slovak or English); you can still change it before sending.</p>
+      ${editing ? `<form class="reply-form" id="reply-form">
+        <h2>${editing.id ? "Edit reply" : "New reply"}</h2>
+        <label class="field">Title (only admins see it)<input class="input" name="title" maxlength="80" required value="${esc(editing.title)}"></label>
+        <div class="notes-grid">
+          <label class="field">Slovak<textarea class="input" name="sk" rows="7">${esc(editing.body_sk)}</textarea></label>
+          <label class="field">English<textarea class="input" name="en" rows="7">${esc(editing.body_en)}</textarea></label>
+        </div>
+        <p class="error-text" id="reply-error" hidden></p>
+        <div class="row" style="gap:8px"><button class="btn" type="submit">${editing.id ? "Save" : "Add the reply"}</button>
+          <a class="btn quiet" href="#replies">Cancel</a>${editing.id ? `<button class="btn danger" type="button" id="reply-delete">Delete</button>` : ""}</div>
+      </form>` : ""}
+      <div class="line-list">${replies.map((x) => `<article class="line-card"><div class="line-card-head"><b>${esc(x.title)}</b></div>
+        <p class="muted small">${esc((x.body_sk || x.body_en).slice(0, 180))}${(x.body_sk || x.body_en).length > 180 ? "…" : ""}</p>
+        <p class="small">${x.body_sk ? "Slovak" : ""}${x.body_sk && x.body_en ? " and " : ""}${x.body_en ? "English" : ""}${x.updated_by ? `, changed by ${esc(x.updated_by)} ${ago(x.updated_at)}` : ""}</p>
+        <a class="btn quiet" href="#replies/${x.id}">Edit</a></article>`).join("") || `<p class="muted">No saved replies yet.</p>`}</div>
+    </div>`;
+  const form = $("#reply-form");
+  if (!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api(editing.id ? `replies/${editing.id}` : "replies", { title: form.title.value, bodySk: form.sk.value, bodyEn: form.en.value });
+      toast("Saved"); location.hash = "#replies";
+    } catch (err) { const el = $("#reply-error"); el.textContent = err.message; el.hidden = false; }
+  };
+  const del = $("#reply-delete");
+  if (del) del.onclick = async () => { if (!confirm("Delete this saved reply?")) return; await api(`replies/${editing.id}/delete`, {}); toast("Deleted"); location.hash = "#replies"; };
+}
+
+// ------------------------------------------------------------------ activity log
+
+async function renderActivity() {
+  const { entries } = await api("audit");
+  view.innerHTML = `
+    <div class="page-head"><h1>Activity log</h1></div>
+    <div class="section">
+      <p class="muted" style="max-width:72ch;margin:0 0 16px">Changes made by admins, newest first: who, when, and what was changed (never the content sent).</p>
+      <div class="table-wrap"><table class="grid"><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead>
+        <tbody>${entries.map((e) => `<tr><td data-label="When">${when(e.created_at)}</td><td data-label="Who">${esc(e.username)}</td><td data-label="What"><code>${esc(e.action)}</code></td></tr>`).join("")
+          || `<tr><td colspan="3" class="muted">Nothing yet.</td></tr>`}</tbody></table></div>
+    </div>`;
+}
+
+// ------------------------------------------------------------------ server health and backups
+
+const bytes = (n) => n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.round(n / 1e3) + " kB";
+const duration = (s) => s >= 86400 ? `${Math.floor(s / 86400)} d ${Math.floor(s % 86400 / 3600)} h` : s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor(s % 3600 / 60)} min` : `${Math.floor(s / 60)} min`;
+
+async function renderServer() {
+  const h = await api("server");
+  const memUsed = h.memTotal ? 1 - h.memAvailable / h.memTotal : null, diskUsed = 1 - h.disk.free / h.disk.total;
+  const lastBackup = h.backups[0];
+  const pct = (x) => Math.round(x * 100) + " %";
+  view.innerHTML = `
+    <div class="page-head"><h1>Server</h1>
+      <div class="stats">
+        <div class="stat"><b>${duration(h.now - h.started)}</b><span>running, version ${esc(h.version)}</span></div>
+        ${h.rss ? `<div class="stat"><b>${bytes(h.rss)}</b><span>memory used by emHUB</span></div>` : ""}
+        ${memUsed != null ? `<div class="stat"><b class="${memUsed > 0.9 ? "warn-text" : ""}">${pct(memUsed)}</b><span>of ${bytes(h.memTotal)} memory in use</span></div>` : ""}
+        ${h.load ? `<div class="stat"><b>${h.load[0]}</b><span>load (${h.cpus} CPU), 15 min ${h.load[2]}</span></div>` : ""}
+        <div class="stat"><b class="${diskUsed > 0.9 ? "warn-text" : ""}">${bytes(h.disk.free)}</b><span>disk free, database ${bytes(h.dbSize)}</span></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="row" style="justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px"><h2>Database backups</h2>
+        <button class="btn" type="button" id="backup-now">Back up now</button></div>
+      <p class="muted" style="max-width:72ch;margin:0 0 12px">A copy of the database is made once a day; the newest 14 are kept on the server.
+        ${lastBackup ? `Last one ${ago(lastBackup.at)}.` : "None made yet."}</p>
+      ${h.backups.length ? `<div class="table-wrap"><table class="grid"><thead><tr><th>Made</th><th>File</th><th>Size</th></tr></thead>
+        <tbody>${h.backups.map((b) => `<tr><td data-label="Made">${when(b.at)}</td><td data-label="File"><code>${esc(b.name)}</code></td><td data-label="Size">${bytes(b.size)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    </div>
+    <div class="section">
+      <h2>Errors since the last restart</h2>
+      ${h.errors.length ? h.errors.map((e) => `<details class="error-log"><summary><b>${esc(e.where)}</b> <span class="muted small">${when(e.at)}</span></summary><pre>${esc(e.error)}</pre></details>`).join("")
+        : `<p class="muted">None.</p>`}
+    </div>
+    <div class="section">
+      <h2>Response times since the last restart</h2>
+      <p class="muted" style="max-width:72ch;margin:0 0 12px">${h.threads} threads, ${h.mailQueue} emails waiting to be sent.</p>
+      <div class="table-wrap"><table class="grid"><thead><tr><th>Requests to</th><th>Count</th><th>Average</th><th>Slowest</th></tr></thead>
+        <tbody>${h.routes.map((r) => `<tr><td data-label="Requests to"><code>${esc(r.route)}</code></td><td data-label="Count">${r.count}</td>
+          <td data-label="Average">${r.avgMs} ms</td><td data-label="Slowest"><span class="${r.maxMs > 5000 ? "warn-text" : ""}">${r.maxMs} ms</span></td></tr>`).join("")
+          || `<tr><td colspan="4" class="muted">Nothing yet.</td></tr>`}</tbody></table></div>
+    </div>
+    <div class="section">
+      <h2>App versions in use</h2>
+      <p class="muted" style="max-width:72ch;margin:0 0 12px">Requests by app version since the last restart (sent by the app from 2.17.1 and by the web version), and the versions in bug reports from the last 90 days.</p>
+      ${h.appVersions.length ? `<div class="table-wrap"><table class="grid"><thead><tr><th>Version</th><th>Requests</th></tr></thead>
+        <tbody>${h.appVersions.map((v) => `<tr><td data-label="Version">${esc(v.version)}</td><td data-label="Requests">${v.requests}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      ${h.reportedVersions.length ? `<div class="table-wrap" style="margin-top:12px"><table class="grid"><thead><tr><th>In reports</th><th>Platform</th><th>Reports</th><th>Last</th></tr></thead>
+        <tbody>${h.reportedVersions.map((v) => `<tr><td data-label="In reports">${esc(v.version)}</td><td data-label="Platform">${esc(v.platform)}</td>
+          <td data-label="Reports">${v.reports}</td><td data-label="Last">${ago(v.last)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">No reports yet.</p>`}
+    </div>`;
+  $("#backup-now").onclick = async (e) => {
+    e.target.disabled = true;
+    try { const r = await api("server/backup", {}); toast("Backed up: " + r.name); renderServer(); }
+    catch (err) { toast(err.message); e.target.disabled = false; }
+  };
+}
+
+// ------------------------------------------------------------------ riders' submissions (2.17.0)
+
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const KIND_TITLE = { trip: "Missing connection", stop: "Missing stop", problem: "Problem at a stop" };
+const clockOf = (secs) => `${Math.floor(secs / 3600)}:${String(Math.floor(secs % 3600 / 60)).padStart(2, "0")}`;
+
+/** What a rider sent, shown the way it gets checked: a connection's stops and times, a stop on the map, a problem's text. */
+function submissionBody(s) {
+  const d = s.data;
+  if (s.kind === "trip") {
+    const days = d.weekdays.length === 7 ? "every day" : d.weekdays.map((x) => DAY_NAMES[x]).join(", ");
+    return `<p><span class="plate line">${esc(d.line)}</span> ${d.headsign ? "to " + esc(d.headsign) : ""} <span class="muted">${esc(days)}${d.operator ? ", " + esc(d.operator) : ""}</span></p>
+      <ol class="sub-stops">${d.stops.map(([, secs], i) => `<li><b>${clockOf(secs)}</b> ${esc((d.stopNames || [])[i] || d.stops[i][0])}</li>`).join("")}</ol>`;
+  }
+  if (s.kind === "stop") {
+    return `<p><b>${esc(d.name)}</b> <a href="https://www.openstreetmap.org/?mlat=${d.lat}&mlon=${d.lon}#map=18/${d.lat}/${d.lon}" target="_blank" rel="noopener">See the place on a map</a></p>`;
+  }
+  return `<p class="desc">${esc(d.text)}</p>${d.station ? `<p class="muted small">Stop: ${esc(d.station)}</p>` : ""}`;
+}
+
+async function renderSubmissions() {
+  const [{ submissions }] = await Promise.all([api("submissions"), refreshCounts()]);
+  const waiting = submissions.filter((s) => s.status === "new"), handled = submissions.filter((s) => s.status !== "new");
+  const card = (s) => `<article class="sub" data-id="${s.id}">
+      <header><h3>${KIND_TITLE[s.kind]}</h3><span class="muted small">from ${esc(s.name)}${s.email ? ` (${esc(s.email)})` : ""}, ${ago(s.created_at)}</span></header>
+      ${submissionBody(s)}
+      ${s.status === "new" ? `<div class="row sub-actions">
+          <input class="input" name="note" placeholder="Note for the record (optional)" maxlength="500">
+          ${s.kind === "problem" ? `<button class="btn" data-act="done">Mark as handled</button>`
+            : `<button class="btn" data-act="approve">Approve and add to the timetable</button>`}
+          <button class="btn quiet" data-act="reject">Reject</button></div>`
+        : `<p class="small"><span class="status ${s.status === "approved" || s.status === "done" ? "resolved" : ""}">${esc(s.status)}</span>
+           <span class="muted">by ${esc(s.reviewed_by)}${s.note ? ": " + esc(s.note) : ""}</span></p>`}
+    </article>`;
+  view.innerHTML = `
+    <div class="page-head"><h1>Submissions</h1></div>
+    <div class="section">
+      <p class="muted" style="max-width:70ch;margin:0 0 16px">Riders send stops and connections the timetable lacks, and problems at stops. Nothing changes the
+        timetable until you approve it; an approved stop or connection is in the planner about half a minute later.</p>
+      <h2>Waiting for you</h2>
+      ${waiting.length ? waiting.map(card).join("") : `<p class="muted">Nothing new. Riders' submissions from the apps appear here.</p>`}
+      ${handled.length ? `<h2 style="margin-top:28px">Handled</h2>${handled.map(card).join("")}` : ""}
+    </div>`;
+  view.querySelectorAll(".sub").forEach((el) => {
+    el.onclick = async (e) => {
+      const b = e.target.closest("[data-act]");
+      if (!b) return;
+      await api(`submissions/${el.dataset.id}/${b.dataset.act}`, { note: el.querySelector("[name=note]")?.value || "" });
+      toast({ approve: "Approved: in the timetable in about half a minute", reject: "Rejected", done: "Marked as handled" }[b.dataset.act]);
+      renderSubmissions();
+    };
+  });
 }
 
 // ------------------------------------------------------------------ bugs
@@ -374,7 +997,8 @@ async function renderBugs(selectedId, kind = "bug") {
   const params = new URLSearchParams({ kind });
   if (bugFilter.status !== "all") params.set("status", bugFilter.status);
   if (bugFilter.q) params.set("q", bugFilter.q);
-  const [bugs] = await Promise.all([api("bugs?" + params), refreshCounts()]);
+  if (bugFilter.label) params.set("label", bugFilter.label);
+  const [bugs, { labels }] = await Promise.all([api("bugs?" + params), api("labels"), refreshCounts()]);
   const filters = [["open", "Open"], ...STATUSES.map((s) => [s, label(s)]), ["all", "All"]];
   view.innerHTML = `
     <div class="page-head"><h1>${ideas ? "Suggestions" : "Bugs"}</h1><span class="muted small">${bugs.length} shown</span></div>
@@ -383,17 +1007,20 @@ async function renderBugs(selectedId, kind = "bug") {
         <div class="filters">
           ${filters.map(([v, l]) => `<button type="button" data-status="${v}" aria-pressed="${bugFilter.status === v}">${l}</button>`).join("")}
           <input class="input" type="search" placeholder="Search title, text, name or email" value="${esc(bugFilter.q)}" aria-label="Search bugs">
+          ${labels.length ? `<div class="label-filter">${labels.map(([l, n]) => `<button type="button" class="tag" data-label="${esc(l)}" aria-pressed="${bugFilter.label === l}">${esc(l)} <span class="muted">${n}</span></button>`).join("")}</div>` : ""}
         </div>
         ${bugs.length ? bugs.map((b) => `
           <a class="bug-row" href="#${ideas ? "idea" : "bug"}/${b.id}" aria-current="${b.id === selectedId}">
             <span class="plate">${b.code}</span>
             <span class="t">${esc(b.title)}</span>
-            <span class="m"><span class="status ${b.status}">${label(b.status)}</span><span>${esc(b.category)}</span><span>${esc(b.platform)}</span><span>${ago(b.updated_at)}</span></span>
+            <span class="m"><span class="status ${b.status}">${label(b.status)}${b.fixed_in ? " " + esc(b.fixed_in) : ""}</span><span>${esc(b.category)}</span><span>${esc(b.platform)} ${esc(b.app_version)}</span><span>${ago(b.updated_at)}</span></span>
+            ${b.labels ? `<span class="m tags">${b.labels.split(",").map((l) => `<span class="tag">${esc(l)}</span>`).join("")}</span>` : ""}
           </a>`).join("") : `<div class="empty"><h2>No ${ideas ? "suggestions" : "reports"} here</h2><p>${ideas ? "Feature ideas" : "Reports"} sent from the app and the web version appear in this list. Try another filter.</p></div>`}
       </div>
       <section class="detail" id="detail">${selectedId ? "" : `<div class="empty"><h2>Pick a report</h2><p>Select ${ideas ? "a suggestion" : "a bug"} on the left to read it${ideas ? "" : ", look at the logs"} and reply to the reporter.</p></div>`}</section>
     </div>`;
   view.querySelectorAll("[data-status]").forEach((b) => b.onclick = () => { bugFilter.status = b.dataset.status; renderBugs(selectedId, kind); });
+  view.querySelectorAll("[data-label]").forEach((b) => b.onclick = () => { bugFilter.label = bugFilter.label === b.dataset.label ? "" : b.dataset.label; renderBugs(selectedId, kind); });
   const search = $(".filters input", view);
   search.oninput = () => { clearTimeout(search.t); search.t = setTimeout(() => { bugFilter.q = search.value.trim(); renderBugs(selectedId, kind).then(() => { const s = $(".filters input"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }); }, 300); };
   if (selectedId) await renderBug(selectedId);
@@ -409,7 +1036,8 @@ function highlightLogs(text, needle) {
 }
 
 async function renderBug(id) {
-  const bug = await api("bugs/" + id);
+  const [bug, { replies }, { releases }] = await Promise.all([api("bugs/" + id), api("replies"), api("releases")]);
+  const upcoming = releases.filter((x) => !x.notified).map((x) => x.version);
   const detail = $("#detail");
   const mailNote = (m) => m.mail_status ? `<span class="${m.mail_status.startsWith("failed") ? "mail-failed" : ""}">email ${esc(m.mail_status)}</span>` : "";
   const kindLabel = { reply: "Reply to reporter", note: "Internal note", status: "Status change", system: "System" };
@@ -424,7 +1052,17 @@ async function renderBug(id) {
       <div><dt>Category</dt><dd>${esc(bug.category)}</dd></div>
       <div><dt>Sent</dt><dd>${when(bug.created_at)}</dd></div>
       <div><dt>Consent given</dt><dd>${when(bug.consent_at)}</dd></div>
+      <div><dt>Language of emails</dt><dd><span class="seg" role="group" aria-label="Language of emails to the reporter">
+        ${["sk", "en"].map((l) => `<button type="button" data-lang="${l}" aria-pressed="${bug.lang === l}">${l === "sk" ? "Slovak" : "English"}</button>`).join("")}</span></dd></div>
     </dl>
+    <div class="row fix-row">
+      <label class="field">Fixed in version<input class="input" id="fixed-in" list="versions" placeholder="2.17.1" value="${esc(bug.fixed_in)}" style="width:120px"></label>
+      <datalist id="versions">${upcoming.map((v) => `<option value="${esc(v)}">`).join("")}</datalist>
+      <label class="field" style="flex:1;min-width:200px">Labels<input class="input" id="labels" placeholder="map, planner, notifications" value="${esc(bug.labels.replaceAll(",", ", "))}"></label>
+      <p class="muted small" style="flex-basis:100%;margin:0">With a version set, it waits for that update. On <a href="#releases">Releases</a>, marking the version released resolves it and emails the reporter.</p>
+    </div>
+    ${bug.similar.length ? `<div class="similar"><h3>Maybe the same problem</h3><ul>${bug.similar.map((x) =>
+      `<li><a href="#${bug.kind === "feature" ? "idea" : "bug"}/${x.id}">${x.code}</a> ${esc(x.title)} <span class="muted small">${x.why}, ${label(x.status).toLowerCase()}</span></li>`).join("")}</ul></div>` : ""}
     <div class="status-bar">
       <label class="field" style="flex-direction:row;align-items:center;gap:8px">Status
         <select id="status">${STATUSES.map((s) => `<option value="${s}" ${s === bug.status ? "selected" : ""}>${label(s)}</option>`).join("")}</select>
@@ -446,6 +1084,9 @@ async function renderBug(id) {
       <li class="msg ${m.kind}"><header><span>${kindLabel[m.kind] || m.kind}${m.author ? " by " + esc(m.author) : ""}</span><span>${mailNote(m)} ${ago(m.created_at)}</span></header><p>${esc(m.body)}</p></li>`).join("")}
     </ol>
     <div class="composer">
+      ${replies.length ? `<div class="row" style="gap:8px"><select class="input" id="saved-reply" aria-label="Insert a saved reply" style="flex:1;min-width:0">
+        <option value="">Insert a saved reply (${bug.lang === "sk" ? "Slovak" : "English"})</option>${replies.map((x) => `<option value="${x.id}">${esc(x.title)}</option>`).join("")}</select>
+        <a class="btn quiet" href="#replies">Edit saved replies</a></div>` : ""}
       <label class="field">${bug.email ? "Reply to " + esc(bug.name || bug.email) : "Internal note (the reporter left no email)"}
         <textarea id="body" rows="6" placeholder="${bug.email ? "Write to the reporter. It goes out as a formatted email with the bug id." : "Only admins see notes."}"></textarea>
       </label>
@@ -472,6 +1113,28 @@ async function renderBug(id) {
       a.download = bug.code + "-logs.txt"; a.click();
     };
   }
+  detail.querySelectorAll("[data-lang]").forEach((b) => b.onclick = async () => {
+    await api(`bugs/${id}/meta`, { lang: b.dataset.lang });
+    toast(`Emails to this reporter are in ${b.dataset.lang === "sk" ? "Slovak" : "English"} now`); renderBug(id);
+  });
+  const saveMeta = async () => {
+    try {
+      await api(`bugs/${id}/meta`, { fixedIn: $("#fixed-in").value.trim(), labels: $("#labels").value });
+      toast("Saved"); renderBugs(id, bug.kind);
+    } catch (err) { toast(err.message); }
+  };
+  $("#fixed-in").onchange = saveMeta;
+  $("#labels").onchange = saveMeta;
+  const pick = $("#saved-reply");
+  if (pick) pick.onchange = () => {
+    const x = replies.find((r) => String(r.id) === pick.value);
+    if (!x) return;
+    // The reporter's language, else the other one if only that is written.
+    const text = (bug.lang === "en" ? x.body_en || x.body_sk : x.body_sk || x.body_en);
+    const area = $("#body");
+    area.value = (area.value.trim() ? area.value.trimEnd() + "\n\n" : "") + text;
+    area.focus(); pick.value = "";
+  };
   $("#status").onchange = async (e) => {
     await api(`bugs/${id}/status`, { status: e.target.value, notify: $("#notify")?.checked });
     toast("Status set to " + label(e.target.value)); renderBugs(id, bug.kind);
@@ -568,7 +1231,9 @@ async function renderCommunity(selected) {
             <td class="row"><button class="btn quiet" data-del="${r.id}" type="button">Delete</button>
               <button class="btn danger" data-block="${esc(r.reporter)}" data-unblock="${r.blocked ? 1 : ""}" type="button">${r.blocked ? "Unblock" : "Block rider"}</button></td></tr>`;
         }).join("")}</tbody></table></div>${more("reports", reports.length)}` : `<p class="muted">No reports.</p>`}
-    </div>`;
+    </div>
+    <div class="section" id="c-stats"></div>`;
+  renderRiderStats();
   $("#c-filter").onsubmit = (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -614,10 +1279,12 @@ function renderMap(stationId = null) {
       <span><i class="dot" style="background:#C77700"></i>late</span>
       <span><i class="dot" style="background:#1D4FB8"></i>stop (mint: moved by hand)</span></span></div>
     <p class="muted small" id="map-people"></p>
+    <div class="op-filter small" id="op-filter"></div>
     <div class="map-wrap" id="map-wrap"><div id="map"></div>
       <aside class="map-panel"><button class="side-x" id="side-x" type="button" title="Close the panel (full-screen map)" aria-label="Close the panel">✕</button>
       <div class="map-side" id="map-side"></div></aside></div>`;
-  const map = L.map("map", { preferCanvas: true }).setView([48.736, 19.146], 13);
+  // Lines are easy to click: within 8 px counts (a 6 px line at a town zoom was hard to hit).
+  const map = L.map("map", { preferCanvas: true, renderer: L.canvas({ tolerance: 8 }) }).setView([48.736, 19.146], 13);
   // OpenStreetMap's tile servers refuse requests without a Referer (403): send our origin with them.
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors",
     referrerPolicy: "strict-origin-when-cross-origin" }).addTo(map);
@@ -683,8 +1350,14 @@ function showPeople() {
 function othersSaved(m) {
   toast(`${m.by} saved ${m.station ? "a stop" : "a road trace"}`);
   loadStops();
-  if (m.station && m.station === mapState.stationId) showStation(m.station);
-  if ((m.segment || m.trip) && mapState.tripId) showTripOnMap(mapState.tripId);
+  if (m.station && m.station === mapState.stationId && !mapState.busy) showStation(m.station);
+  if ((m.segment || m.trip) && mapState.tripId) (mapState.busy ? redrawTrip : showTripOnMap)(mapState.tripId);
+}
+
+/** The open trip's lines drawn again, leaving the panel (an editor in use there) as it is. */
+async function redrawTrip(tripId) {
+  const t = await api("map/trip?id=" + encodeURIComponent(tripId));
+  if (mapState.tripId === tripId) drawTrip(t, false);
 }
 
 function bbox() {
@@ -701,9 +1374,12 @@ function sidePanel(open) {
 function sideHelp() {
   if (mapState && (mapState.stationId || mapState.tripId)) { mapState.stationId = null; sendFocus(); }
   $("#map-side").innerHTML = `<h2>Map</h2>
-    <form id="line-find" class="row"><input id="line-q" placeholder="Line, e.g. 34 or 60101" inputmode="numeric" aria-label="Find a line">
+    <form id="line-find" class="row"><input id="line-q" placeholder="Line (34, 60101), stop, or from > to" aria-label="Find a line, a stop's lines or a connection">
       <button class="primary">Find line</button></form>
     <div id="line-routes"></div>
+    <div class="row map-tools"><button type="button" id="map-todo">To-do</button><button type="button" id="map-history">History</button>
+      <button type="button" id="map-bulk">Snap an operator</button></div>
+    <div class="row"><button type="button" id="new-stop">New stop here</button><span class="muted small" id="new-stop-hint"></span></div>
     <p class="muted">Buses on the road now: green ones are where riders' phones or reports put them, grey ones where the timetable does. Stops show from zoom 14.</p>
     <p class="muted"><b>A stop:</b> click it to move it, give it more places (with the lines that stop at each), a zone (circle or shape), or make it a central station whose platforms are other stops. All of it is kept through every timetable update.</p>
     <p class="muted small">Purple dots: extra places. Green ring: central station; green dots and dashed lines: its platforms. Shaded: zones.</p>
@@ -713,7 +1389,94 @@ function sideHelp() {
   bindLineFind();
 }
 
+/** What's still wrong on the map, most used first; a click opens a bus that drives it. */
+async function sideTodo(tab = "straight") {
+  const side = $("#map-side");
+  side.innerHTML = `<h2>Map to-do</h2><p class="muted small">Loading…</p>`;
+  const todo = await api("map/todo");
+  const tabs = [["straight", "Straight parts"], ["unplaced", "Stops without a place"], ["detours", "Long detours"]];
+  const hint = { straight: "Parts between two stops still drawn as a straight line. Open one and snap it, or use Snap an operator.",
+    unplaced: "Stops the timetable doesn't place. Open the bus and use Place on map for the stop.",
+    detours: "Traces over three times longer than the way between their stops: loops or wrong roads. Open one and fix it with checkpoints." }[tab];
+  const items = todo[tab];
+  side.innerHTML = `<h2>Map to-do</h2>
+    <div class="seg" role="tablist" style="margin-bottom:10px">${tabs.map(([k, l]) => `<button type="button" role="tab" data-todo="${k}" aria-pressed="${k === tab}">${l} ${todo.counts[k]}</button>`).join("")}</div>
+    <p class="muted small">${hint}</p>
+    <ol class="todo-list">${items.map((x, i) => `<li><button type="button" class="link" data-open-todo="${i}">${esc(x.name || `${x.fromName} → ${x.toName}`)}</button>
+      <span class="muted small">${x.uses} trip${x.uses === 1 ? "" : "s"}${x.times ? `, ${x.times}× the distance` : ""}, line ${esc(x.line || "")}</span></li>`).join("") || `<li class="muted">Nothing here.</li>`}</ol>
+    <div class="row"><button type="button" id="todo-back">Back</button></div>`;
+  side.querySelectorAll("[data-todo]").forEach((b) => b.onclick = () => sideTodo(b.dataset.todo));
+  side.onclick = (e) => {
+    const b = e.target.closest("[data-open-todo]");
+    if (b && items[Number(b.dataset.openTodo)]?.tripId) showTripOnMap(items[Number(b.dataset.openTodo)].tripId).then(fitTrip);
+  };
+  $("#todo-back").onclick = sideHelp;
+}
+
+/** Every map change, newest first; one can be undone when nothing newer changed the same thing. */
+async function sideHistory() {
+  const side = $("#map-side");
+  const { history } = await api("map/history");
+  const names = { stop: "moved stop", "stop/reset": "stop back to timetable", station: "stop set-up", child: "sub-station", "child/remove": "sub-station removed",
+    segment: "drawn by hand", "segment/reset": "straight again", via: "checkpoints", route: "stops of a way", snap: "snapped" };
+  side.innerHTML = `<h2>Map history</h2>
+    <p class="muted small">Who changed what on the map. Undo puts it back as it was; undo newer changes of the same thing first.</p>
+    <ol class="hist-list">${history.map((h) => `<li class="${h.undone_at ? "undone" : ""}"><div><b>${esc(names[h.action] || h.action)}</b> ${esc(h.what)}</div>
+      <div class="muted small">${esc(h.username)}, ${ago(h.created_at)}${h.undone_at ? ", undone" : ""}</div>
+      ${h.undone_at ? "" : `<button type="button" data-undo="${h.id}">Undo</button>`}</li>`).join("") || `<li class="muted">No changes yet.</li>`}</ol>
+    <div class="row"><button type="button" id="hist-back">Back</button></div>`;
+  side.onclick = async (e) => {
+    const b = e.target.closest("[data-undo]");
+    if (!b) return;
+    try { await api(`map/history/${b.dataset.undo}/undo`, {}); toast("Undone"); loadStops(); if (mapState.tripId) redrawTrip(mapState.tripId); sideHistory(); }
+    catch (err) { toast(err.message); }
+  };
+  $("#hist-back").onclick = sideHelp;
+}
+
+/** Snaps an operator's straight parts in the background (one a second), with its progress. */
+async function sideBulk() {
+  const side = $("#map-side");
+  const { status, operators } = await api("map/bulk");
+  side.innerHTML = `<h2>Snap an operator</h2>
+    <p class="muted small">Snaps the parts still drawn straight on every line of one operator, the most used first (up to 600 a run, one a second, so
+      the public routers aren't overloaded). Parts drawn by hand stay as they are. You can keep working meanwhile.</p>
+    ${status.running ? `<p><b>Snapping ${esc(status.operator)}</b>: ${status.done + status.failed} of ${status.total} done, ${status.failed} couldn't be routed.</p>
+      <progress max="${status.total}" value="${status.done + status.failed}" style="width:100%"></progress>
+      <div class="row"><button type="button" id="bulk-stop">Stop</button></div>`
+      : `${status.finished ? `<p class="small">Last run: ${esc(status.operator)}, ${status.done} snapped, ${status.failed} couldn't be routed, ${ago(status.finished)} by ${esc(status.by)}.</p>` : ""}
+      <label class="field">Operator<select class="input" id="bulk-op">${operators.map((o) => `<option>${esc(o)}</option>`).join("")}</select></label>
+      <div class="row"><button type="button" class="primary" id="bulk-go">Start snapping</button></div>`}
+    <div class="row"><button type="button" id="bulk-back">Back</button></div>`;
+  $("#bulk-back").onclick = () => { clearTimeout(sideBulk.t); sideHelp(); };
+  if (status.running) {
+    $("#bulk-stop").onclick = async () => { await api("map/bulk", { operator: "stop" }); sideBulk(); };
+    clearTimeout(sideBulk.t); sideBulk.t = setTimeout(() => { if ($("#bulk-back")) sideBulk(); }, 3000);
+    return;
+  }
+  $("#bulk-go").onclick = async () => {
+    try { const r = await api("map/bulk", { operator: $("#bulk-op").value }); toast(`Snapping ${r.total} parts`); sideBulk(); } catch (err) { toast(err.message); }
+  };
+}
+
 function bindLineFind() {
+  if ($("#map-todo")) { $("#map-todo").onclick = () => sideTodo(); $("#map-history").onclick = sideHistory; $("#map-bulk").onclick = sideBulk; }
+  // A stop the timetable lacks (for a line added under Lines): click the map where it is, then name it.
+  const add = $("#new-stop");
+  if (add) add.onclick = () => {
+    $("#new-stop-hint").textContent = "Click the map where the stop is";
+    mapState.mapClick = async (e) => {
+      mapState.mapClick = null;
+      $("#new-stop-hint").textContent = "";
+      const name = prompt("The stop's name, with its town (e.g. Zvolen, Nová ulica)");
+      if (!name?.trim()) return;
+      try {
+        await api("stops/new", { name: name.trim(), lat: e.latlng.lat, lon: e.latlng.lng });
+        toast("Stop added: in the timetable in about half a minute");
+        setTimeout(loadStops, 35000);
+      } catch (err) { toast(err.message); }
+    };
+  };
   const form = $("#line-find");
   if (form) form.onsubmit = (e) => { e.preventDefault(); const q = $("#line-q").value.trim(); if (q) findLine(q); };
 }
@@ -723,7 +1486,10 @@ async function findLine(q) {
   const box = $("#line-routes");
   box.innerHTML = `<p class="muted small">Looking…</p>`;
   const r = await api("map/lines?q=" + encodeURIComponent(q));
-  if (!r.routes.length) { box.innerHTML = `<p class="muted small">No line ${esc(q)} in the timetable.</p>`; return; }
+  showOps(r.routes.map((x) => x.operator));
+  const all = r.routes.length;
+  r.routes = r.routes.filter((x) => !hiddenOps.has(x.operator));
+  if (!r.routes.length) { box.innerHTML = `<p class="muted small">${all ? `${esc(q)}: only buses of hidden operators.` : `Nothing for ${esc(q)}: try a line number, a stop, or two stops as "from > to".`}</p>`; return; }
   box.innerHTML = `<ul class="line-routes">${r.routes.map((x, i) => `<li><button type="button" data-route="${i}">
     <b>${esc(x.line)}</b> ${esc(x.from)} → ${esc(x.to)}<br><span class="muted small">${x.stops} stops · ${x.trips} trip${x.trips === 1 ? "" : "s"} · ${esc(x.operator)}</span></button></li>`).join("")}</ul>`;
   box.onclick = (e) => {
@@ -866,7 +1632,13 @@ async function showStation(id, center = false) {
   bindLinePickers(side);
   // On a phone the panel is under the pinned map: scroll so the panel starts right under it.
   if (matchMedia("(max-width: 900px)").matches) window.scrollTo({ top: side.getBoundingClientRect().top + scrollY - $("#map").offsetHeight, behavior: "smooth" });
-  $("#st-close").onclick = () => { endEditing(); sideHelp(); history.replaceState(null, "", "#map"); };
+  // Close goes back to where you came from: the bus being edited (its line redrawn with the stop as it is now), else the help.
+  $("#st-close").onclick = () => {
+    endEditing();
+    history.replaceState(null, "", "#map");
+    mapState.stationId = null;
+    if (mapState.tripId) { sendFocus(); showTripOnMap(mapState.tripId); } else sideHelp();
+  };
 
   // Position
   $("#st-move").onclick = () => {
@@ -1120,11 +1892,35 @@ function endEditing() {
   if (mapState.editing) { mapState.map.removeLayer(mapState.editing.layer); mapState.editing = null; }
 }
 
+/**
+ * Operators shown on the map (buses now, lines found): untick one to hide it, so a busy map stays readable. Every
+ * operator seen gets a box; the ones hidden are remembered in this browser.
+ */
+const hiddenOps = new Set((() => { try { return JSON.parse(localStorage.getItem("mapHiddenOps") || "[]"); } catch { return []; } })());
+const seenOps = new Set();
+function showOps(operators) {
+  const before = seenOps.size;
+  operators.forEach((o) => o && seenOps.add(o));
+  const box = $("#op-filter");
+  if (!box || (seenOps.size === before && box.childElementCount)) return;
+  box.innerHTML = "Operators: " + [...seenOps].sort().map((o) =>
+    `<label><input type="checkbox" data-op="${esc(o)}" ${hiddenOps.has(o) ? "" : "checked"}> ${esc(o)}</label>`).join(" ");
+  box.onchange = (e) => {
+    const o = e.target.dataset.op;
+    if (!o) return;
+    e.target.checked ? hiddenOps.delete(o) : hiddenOps.add(o);
+    try { localStorage.setItem("mapHiddenOps", JSON.stringify([...hiddenOps])); } catch { /* private window: this visit only */ }
+    loadBuses();
+    if ($("#line-q")?.value.trim() && $("#line-routes")?.childElementCount) findLine($("#line-q").value.trim());
+  };
+}
+
 async function loadBuses() {
   const r = await api("map/vehicles?bbox=" + bbox());
   const { buses } = mapState;
   buses.clearLayers();
-  for (const v of r.vehicles) {
+  showOps(r.vehicles.map((v) => v.operator));
+  for (const v of r.vehicles.filter((x) => !hiddenOps.has(x.operator))) {
     const late = v.delay != null && v.delay >= 600 ? "very" : v.delay != null && v.delay >= 180 ? "late" : "";
     const icon = L.divIcon({ className: "", html: `<div class="bus-icon ${v.live ? "live" : ""} ${late}">${esc(v.line)}</div>`, iconSize: null });
     const m = L.marker([v.lat, v.lon], { icon });
@@ -1137,6 +1933,7 @@ async function loadBuses() {
 
 async function showTripOnMap(tripId) {
   const t = await api("map/trip?id=" + encodeURIComponent(tripId));
+  mapState.busy = null; // the trip's own panel again: no editor open
   const opened = mapState.tripId !== tripId;
   mapState.tripId = tripId;
   mapState.stationId = null;
@@ -1144,11 +1941,29 @@ async function showTripOnMap(tripId) {
   drawTrip(t, opened);
   const side = $("#map-side");
   sidePanel(true);
-  side.innerHTML = `<h2>${esc(t.line)} → ${esc(t.headsign)}</h2><p class="muted small">${esc(t.operator)} · ${esc(tripId)}</p>
+  side.innerHTML = `<h2>${esc(t.line)} → ${esc(t.headsign)}</h2><p class="muted small">${esc(t.operator)} · ${esc(tripId)}
+      <button type="button" class="link" id="trip-close">Close trip</button></p>
     <p class="muted">${t.segments.filter((s) => s.traced).length} of ${t.segments.length} parts follow the roads. Click a part to draw it by hand.</p>
-    <div class="row"><button class="primary" id="snap">Snap to roads</button><button id="snap-missing">Snap only the straight parts</button><button id="trip-close">Close</button></div>
+    <div class="row"><button class="primary" id="snap">Snap to roads</button><button id="snap-missing">Snap only the straight parts</button>
+      <button id="trip-via" title="Points the bus must pass, for a part that's routed along the wrong roads">Checkpoints…</button>${t.routeKey ? `<button id="own-stops">Edit stops</button>` : ""}</div>
+    <p class="muted small" id="trip-via-hint">${t.ownStops ? "Stops set by hand for this way." : ""}</p>
     <div id="snap-progress"></div>
-    <ol class="small">${t.stops.map((s) => `<li>${esc(s.name)} <span class="muted">${new Date(s.departure).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></li>`).join("")}</ol>`;
+    ${t.stops.some((s) => s.lat == null) ? `<p class="muted small">Stops marked "Place on map" have no place on the map (the timetable doesn't say where they are), so the parts
+      around them can't be drawn: press "Place on map" and click the map where the stop is.</p>` : ""}
+    <ol class="small" id="trip-stops">${t.stops.map((s, i) => `<li>${esc(s.name)} <span class="muted">${new Date(s.departure).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+      ${s.lat == null ? `<button type="button" class="link" data-place="${i}">Place on map</button>` : ""}</li>`).join("")}</ol>`;
+  // A stop without a position: the next click on the map puts it there (kept like a stop moved by hand).
+  $("#trip-stops").onclick = (e) => {
+    const b = e.target.closest("[data-place]");
+    if (!b) return;
+    const stop = t.stops[Number(b.dataset.place)];
+    b.textContent = "now click the map where it is…";
+    mapState.mapClick = async (ev) => {
+      mapState.mapClick = null;
+      try { await api("map/stop", { id: stop.id, lat: ev.latlng.lat, lon: ev.latlng.lng }); toast(stop.name + " placed"); } catch (err) { toast(err.message); }
+      showTripOnMap(tripId);
+    };
+  };
   // Part by part, with a progress bar: it takes about a second a part, and it should be clear it's working.
   const snap = async (keep) => {
     const todo = t.segments.filter((x) => x.points.length >= 2 && !(keep && x.traced));
@@ -1171,6 +1986,68 @@ async function showTripOnMap(tripId) {
   $("#snap").onclick = () => snap(false);
   $("#snap-missing").onclick = () => snap(true);
   $("#trip-close").onclick = () => { mapState.trip.clearLayers(); mapState.tripId = null; sendFocus(); sideHelp(); };
+  if ($("#own-stops")) $("#own-stops").onclick = () => editOwnStops(t, tripId);
+  // Checkpoints: pick the part of the line they're for, then set them on the map.
+  mapState.pickVia = false;
+  $("#trip-via").onclick = () => {
+    mapState.pickVia = !mapState.pickVia;
+    $("#trip-via-hint").textContent = mapState.pickVia ? "Now click the part of the line that goes the wrong way" : t.ownStops ? "Stops set by hand for this way." : "";
+    $("#trip-via").classList.toggle("primary", mapState.pickVia);
+  };
+}
+
+/**
+ * A city way's stops by hand, for every bus of it (S.A.D. leaves some out, e.g. line 1 towards Zeleznicna stanica):
+ * add the missing ones in order, remove wrong ones. The bus keeps its own times; added stops get times by distance.
+ */
+function editOwnStops(t, tripId) {
+  const side = $("#map-side");
+  let list = t.stops.map((x) => ({ id: x.id, name: x.name }));
+  let at = null; // adding a stop after list[at - 1]
+  mapState.busy = "stops";
+  const draw = () => {
+    side.innerHTML = `<h2>Stops of ${esc(t.line)} → ${esc(t.headsign)}</h2>
+      <p class="muted small">For every bus of this way. Add a stop with + where it belongs; ✕ removes one. The bus's own times stay,
+      the stops you add get times by distance. Saved stops are used right away.</p>
+      <ol class="own-stops">${list.map((x, i) => `<li${at === i + 1 ? ' class="adding"' : ""}><span>${esc(x.name)}</span>
+        <button type="button" class="link" data-del="${i}" title="Remove">✕</button>
+        <button type="button" class="link" data-add="${i}" title="Add a stop after this one">+</button></li>`).join("")}</ol>
+      <div id="own-find" ${at == null ? "hidden" : ""}><p class="small">Add after ${esc(list[at - 1]?.name || "")}:</p>
+        <input class="input" id="own-q" placeholder="Stop name" autocomplete="off" style="width:100%"><div id="own-hits"></div></div>
+      <div class="row"><button class="primary" id="own-save">Save</button>${t.ownStops ? `<button id="own-reset">Back to the timetable's stops</button>` : ""}<button id="own-cancel">Cancel</button></div>`;
+    side.querySelector(".own-stops").onclick = (e) => {
+      const del = e.target.closest("[data-del]"), add = e.target.closest("[data-add]");
+      if (del) { list.splice(Number(del.dataset.del), 1); at = null; draw(); }
+      if (add) { at = Number(add.dataset.add) + 1; draw(); $("#own-q").focus(); }
+    };
+    let timer = null;
+    $("#own-q").oninput = (e) => {
+      clearTimeout(timer);
+      const q = e.target.value.trim();
+      timer = setTimeout(async () => {
+        if (q.length < 2) return ($("#own-hits").innerHTML = "");
+        const r = await api("timetable/stops?q=" + encodeURIComponent(q) + "&n=8");
+        $("#own-hits").innerHTML = r.stops.map((x, i) => `<button type="button" class="link" data-hit="${i}">${esc(x.name)}</button>`).join("<br>");
+        $("#own-hits").onclick = (ev) => {
+          const b = ev.target.closest("[data-hit]");
+          if (b) { const x = r.stops[Number(b.dataset.hit)]; list.splice(at, 0, { id: x.id, name: x.name }); at = null; draw(); }
+        };
+      }, 250);
+    };
+    const save = async (stations) => {
+      $("#own-save").disabled = true;
+      try { await api("map/route", { trip: tripId, stations }); } catch (err) { $("#own-save").disabled = false; return toast(err.message); }
+      const before = t.stops.map((x) => x.id).join("|");
+      await showTripOnMap(tripId);
+      const now = (await api("map/trip?id=" + encodeURIComponent(tripId))).stops.map((x) => x.id).join("|");
+      toast(stations.length < 2 ? "Back to the timetable's stops" : now !== before ? "Stops saved"
+        : "Not used: the list has to keep the bus's own stops, in their order");
+    };
+    $("#own-save").onclick = () => save(list.map((x) => x.id));
+    if ($("#own-reset")) $("#own-reset").onclick = () => save([]);
+    $("#own-cancel").onclick = () => showTripOnMap(tripId);
+  };
+  draw();
 }
 
 function drawTrip(t, fit = true) {
@@ -1179,18 +2056,30 @@ function drawTrip(t, fit = true) {
   const bounds = [];
   t.segments.forEach((seg) => {
     if (seg.points.length < 2) return;
-    const line = L.polyline(seg.points, { color: seg.traced ? "#1D4FB8" : "#8A94A6", weight: 6, opacity: 0.85, dashArray: seg.traced ? null : "8 8" });
-    line.on("click", () => editSegment(t, seg));
+    // bubblingMouseEvents: the click picking a part isn't also a click on the map (a checkpoint or point added at once).
+    const line = L.polyline(seg.points, { bubblingMouseEvents: false, color: seg.traced ? "#1D4FB8" : "#8A94A6", weight: 6, opacity: 0.85, dashArray: seg.traced ? null : "8 8" });
+    line.on("click", () => { if (mapState.pickVia) { mapState.pickVia = false; editVias(t, seg); } else editSegment(t, seg); });
     trip.addLayer(line);
     bounds.push(...seg.points);
   });
   t.stops.forEach((s) => { if (s.lat != null) trip.addLayer(L.circleMarker([s.lat, s.lon], { radius: 5, color: "#fff", weight: 2, fillColor: "#14213D", fillOpacity: 1 }).bindTooltip(esc(s.name))); });
+  // Across stops without a position the line can't be drawn: a thin dashed connector, naming what's missing.
+  let last = null, missing = [];
+  t.stops.forEach((s) => {
+    if (s.lat == null) { if (last) missing.push(s.name); return; }
+    if (last && missing.length) trip.addLayer(L.polyline([[last.lat, last.lon], [s.lat, s.lon]], { color: "#C77700", weight: 3, dashArray: "4 8" })
+      .bindTooltip("No place on the map yet: " + esc(missing.join(", ")) + " (Place on map, in the panel)"));
+    last = s; missing = [];
+  });
+  t.segments.forEach((seg) => (seg.via || []).forEach((p, i) => trip.addLayer(L.circleMarker(p, { radius: 6, color: "#fff", weight: 2, fillColor: "#F59E0B", fillOpacity: 1 })
+    .bindTooltip(`Checkpoint ${i + 1}: click to move or remove`).on("click", (e) => { L.DomEvent.stop(e); editVias(t, seg); }))));
   if (bounds.length && fit) map.fitBounds(bounds, { padding: [30, 30] });
 }
 
 /** Draw one stop-to-stop part by hand: its inner points can be dragged, added (click the map) or removed (right-click). */
 function editSegment(t, seg) {
   const { map, trip } = mapState;
+  mapState.busy = "segment";
   const ends = [seg.points[0], seg.points.at(-1)];
   let inner = seg.points.slice(1, -1).map((p) => L.latLng(p[0], p[1]));
   const layer = L.layerGroup().addTo(map);
@@ -1221,11 +2110,97 @@ function editSegment(t, seg) {
   const side = $("#map-side");
   sidePanel(true);
   side.innerHTML = `<h2>Drawing a part by hand</h2><p class="muted">Drag the points along the road; click the map to add one; right-click a point to remove it.</p>
-    <div class="row"><button class="primary" id="seg-save">Save</button><button id="seg-reset">Straight line again</button><button id="seg-cancel">Cancel</button></div>`;
+    <label class="row">Line ends at <select id="seg-end"><option>Loading the stop's places…</option></select></label>
+    <p class="muted small">The place picked here is where every bus of this part stops, before any direction set up; Save with no points
+      for a straight line to it.</p>
+    <div class="row"><button class="primary" id="seg-save">Save</button><button id="seg-reset">Straight line again</button><button id="seg-cancel">Cancel</button></div>
+    <p class="muted"><b>Or checkpoints:</b> when snapping takes the wrong roads, set a few points the bus must pass and it's routed through them,
+      now and every time this part is snapped again.</p>
+    <div class="row"><button id="seg-via">Checkpoints${seg.via?.length ? ` (${seg.via.length})` : ""}</button></div>`;
   const end = () => { map.off("click", add); map.removeLayer(layer); showTripOnMap(mapState.tripId); };
+  $("#seg-via").onclick = () => { map.off("click", add); map.removeLayer(layer); editVias(t, seg); };
   $("#seg-cancel").onclick = end;
-  $("#seg-save").onclick = async () => { await api("map/segment", { from: seg.from, to: seg.to, points: inner.map((p) => [p.lat, p.lng]) }); toast("Saved"); end(); };
+  // The spots of the stop the part goes to: its own point, its places (platforms) and sub-stations.
+  api("map/station?id=" + encodeURIComponent(seg.to)).then((st) => {
+    const spots = [{ lat: st.lat, lon: st.lon, name: "The stop's own point" },
+      ...(st.places || []).map((p, i) => ({ lat: p.lat, lon: p.lon, name: `Place ${i + 1}${p.platform ? ` · platform ${p.platform}` : ""}${p.label ? ` · ${p.label}` : ""}` })),
+      ...(st.children || []).map((c) => ({ lat: c.lat, lon: c.lon, name: `${c.name}${c.platform ? ` · platform ${c.platform}` : ""}` }))]
+      .filter((x) => x.lat != null);
+    const close = (x) => map.distance(L.latLng(x.lat, x.lon), L.latLng(...ends[1])) < 2;
+    $("#seg-end").innerHTML = spots.map((x, i) => `<option value="${i}" ${close(x) ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+    $("#seg-end").onchange = (e) => { const x = spots[Number(e.target.value)]; ends[1] = [x.lat, x.lon]; redraw(); };
+  }).catch(() => { $("#seg-end").innerHTML = `<option>Couldn't load the stop</option>`; });
+  // Saved with its end: the part then ends exactly at the place picked, and the bus stops there.
+  $("#seg-save").onclick = async () => { await api("map/segment", { from: seg.from, to: seg.to, points: [...inner.map((p) => [p.lat, p.lng]), ends[1]] }); toast("Saved"); end(); };
   $("#seg-reset").onclick = async () => { await api("map/segment/reset", { from: seg.from, to: seg.to }); toast("Straight again"); end(); };
+}
+
+/**
+ * Checkpoints for one part: points the bus must pass, in order, whenever the part is snapped to the roads (when the
+ * router takes the wrong streets). Click the map to add one, drag to move, right-click to remove.
+ */
+function editVias(t, seg) {
+  mapState.viaEnd?.(true); // another part's checkpoints were open: leave them
+  const { map, trip } = mapState;
+  mapState.busy = "checkpoints";
+  let via = (seg.via || []).map((p) => L.latLng(p[0], p[1]));
+  const ends = [L.latLng(...seg.points[0]), L.latLng(...seg.points.at(-1))];
+  const layer = L.layerGroup().addTo(map);
+  const redraw = () => {
+    layer.clearLayers();
+    layer.addLayer(L.polyline([ends[0], ...via, ends[1]], { color: "#F59E0B", weight: 3, dashArray: "6 6" }));
+    if ($("#via-list")) listVias();
+    via.forEach((p, i) => {
+      const v = L.marker(p, { draggable: true, icon: L.divIcon({ className: "", html: `<div class="via-pin">${i + 1}</div>`, iconSize: null }) });
+      v.on("dragend", (e) => { via[i] = e.target.getLatLng(); redraw(); });
+      v.on("contextmenu", () => { via.splice(i, 1); redraw(); });
+      layer.addLayer(v);
+    });
+  };
+  // A click adds a checkpoint where it fits best along the way (between its two nearest neighbours).
+  const add = (e) => {
+    const all = [ends[0], ...via, ends[1]];
+    let best = 0, bestCost = Infinity;
+    for (let i = 0; i < all.length - 1; i++) {
+      const cost = map.distance(all[i], e.latlng) + map.distance(e.latlng, all[i + 1]) - map.distance(all[i], all[i + 1]);
+      if (cost < bestCost) { bestCost = cost; best = i; }
+    }
+    via.splice(best, 0, e.latlng);
+    redraw();
+  };
+  map.on("click", add);
+  trip.eachLayer((l) => l.setStyle && l.setStyle({ opacity: 0.3 }));
+  const side = $("#map-side");
+  sidePanel(true);
+  side.innerHTML = `<h2>Checkpoints</h2>
+    <p class="muted">Click the map on the roads the bus really takes: it's routed through the checkpoints in order. Drag one to move it,
+      right-click to remove it. They're kept: every later snap of this part goes through them too, for every line that uses it.</p>
+    <ol class="own-stops" id="via-list"></ol>
+    <div class="row"><button class="primary" id="via-route">Route through checkpoints</button><button id="via-clear">Remove all</button><button id="via-cancel">Cancel</button></div>
+    <p class="muted small">Each stretch between checkpoints is routed on its own; one the router can only do the long way is drawn straight
+      between them, so put them along the road the bus really takes.</p>
+    <div id="via-progress"></div>`;
+  const listVias = () => {
+    $("#via-list").innerHTML = via.map((p, i) => `<li><span>Checkpoint ${i + 1}</span><button type="button" class="link" data-via-del="${i}" title="Remove">✕</button></li>`).join("")
+      || `<li class="muted small">None yet: click the map.</li>`;
+  };
+  $("#via-list").onclick = (e) => { const d = e.target.closest("[data-via-del]"); if (d) { via.splice(Number(d.dataset.viaDel), 1); redraw(); } };
+  const end = (quiet) => { map.off("click", add); map.removeLayer(layer); mapState.viaEnd = null; if (quiet !== true) showTripOnMap(mapState.tripId); };
+  mapState.viaEnd = end;
+  const save = async (points) => {
+    side.querySelectorAll("button").forEach((b) => (b.disabled = true));
+    $("#via-progress").innerHTML = `<p class="small muted">Routing…</p>`;
+    try {
+      await api("map/via", { from: seg.from, to: seg.to, points });
+      const r = await api("map/snap", { id: mapState.tripId, from: seg.from, to: seg.to, force: true });
+      toast(r.snapped ? (points.length ? "Routed through the checkpoints" : "Checkpoints removed, snapped again") : "Couldn't route it: try moving a checkpoint");
+    } catch (err) { toast(err.message); }
+    end();
+  };
+  redraw();
+  $("#via-route").onclick = () => save(via.map((p) => [p.lat, p.lng]));
+  $("#via-clear").onclick = () => save([]);
+  $("#via-cancel").onclick = end;
 }
 
 async function renderTimetable() {
@@ -1289,8 +2264,10 @@ async function renderTimetable() {
     <div class="section">
       <h2>Log</h2>
       <div class="logs" style="max-height:340px">${st.log.length ? st.log.map((l) => `${esc(when(l.at))}  ${esc(l.text)}`).join("\n") : "Nothing yet."}</div>
-    </div>`;
+    </div>
+    <div class="section" id="tt-health"></div>`;
   if (st.busy) ttPoll = setTimeout(renderTimetable, 3000);
+  renderFeedHealth();
   $("#tt-update").onclick = run($("#tt-update"), async () => {
     await api("timetable/update", {}); toast("Update started"); setTimeout(renderTimetable, 1500);
   });
@@ -1469,7 +2446,9 @@ async function renderSettings(flag) {
           ${field("mail_reply_to", "Replies go to (optional)", cfg.mail_reply_to, 'placeholder="support@karafa.network"')}
           ${field("admin_email", "New bug alerts go to (empty = every admin's email)", cfg.admin_email, 'placeholder="you@example.com"')}
           <div class="row"><button class="btn" type="submit">Save email settings</button><button class="btn quiet" id="test-mail" type="button">Send test email to me</button>
-            <a class="btn quiet" href="#templates">Edit email templates</a></div>
+            <a class="btn quiet" href="#templates">Edit email templates</a>
+            <a class="btn quiet" href="#replies">Saved replies</a>
+            <a class="btn quiet" href="#activity">Activity log</a></div>
         </form>
       </section>
 

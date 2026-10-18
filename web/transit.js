@@ -175,11 +175,16 @@ async function timetable(path, params) {
     headers: { 'X-App-Key': HUB_APP_KEY }, signal: AbortSignal.timeout(30000),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || `Timetable HTTP ${res.status}`), { status: res.status === 404 ? 404 : 502 });
+  if (!res.ok) throw Object.assign(new Error(data.error || `Timetable HTTP ${res.status}`), { status: res.status === 404 || res.status === 400 ? res.status : 502 });
   return data;
 }
 
 /** EM-0064: the roads between a trip's stops ("lat,lon;lat,lon;..."), as drawn or snapped in emHUB: one list per hop. */
+/** EM-0072: seconds by car along the roads, "lat,lon" to "lat,lon". */
+export async function driveSeconds(from, to) {
+  return timetable('drive', { from: String(from).slice(0, 40), to: String(to).slice(0, 40) });
+}
+
 export async function roadPath(stops) {
   return (await timetable('path', { stops: String(stops).slice(0, 2000) })).hops || [];
 }
@@ -394,14 +399,16 @@ function connection(c) {
     departurePlatform: l.from.platform || '', arrivalPlatform: l.to.platform || '',
     // A city bus from SAD Zvolen's live data is followed live; others by their timetable trip.
     routeUrl: l.live ? liveUrl(l) : tripUrl(l.tripId, l.from.seq, l.to.seq), serviceDate: dateOf(l.departure),
+    transfer: l.transfer || null, // 2.17.0: { worked, runs } of the change onto this bus on earlier days
   }));
+  const walkMinutes = Math.round(c.legs.filter((l) => l.type === 'walk').reduce((n, w) => n + (w.arrival - w.departure), 0) / 60000);
   const minutes = Math.round((c.arrival - c.departure) / 60000);
   return {
     id: trips.map((l) => l.tripId).join('|'),
     departureTime: segments[0]?.departureTime || clockOf(c.departure),
     arrivalTime: segments.at(-1)?.arrivalTime || clockOf(c.arrival),
     totalDuration: minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`,
-    segments,
+    segments, walkMinutes,
   };
 }
 
@@ -421,7 +428,13 @@ export async function searchConnections({ from, to, fromSug, toSug, time, date, 
     : /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? (([y, m, d]) => ({ year: y, month: m, day: d }))(date.split('-').map(Number)) : todayLocal();
   const hm = /^(\d{1,2}):(\d{2})$/.exec(String(time || '').trim());
   const epoch = hm ? localToEpoch(day.year, day.month, day.day, +hm[1], +hm[2]) : Date.now();
-  return plan(stopParam(fromSug, from), stopParam(toSug, to), Math.floor(epoch / 1000), directOnly, [], !!(arriveBy && hm));
+  const r = await plan(stopParam(fromSug, from), stopParam(toSug, to), Math.floor(epoch / 1000), directOnly, [], !!(arriveBy && hm));
+  // 2.17.0: rain where the journey starts (emHUB asks Open-Meteo): connections with little walking first.
+  const { coorX: lat, coorY: lon } = r.from || {};
+  const rainy = lat !== '' && lon !== '' && lat != null
+    && !!(await timetable('weather', { lat: Number(lat).toFixed(3), lon: Number(lon).toFixed(3) }).catch(() => null))?.rainy;
+  if (rainy) r.connections = [...r.connections].sort((a, b) => (a.walkMinutes > 3) - (b.walkMinutes > 3));
+  return { ...r, rainy };
 }
 
 export async function moreConnections(cursor) {

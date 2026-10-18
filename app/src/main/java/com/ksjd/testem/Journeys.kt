@@ -103,6 +103,16 @@ data class RecurringRide(
     /** Some day of the week is chosen, or a date. */
     val hasDays: Boolean get() = days.isNotEmpty() || !evenDays.isNullOrEmpty() || dates.isNotEmpty()
 
+    /** EM-0076: saved with no day: just today, or tomorrow when its time (minus the lead) has already gone. */
+    fun withDefaultDay(now: ZonedDateTime): RecurringRide {
+        if (hasDays) return this
+        val local = now.withZoneSameInstant(SK_ZONE)
+        val clock = parseClock(time) ?: return this
+        val today = local.toLocalDate()
+        val day = if (today.atTime(clock).atZone(SK_ZONE).minusMinutes(leadMinutes.toLong()).isAfter(local)) today else today.plusDays(1)
+        return copy(dates = listOf(day.toString()))
+    }
+
     companion object {
         val WORKDAYS = setOf(1, 2, 3, 4, 5)
         val EVERY_DAY = (1..7).toSet()

@@ -17,8 +17,8 @@ android {
         minSdk = 30 // Wear OS 3: Galaxy Watch4 and newer
         targetSdk = 36
         // Play: one listing, so the watch build needs its own version codes, above the phone's.
-        versionCode = 1_000_000 + 27
-        versionName = "2.16.0"
+        versionCode = 1_000_000 + 29
+        versionName = "2.17.0"
     }
 
     val keystorePropertiesFile = rootProject.file("keystore.properties")
